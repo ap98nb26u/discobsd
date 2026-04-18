@@ -1,0 +1,56 @@
+/*
+ * Kernel common linker script for GBA.
+ */
+
+/*
+ * On STM32, a minimum of 128 kbytes of flash and 128 kbytes of RAM is needed.
+ * Reserve for the kernel at least 128 kbytes of flash and 32 kbytes of RAM.
+ * Reserve for userland at least 96 kbytes of RAM.
+ */
+
+ENTRY(_start)
+
+MEMORY {
+    FLASH  (rx)  : ORIGIN = 0x08000000, LENGTH = 32M   /* 0x0800 0000 - 0x09FF FFFF */
+    RAM    (rwx) : ORIGIN = 0x03000000, LENGTH = 28K   /* 0x0300 0000 - 0x0300 6FFF */
+    EWRAM  (rwx) : ORIGIN = 0x02000000, LENGTH = 256K  /* 0x0200 0000 - 0x0203 FFFF */
+}
+
+__kernel_flash_start	= ORIGIN(FLASH);
+__kernel_flash_end	= ORIGIN(FLASH) + LENGTH(FLASH);
+__kernel_data_start	= ORIGIN(RAM);
+__kernel_data_end	= ORIGIN(RAM) + LENGTH(RAM);
+__user_data_start	= ORIGIN(USERRAM);
+__user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
+
+u0			= ORIGIN(U0AREA);
+u			= ORIGIN(UAREA);
+u_end			= ORIGIN(UAREA) + LENGTH(UAREA);
+_estack			= ORIGIN(UAREA) + LENGTH(UAREA);
+
+SECTIONS {
+    .text : {
+        *(.text)
+        *(.text.*)
+        *(.rodata)
+        *(.rodata.*)
+        . = ALIGN(4);
+    } > FLASH
+
+    .data : {
+        __data_start__ = .;
+        *(.data)
+        *(.data.*)
+        . = ALIGN(4);
+        __data_end__ = .;
+    } > RAM AT > FLASH
+
+    .bss : {
+        __bss_start__ = .;
+        *(.bss)
+        *(.bss.*)
+        *(COMMON)
+        . = ALIGN(4);
+        __bss_end__ = .;
+    } > RAM
+}

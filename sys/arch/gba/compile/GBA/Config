@@ -1,0 +1,46 @@
+#
+# GameBoy Advance (GBA)
+# =====================================
+#
+# To build the kernel, use:
+#   cd sys/arch/gba/compile/GBA
+#   tools/bin/config Config
+#   make clean
+#   make
+#
+architecture    "gba"
+cpu             "ARM7TDMI"                  # Processor variant
+board           "GBA"                       # Board type
+#ldscript        "GBA.ld"                    # Kernel memory linker script
+ldscript        "kern.ldscript"             # Kernel memory linker script
+
+makeoptions     DEBUG="-g"                  # Debug symbols
+
+# Standard system options
+options         "CPU_KHZ=16777"             # Oscillator frequency of CPU core
+options         "BUS_KHZ=16777"             # Frequency of peripheral bus
+options         "HALTREBOOT"                # If halted, press key to reboot
+
+#options         "GLOBAL_DEBUG"              # Enable debugging
+#options         "DIAGNOSTIC"                # Enable diagnostics
+
+# Root filesystem at /dev/sd0a, swap at /dev/sd0b
+config          unix    root on sd0a
+                        swap on sd0b
+
+# Serial UART ports
+device          uart1                       # USART1 as console
+device          uart2                       # USART2
+options         "UART_BAUD=115200"          # default speed
+
+# Use USART1 on debug header as serial console
+options         "CONS_MAJOR=UART_MAJOR"     # UART device
+options         "CONS_MINOR=0"              # uart1 is /dev/tty0
+
+# SDIO port
+controller      sdio0                       # SDIO port
+options         "SDIO_XFER_CLK_DIV=2"       # APB2 84MHz / (DIV + 2) < 25MHz
+
+# MicroSD card on underside of board
+device          sd0     at sdio0            # SD card uses SDIO port
+options         "NSD=1"                     # One disk on SDIO.

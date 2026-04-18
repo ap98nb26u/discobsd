@@ -101,6 +101,10 @@ main(void)
 	for (svc = conf_service_init; svc->svc_attach != NULL; svc++)
 		(*svc->svc_attach)();
 
+	//printf("REG_IME:  0x%04X\n", (*(volatile unsigned short*)0x04000208));
+	//printf("REG_IE:   0x%04X\n", (*(volatile unsigned short*)0x04000200));
+	//printf("TM0CNT_H: 0x%04X\n", (*(volatile unsigned short*)0x04000102));
+
 	/* Mount a root filesystem. */
 	s = spl0();
 	fs = mountfs(rootdev, (boothowto & RB_RDONLY) ? MNT_RDONLY : 0, 0);

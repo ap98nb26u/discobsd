@@ -32,8 +32,22 @@
 	.globl	htons
 	.type	htons, %function
 htons:
+#ifndef MACHINE_GBA
 	rev16	r0, r0		/* Swap bytes in each half-word. */
 	uxth	r0, r0		/* Unsigned extend half-word to word. */
+#else // MACHINE_GBA
+	push	{r1}
+
+	lsls	r1, r0, #8	/* r1 = x << 8 */
+	movs	r0, #0xFF	/* r0 = 0xFF */
+	lsls	r0, r0, #8	/* r0 = 0x0000FF00 */
+	ands	r0, r1		/* r0 = (x << 8) & 0x0000FF00 */
+
+	lsrs	r1, r1, #16	/* r1 = (x << 8) >> 16 */
+	orrs	r0, r1		/* r0 = (x >> 8) | (x << 8) & 0x0000FF00 */
+
+	pop	{r1}
+#endif // MACHINE_GBA
 	bx	lr
 	.size	htons, . - htons
 
@@ -53,7 +67,21 @@ htons:
 	.globl	ntohs
 	.type	ntohl, %function
 ntohs:
+#ifndef MACHINE_GBA
 	rev16	r0, r0		/* Swap bytes in each half-word. */
 	uxth	r0, r0		/* Unsigned extend half-word to word. */
+#else // MACHINE_GBA
+	push	{r1}
+
+	lsls	r1, r0, #8	/* r1 = x << 8 */
+	movs	r0, #0xFF	/* r0 = 0xFF */
+	lsls	r0, r0, #8	/* r0 = 0x0000FF00 */
+	ands	r0, r1		/* r0 = (x << 8) & 0x0000FF00 */
+
+	lsrs	r1, r1, #16	/* r1 = (x << 8) >> 16 */
+	orrs	r0, r1		/* r0 = (x >> 8) | (x << 8) & 0x0000FF00 */
+
+	pop	{r1}
+#endif // MACHINE_GBA
 	bx	lr
 	.size	ntohs, . - ntohs

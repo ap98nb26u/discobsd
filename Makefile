@@ -13,8 +13,8 @@ TOPSRC!=	pwd
 # Override the default port with:
 # $ make MACHINE=pic32 MACHINE_ARCH=mips
 #
-MACHINE=	stm32
-MACHINE_ARCH=	arm
+MACHINE		?= stm32
+MACHINE_ARCH	?= arm
 
 DESTDIR?=	${TOPSRC}/distrib/obj/destdir.${MACHINE}
 RELEASEDIR?=	${TOPSRC}/distrib/obj/releasedir

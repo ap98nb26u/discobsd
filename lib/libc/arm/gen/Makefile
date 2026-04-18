@@ -6,6 +6,9 @@
 TOPSRC!=cd ../../../..; pwd
 include ${TOPSRC}/share/mk/sys.mk
 
+ifeq ($(MACHINE),gba)
+ASFLAGS		+= -DMACHINE_GBA
+endif
 CFLAGS		+= ${DEFS}
 
 SRCS		= _setjmp.S htonl.S htons.S setjmp.S sigsetjmp.S

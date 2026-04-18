@@ -164,6 +164,9 @@ Config_spec:
             } else if (strcmp($2, "stm32") == 0) {
                 arch = ARCH_STM32;
                 archname = "stm32";
+            } else if (strcmp($2, "gba") == 0) {
+                arch = ARCH_GBA;
+                archname = "gba";
             } else
                 yyerror("Unknown architecture");
         }
@@ -793,6 +796,8 @@ check_nexus(struct device *dev, int num)
     case ARCH_PIC32:
         break;
     case ARCH_STM32:
+        break;
+    case ARCH_GBA:
         break;
     }
 }
