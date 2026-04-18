@@ -60,7 +60,7 @@ GCCPREFIX!=if [ x"${MACHINE_ARCH}" = x"arm" ] ; then \
 		echo "/does/not/exist" ; \
 	fi
 
-CC!=	if [ x"${MACHINE_ARCH}" = x"arm" ] ; then \
+CC!=	if [ x"${MACHINE}" = x"stm32" ] ; then \
 		echo "${GCCPREFIX}-gcc -mcpu=cortex-m4 -mabi=aapcs -mlittle-endian -mthumb -mfloat-abi=soft -nostdinc -I${TOPSRC}/include ${INCLUDES}" ; \
 	elif [ x"${MACHINE_ARCH}" = x"mips" ] ; then \
 		echo "${GCCPREFIX}-gcc -mips32r2 -EL -msoft-float -nostdinc -I${TOPSRC}/include ${INCLUDES}" ; \
