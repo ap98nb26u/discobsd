@@ -108,6 +108,10 @@ usage:  fputs("usage: config [-gp] sysname\n", stderr);
         stm32_ioconf();
         break;
 
+    case ARCH_GBA:
+        gba_ioconf();
+        break;
+
     default:
         printf("Specify architecture, e.g. ``architecture pic32''\n");
         exit(1);

@@ -84,6 +84,8 @@ DIRS_RELEASE!=if [ x"${MACHINE}" = x"stm32" ] ; then \
 			FUBARINO MAX32 MAXIMITE MAXIMITE_COLOR MMB_MX7 \
 			PICADILLO PINGUINO_MICRO QUICK240 \
 			SDXL SNADPIC STARTER_KIT UBW32 WF32" ; \
+	elif [ x"${MACHINE}" = x"gba" ] ; then \
+		echo "GBA" ; \
 	else \
 		echo "FAIL" ; \
 	fi

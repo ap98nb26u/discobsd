@@ -32,6 +32,9 @@ ASOPTS!=if [ x"${MACHINE_ARCH}" = x"mips" ] ; then \
 DEFS		= -Wall -ffreestanding
 CFLAGS		= ${DEFS} -Os -Wno-attributes -Wno-attribute-alias ${COPTS}
 ASFLAGS		= ${DEFS} -I${LIBCDIR}/${MACHINE_ARCH}/sys ${ASOPTS}
+ifeq ($(MACHINE),gba)
+ASFLAGS		+= -DMACHINE_GBA
+endif
 
 # modules which can not use SYSCALL and must be assembled from sources.  The
 # rest of the system calls are generated with printf(1) and do not have

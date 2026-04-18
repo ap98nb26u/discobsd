@@ -30,7 +30,31 @@
 	.globl	htonl
 	.type	htonl, %function
 htonl:
+#ifndef MACHINE_GBA
 	rev	r0, r0		/* Swap byte order in 32-bit word. */
+#else // MACHINE_GBA
+	push	{r1, r2}
+
+	lsls	r1, r0, #24	/* r1 = x << 24 */
+	lsrs	r2, r0, #24	/* r2 = x >> 24 */
+	orrs	r1, r2		/* r1 = (x << 24) | (x  >> 24) */
+
+	movs	r2, #0xFF	/* r2 = 0x000000FF */
+	lsls	r2, r2, #8	/* r2 = 0x0000FF00 */
+	ands	r2, r0		/* r2 = 0x0000FF00 & x */
+	lsls	r2, r2, #8	/* r2 = (0x0000FF00 & x) << 8 */
+	orrs	r1, r2		/* r1 = (x << 24) | (x >> 24) | ((0x0000FF00 & x) << 8) */
+
+	movs	r2, #0xFF	/* r2 = 0x000000FF */
+	lsls	r2, r2, #16	/* r2 = 0x00FF0000 */
+	ands	r2, r0		/* r2 = (0x00FF0000 & x) */
+	lsrs	r2, r2, #8	/* r2 = (0x00FF0000 & x) >> 8 */
+
+	movs	r0, r1		/* r0 = (x << 24) | (x >> 24) | ((0x0000FF00 & x) << 8) */
+	orrs	r0, r2		/* r0 = (x << 24) | (x >> 24) | ((0x0000FF00 & x) << 8) | ((0x00FF0000 & x) >> 8) */
+
+	pop	{r1, r2}
+#endif // MACHINE_GBA
 	bx	lr
 	.size	htonl, . - htonl
 
@@ -48,6 +72,27 @@ htonl:
 	.globl	ntohl
 	.type	ntohl, %function
 ntohl:
+#ifndef MACHINE_GBA
 	rev	r0, r0		/* Swap byte order in 32-bit word. */
+#else // MACHINE_GBA
+	push	{r1, r2}
+
+	lsls	r1, r0, #24	/* r1 = x << 24 */
+	lsrs	r2, r0, #24	/* r2 = x >> 24 */
+	orrs	r1, r2		/* r1 = (x << 24) | (x  >> 24) */
+	movs	r2, #0xFF	/* r2 = 0x000000FF */
+	lsls	r2, r2, #8	/* r2 = 0x0000FF00 */
+	ands	r2, r0		/* r2 = 0x0000FF00 & x */
+	lsls	r2, r2, #8	/* r2 = (0x0000FF00 & x) << 8 */
+	orrs	r1, r2		/* r1 = (x << 24) | (x >> 24) | ((0x0000FF00 & x) << 8) */
+	movs	r2, #0xFF	/* r2 = 0x000000FF */
+	lsls	r2, r2, #16	/* r2 = 0x00FF0000 */
+	ands	r2, r0		/* r2 = (0x00FF0000 & x) */
+	lsrs	r2, r2, #8	/* r2 = (0x00FF0000 & x) >> 8 */
+	movs	r0, r1		/* r0 = (x << 24) | (x >> 24) | ((0x0000FF00 & x) << 8) */
+	orrs	r0, r2		/* r0 = (x << 24) | (x >> 24) | ((0x0000FF00 & x) << 8) | ((0x00FF0000 & x) >> 8) */
+
+	pop	{r1, r2}
+#endif // MACHINE_GBA
 	bx	lr
 	.size	ntohl, . - ntohl

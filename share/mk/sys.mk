@@ -1,8 +1,8 @@
 # Override the default port with:
 # $ make MACHINE=pic32 MACHINE_ARCH=mips
 #
-MACHINE=	stm32
-MACHINE_ARCH=	arm
+MACHINE		?= stm32
+MACHINE_ARCH	?= arm
 
 unix=		We run DiscoBSD.
 OSMAJOR=	2
@@ -62,6 +62,8 @@ GCCPREFIX!=if [ x"${MACHINE_ARCH}" = x"arm" ] ; then \
 
 CC!=	if [ x"${MACHINE}" = x"stm32" ] ; then \
 		echo "${GCCPREFIX}-gcc -mcpu=cortex-m4 -mabi=aapcs -mlittle-endian -mthumb -mfloat-abi=soft -nostdinc -I${TOPSRC}/include ${INCLUDES}" ; \
+	elif [ x"${MACHINE}" = x"gba" ] ; then \
+		echo "${GCCPREFIX}-gcc -mcpu=arm7tdmi -mabi=aapcs -mlittle-endian -mthumb -mthumb-interwork -mfloat-abi=soft -nostdinc -I${TOPSRC}/include ${INCLUDES}" ; \
 	elif [ x"${MACHINE_ARCH}" = x"mips" ] ; then \
 		echo "${GCCPREFIX}-gcc -mips32r2 -EL -msoft-float -nostdinc -I${TOPSRC}/include ${INCLUDES}" ; \
 	else \
