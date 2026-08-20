@@ -104,12 +104,13 @@ void exec_setupstack(unsigned entryaddr, struct exec_params *epp)
     envp = (char **)(ucp - (epp->envc+1)*NBPW); /* Make place for envp[...], +1 for the 0 */
     argp = envp - (epp->argc+1)*NBPW;           /* Make place for argv[...] */
 
+DEBUG("\texec_setupstack(): writing to argp = %p, ucp = %p\n", argp, ucp);
 #ifdef __mips__
     u.u_frame->tf_sp = (int)(argp-16);
     u.u_frame->tf_r4 = epp->argc;               /* $a0 := argc */
     u.u_frame->tf_r5 = (int)argp;               /* $a1 := argp */
     u.u_frame->tf_r6 = (int)envp;               /* $a2 := env */
-#elif __thumb2__ || __thumb__
+#elif __thumb2__ || __thumb__ || __arm__
     u.u_frame->tf_sp = (int)(argp-0x40);        /* 0x40 for svc trap frame. */
     u.u_frame->tf_r0 = epp->argc;               /* $a1 := argc */
     u.u_rval         = epp->argc;               /* $a1 := argc via syscall() */
@@ -134,17 +135,36 @@ void exec_setupstack(unsigned entryaddr, struct exec_params *epp)
             nc += len;
             ucp += len;
         }
+        //caddr_t val = (caddr_t)ucp;
+        //bcopy(&val, &argp[i], sizeof(val)); 
+
+        //len = strlen(epp->argp[i])+1;
+        //bcopy(epp->argp[i], ucp, len);
+        //ucp += len;
+        //nc += len;
     }
     argp[epp->argc] = NULL;
+    //caddr_t null_val = NULL;
+    //bcopy(&null_val, &argp[epp->argc], sizeof(null_val));
 
+    //nc = 0;
     for (i = 0; i < epp->envc; i++) {
         envp[i] = ucp;
         if (copystr((caddr_t)epp->envp[i], (caddr_t)ucp, (caddr_t)topp-ucp, &len) == 0) {
             nc += len;
             ucp += len;
         }
+        //caddr_t val = (caddr_t)ucp;
+        //bcopy(&val, &envp[i], sizeof(val)); 
+
+        //len = strlen(epp->envp[i])+1;
+        //bcopy(epp->envp[i], ucp, len);
+        //ucp += len;
+        //nc += len;
     }
     envp[epp->envc] = NULL;
+    //null_val = NULL;
+    //bcopy(&null_val, &envp[epp->envc], sizeof(null_val));
 
     ucp = (caddr_t)roundup((unsigned)ucp, NBPW);
     if ((caddr_t)ucp != (caddr_t)topp) {
@@ -159,6 +179,9 @@ void exec_setupstack(unsigned entryaddr, struct exec_params *epp)
      * Remember file name for accounting.
      */
     (void) copystr(argp[0], u.u_comm, MAXCOMLEN, 0);
+    //caddr_t user_arg0_ptr;
+    //bcopy(&argp[0], &user_arg0_ptr, sizeof(user_arg0_ptr)); 
+    //(void)copystr(user_arg0_ptr, u.u_comm, MAXCOMLEN, 0);
 
     DEBUG("\texec_setupstack(): end\n");
 }
@@ -235,12 +258,21 @@ int exec_estab(struct exec_params *epp)
      * Right now we can only handle the simple original a.out
      * case, so we double check for that case here.
      */
+#if 1 //GBA
     if (epp->text.vaddr != NO_ADDR || epp->data.vaddr == NO_ADDR ||
       epp->data.vaddr != (caddr_t)__user_data_start ||
       epp->stack.vaddr != (caddr_t)__user_data_end - epp->stack.len) {
         DEBUG("\texec_estab(): error: not an a.out executable\n");
         return ENOMEM;
     }
+#else /* 0 GBA */
+    if (epp->data.vaddr == NO_ADDR ||
+      epp->data.vaddr != (caddr_t)__user_data_start ||
+      epp->stack.vaddr != (caddr_t)__user_data_end - epp->stack.len) {
+        DEBUG("\texec_estab(): error: not an a.out executable\n");
+        return ENOMEM;
+    }
+#endif
 
     /*
      * Try out for overflow
@@ -438,7 +470,7 @@ void exec_clear(struct exec_params *epp)
     u.u_frame->tf_lo  = 0;
     u.u_frame->tf_hi  = 0;
     u.u_frame->tf_gp  = 0;
-#elif __thumb2__ || __thumb__
+#elif __thumb2__ || __thumb__ || __arm__
     u.u_frame->tf_r0  = 0;              /* a1 */
     u.u_frame->tf_r1  = 0;              /* a2 */
     u.u_frame->tf_r2  = 0;              /* a3 */

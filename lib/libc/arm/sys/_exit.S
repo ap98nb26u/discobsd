@@ -5,6 +5,16 @@
  */
 #include "SYS.h"
 
+#ifndef MACHINE_GBA
+
 ENTRY(_exit)
 	svc	#SYS_exit
 END(_exit)
+
+#else /* GBA */
+
+ENTRY(_exit)
+	CALL_SIMSYS(SYS_exit)
+END(_exit)
+
+#endif

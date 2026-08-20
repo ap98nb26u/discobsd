@@ -54,6 +54,11 @@ main(void)
 	struct fs *fs = NULL;
 	int s __attribute__((unused));
 
+//	int ret = setjmp(&u.u_rsave);
+//	printf("setjmp ret=%d\n", ret);
+//	register unsigned int sp asm("sp");
+//	printf("SP=%x, u=%x\n", sp, &u);
+
 	startup();
 	printf("\n%s", version);
 	config();
@@ -101,10 +106,6 @@ main(void)
 	for (svc = conf_service_init; svc->svc_attach != NULL; svc++)
 		(*svc->svc_attach)();
 
-	//printf("REG_IME:  0x%04X\n", (*(volatile unsigned short*)0x04000208));
-	//printf("REG_IE:   0x%04X\n", (*(volatile unsigned short*)0x04000200));
-	//printf("TM0CNT_H: 0x%04X\n", (*(volatile unsigned short*)0x04000102));
-
 	/* Mount a root filesystem. */
 	s = spl0();
 	fs = mountfs(rootdev, (boothowto & RB_RDONLY) ? MNT_RDONLY : 0, 0);
@@ -140,6 +141,11 @@ main(void)
 	iunlock(u.u_cdir);
 	u.u_rdir = NULL;
 
+#ifdef GBA
+//	u.u_procp->p_addr = (size_t)&u;
+//	printf("INIT setjmp\n");
+//	setjmp(&u.u_rsave);
+#endif
 	/*
 	 * Make init process.
 	 */
@@ -166,6 +172,9 @@ main(void)
 		iflags[1] = 's';
 	}
 
+//printf("u0 init sp=%x lx=%x\n",
+//  u0.u_rsave.val[9],
+//  u0.u_rsave.val[8]);
 	/*
 	 * return goes to location 0 of user init code
 	 * just copied out.
