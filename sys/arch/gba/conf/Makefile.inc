@@ -1,5 +1,5 @@
 BOARD?=		GBA
-KERNDIR=	${TOPSRC}/sys/arch/stm32/compile/${BOARD}
+KERNDIR=	${TOPSRC}/sys/arch/gba/compile/${BOARD}
 KERN=		unix
 
 CONFSCRIPT!=if [ x"${BOARD}" = x"GBA" ] ; then \

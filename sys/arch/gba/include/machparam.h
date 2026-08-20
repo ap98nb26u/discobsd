@@ -38,14 +38,16 @@
  * Cortex-M SysTick operates with a 1ms time base, hence 1000 for HZ.
  */
 #ifndef HZ
-#define HZ              1000
+#define HZ              100
 #endif
+
+#define MAXMEM		(128*1024)
 
 /*
  * System parameter formulae.
  */
 #ifndef NBUF
-#define NBUF            10                      /* number of i/o buffers */
+#define NBUF            3                      /* number of i/o buffers */
 #endif
 #ifndef MAXUSERS
 #define MAXUSERS        1                       /* number of user logins */
@@ -77,12 +79,12 @@
 #define btod(x)         (((x) + DEV_BSIZE-1) >> DEV_BSHIFT)
 
 #if 1 /* XXX Needed for ps, w, smlrc. To be removed. */
-#define USER_DATA_START         (0x20000000)
-#define USER_DATA_SIZE          (96 * 1024)     /* 96kb for user RAM. */
-#define USER_DATA_END           (USER_DATA_START + USER_DATA_SIZE)
+//#define USER_DATA_START         (0x20000000)
+//#define USER_DATA_SIZE          (96 * 1024)     /* 96kb for user RAM. */
+//#define USER_DATA_END           (USER_DATA_START + USER_DATA_SIZE)
 
-#define stacktop(siz)           (USER_DATA_END)
-#define stackbas(siz)           (USER_DATA_END-(siz))
+//#define stacktop(siz)           (USER_DATA_END)
+//#define stackbas(siz)           (USER_DATA_END-(siz))
 #endif /* XXX Needed for ps, w, smlrc. To be removed. */
 
 /*
@@ -98,6 +100,19 @@
  */
 #define USIZE           3072
 #define SSIZE           2048            /* initial stack size (bytes) */
+
+/*
+ * GBA has no writable SWI vector (0x00000018 is BIOS ROM), so syscalls
+ * are dispatched via a software-simulated SWI: userland calls a fixed,
+ * well-known RAM address holding a pointer to the kernel's
+ * simulate_swi_via_inline_data() trampoline (see gba/gba/syscall.c),
+ * rather than linking against that kernel symbol directly (userland
+ * binaries are linked separately from the kernel and never see it).
+ * The kernel writes the pointer here once at boot, before running any
+ * user process (see gba/gba/machdep.c: startup()). Address must match
+ * the SYSVEC region reserved in gba/conf/kern.ldscript.
+ */
+#define SYSCALL_VECTOR_ADDR	0x03006400
 
 /*
  * Collect kernel statistics by default.

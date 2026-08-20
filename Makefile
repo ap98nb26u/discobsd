@@ -20,9 +20,15 @@ DESTDIR?=	${TOPSRC}/distrib/obj/destdir.${MACHINE}
 RELEASEDIR?=	${TOPSRC}/distrib/obj/releasedir
 
 # Filesystem and swap sizes.
+ifneq ($(MACHINE),gba)
 FS_MBYTES       = 200
 U_MBYTES        = 200
 SWAP_MBYTES     = 2
+else
+FS_MBYTES       = 5
+U_MBYTES        = 1
+SWAP_MBYTES     = 1
+endif
 
 # SD card filesystem image for ${MACHINE}.
 FSIMG=		${TOPSRC}/distrib/${MACHINE}/sdcard.img

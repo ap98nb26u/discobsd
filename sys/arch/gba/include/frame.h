@@ -22,16 +22,10 @@
 #define	PSR_C		(1UL << 29U)	/* Carry bit. */
 
 struct	trapframe {
-/* The following 8 registers are pushed on stack by hardware in an SVCall. */
 	u_int	tf_r0;		/* Argument / Scratch Register 1 */
 	u_int	tf_r1;		/* Argument / Scratch Register 2 */
 	u_int	tf_r2;		/* Argument / Scratch Register 3 */
 	u_int	tf_r3;		/* Argument / Scratch Register 4 */
-	u_int	tf_ip;		/* Stack Pointer (as passed by IP) */
-	u_int	tf_lr;		/* Link Register */
-	u_int	tf_pc;		/* Program Counter */
-	u_int	tf_psr;		/* Program Status Register */
-/* The following 8 registers are manually pushed on stack in SVC_Handler. */
 	u_int	tf_r4;		/* Variable Register 1 */
 	u_int	tf_r5;		/* Variable Register 2 */
 	u_int	tf_r6;		/* Variable Register 3 */
@@ -40,6 +34,10 @@ struct	trapframe {
 	u_int	tf_r9;		/* Variable Register 6 */
 	u_int	tf_r10;		/* Variable Register 7 */
 	u_int	tf_r11;		/* Variable Register 8 or Frame Pointer */
+	u_int	tf_ip;		/* Stack Pointer (as passed by IP) */
+	u_int	tf_lr;		/* Link Register */
+	u_int	tf_pc;		/* Program Counter */
+	u_int	tf_psr;		/* Program Status Register */
 };
 
 #define	tf_r12	tf_ip		/* Intra-Procedure-Call Scratch Register */

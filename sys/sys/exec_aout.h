@@ -4,6 +4,7 @@
 /*
  * Header prepended to each a.out file.
  */
+__attribute__((packed))
 struct  exec {
     unsigned a_midmag;      /* magic number */
     unsigned a_text;        /* size of text segment */

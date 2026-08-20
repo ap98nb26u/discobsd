@@ -1,6 +1,9 @@
 TOPSRC!=cd ../../../..; pwd
 include ${TOPSRC}/share/mk/sys.mk
 
+ifeq ($(MACHINE),gba)
+ASFLAGS		+= -DMACHINE_GBA
+endif
 ASFLAGS		+= ${DEFS}
 CFLAGS          += -Os
 

@@ -22,10 +22,12 @@ uartprobe(struct conf_device *config) {
     if (unit < 0 || unit >= NUART)
         return 0;
 
+#if 0
     printf("uart%d:", unit+1);
     if (is_console)
         printf(", console");
     printf("\n");
+#endif
 
     //uartttys[unit].t_addr = (caddr_t) &uart[unit];
     if (! is_console)
@@ -49,8 +51,9 @@ char uartgetc(dev_t dev) {
 
 void uartputc(dev_t dev, char c) {
     MGBA_REG_DEBUG_ENABLE = 0xC0DE; // mGBA Enable
+#if 1 // buffering
     static int i = 0;
-    if (c && i < 255) {
+    if ((c && i < 255) && c != '\n') {
         MGBA_REG_DEBUG_BUFFER[i] = c;                // Buffer
         i++;
     } else {
@@ -58,6 +61,11 @@ void uartputc(dev_t dev, char c) {
         MGBA_REG_DEBUG_FLAGS = 0x100|MGBA_LOG_INFO;  // Send Info Log
         i = 0;
     }
+#else
+    MGBA_REG_DEBUG_BUFFER[0] = c;
+    MGBA_REG_DEBUG_BUFFER[1] = '\0';
+    MGBA_REG_DEBUG_FLAGS = 0x100|MGBA_LOG_INFO;  // Send Info Log
+#endif
 }
 
 void uartputs(dev_t dev, const char *s) {

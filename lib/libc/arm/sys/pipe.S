@@ -16,6 +16,8 @@
 
 #include "SYS.h"
 
+#ifndef MACHINE_GBA
+
 ENTRY(pipe)
 	mov	r3, r0			/* Copy &filedes[0] to r3. */
 	svc	#SYS_pipe
@@ -30,3 +32,22 @@ ENTRY(pipe)
 	mvn	r0, r0
 	bx	lr			/* Error return. */
 END(pipe)
+
+#else /* GBA */
+
+ENTRY(pipe)
+	mov	r3, r0			/* Copy &filedes[0] to r3. */
+	CALL_SIMSYS(SYS_pipe)
+	bcs	1f			/* Error if carry set. */
+	str	r0, [r3, #0]		/* Save read fd in &filedes[0]. */
+	str	r1, [r3, #4]		/* Save write fd in &filedes[1]. */
+	mov	r0, #0
+	bx	lr			/* Success return. */
+1:	ldr	r1, =errno
+	str	r0, [r1]
+	mov	r0, #0
+	mvn	r0, r0
+	bx	lr			/* Error return. */
+END(pipe)
+
+#endif

@@ -10,35 +10,30 @@
 #include <sys/user.h>
 #include <sys/proc.h>
 
-#define REG_TM0D      (*(volatile unsigned short*)0x04000100)
-#define REG_TM0CNT    (*(volatile unsigned short*)0x04000102)
-#define REG_IE        (*(volatile unsigned short*)0x04000200)
-#define REG_IME       (*(volatile unsigned short*)0x04000208)
+#include <machine/gba.h>
 
 void clkstart(void) {
 }
 
 void cpu_initclocks(void) {
     // Timer 0 の設定
-    // HZ=10の設定 (16.78MHz / 1024 / 100 ≒  164)
-    // 65536 - 164 = 65372
-    REG_TM0D = 65536 - (16777216 / 1024 / HZ); 
+    REG_TM0CNT_L = 65536 - (16777216 / 1024 / HZ); 
     
     // 0x0040: 割り込み有効
     // 0x0003: 1024分周
     // 0x0080: 開始
-    REG_TM0CNT = 0x00C3;
+    REG_TM0CNT_H = 0x00C3;
 
     // GBA全体の割り込み許可レジスタ
-    REG_IE |= 0x0008;
-    REG_IME = 1;
+    REG_IE |= IRQ_TIMER0;
+    //REG_IME = 1;
 }
 
 #if 0
 void timer_interrupt_handler(void) {
     // 割り込み要因(REG_IF)の確認とクリア
-    if (*(volatile unsigned short*)0x04000202 & 0x0008) { // Timer 0 bit
-        *(volatile unsigned short*)0x04000202 = 0x0008; // クリア
+    if (REG_IF & IRQ_TIMER0) { // Timer 0 bit
+        REG_IF = IRQ_TIMER0; // クリア
         
         // カーネルの時計を更新
         hardclock((caddr_t)0, 0);

@@ -65,6 +65,8 @@ gettimeofday()
     int s;
     register u_int  ms;
 
+if (1) return;
+else {
     if (uap->tp) {
         /*
          * We don't resolve the milliseconds on every clock tick; it's
@@ -83,6 +85,7 @@ gettimeofday()
     if (uap->tzp)
         u.u_error = copyout ((caddr_t) &tz, (caddr_t) uap->tzp,
             sizeof (tz));
+}
 }
 
 void

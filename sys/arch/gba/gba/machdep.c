@@ -27,10 +27,11 @@
 #include <sys/tty.h>
 
 #include <machine/fault.h>
-
-//#include <gba/dev/uart.h>
+#include <machine/gba.h>
 
 #include <gba/dev/mgbalog.h>
+#include <machine/gba_syscall.h>
+#include <machine/sched_test.h>
 
 int cpu_khz = 16777;
 int bus_khz = 16777;
@@ -60,6 +61,27 @@ struct bufhd		bufhash[BUFHSZ];
 struct cblock		cfree[NCLIST];
 struct proc		proc[NPROC];
 struct file		file[NFILE];
+
+extern struct user u;
+void gba_init_context(void);
+
+void
+resume_point(void)
+{
+	printf("resume ok\n");
+	sched();
+}
+
+void
+gba_init_context(void)
+{
+//printf("init u=%p\n", &u);
+//	for (int i = 0; i < 8; i++) {
+//		u.u_rsave.val[i] = 0; // r4-r11
+//	}
+//	u.u_rsave.val[8] = (int)&u + 3072;    // SP
+//	u.u_rsave.val[9] = (int)resume_point; // LR
+}
 
 /*
  * Remove the ifdef/endif to run the kernel in unsecure mode even when in
@@ -136,12 +158,90 @@ SystemClock_Config(void)
 }
 #endif // 0
 
+extern ARM_CODE void proc1(void);
+void gba_do_schedule(void);
+volatile int need_resched;
+
+volatile uint16_t frame_count = 0;
+volatile uint32_t myticks = 1;
+volatile int vblank_flag;
+volatile int timer0_flag;
+
+IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
+{
+    uint16_t flag = REG_IF;
+    if (flag & IRQ_TIMER0) { // TIMER0
+        flag = IRQ_TIMER0;
+        myticks++;
+        timer0_flag = 1;
+        need_resched = 1;
+    }
+    if (flag & IRQ_VBLANK) { // VBLANK
+        flag = IRQ_VBLANK;
+        vblank_flag = 1;
+    }
+    REG_IF = flag;
+}
+
+//ARM_CODE void gba_vblank_handler(void)
+//{
+//    sys_write("V");
+//}
+
+IWRAM_CODE ARM_CODE void c_gba_intr_handler(void)
+{
+    REG_IME = 0;
+    uint16_t flag = REG_IF;
+
+    if (flag & IRQ_VBLANK) { // VBLANK
+        vblank_flag = 1;
+    }
+    if (flag & IRQ_TIMER0) { // TIMER0
+        myticks++;
+        timer0_flag = 1;
+        need_resched = 1;
+    }
+    REG_IF = flag;
+    REG_IME = 1;
+}
+
+void irq_enable(void)
+{
+	REG_IME = 0;
+
+	REG_TM0CNT_H = 0;
+	//REG_TM0CNT_L = 65263;//60Hz 65536 - (16777216 / 1024 / HZ);
+	REG_TM0CNT_L = 65372;//100Hz 65536 - (16777216 / 1024 / HZ);
+
+	// 0x0040: 割り込み有効
+	// 0x0003: 1024分周
+	// 0x0080: 開始
+	REG_TM0CNT_H = 0x00C3;
+
+	// display
+	REG_DISPSTAT |= (1 << 3); // enable VBLANK IRQ
+
+	REG_IE = (1 << 3) | (1 << 0);
+
+	REG_IME = 1;
+}
+
+
 /*
  * Machine dependent startup code.
  */
 void
 startup(void)
 {
+
+	/*
+	 * Publish the syscall trampoline at the fixed address userland's
+	 * SYS.h dereferences (userland is linked separately from the
+	 * kernel and cannot reference simulate_swi_via_inline_data as a
+	 * symbol). Must run before any user process is started.
+	 */
+	*(void (**)(void))SYSCALL_VECTOR_ADDR = simulate_swi_via_inline_data;
+
 	/*
 	 * Early setup for console devices.
 	 */
@@ -158,68 +258,11 @@ startup(void)
 static void
 cpuidentify(void)
 {
-	printf("cpu: ARM7TDMI");
-	printf(", %u MHz, bus %u MHz\n", CPU_KHZ/1000, BUS_KHZ/1000);
+	physmem = (256 + 32) * 1024; /* EWRAM + IWRAM */
+//	printf("cpu: ARM7TDMI");
+//	printf(", %u MHz, bus %u MHz\n", CPU_KHZ/1000, BUS_KHZ/1000);
+//	printf("HZ: %u, hz: %u\n", HZ, hz);
 
-}
-
-#define REG_BASE     0x04000000
-
-#define REG_DISPCNT  (*(volatile uint16_t*)(REG_BASE + 0x0000))
-#define REG_DISPSTAT (*(volatile uint16_t*)(REG_BASE + 0x0004))
-
-#define REG_BGCNT    ((volatile uint16_t *)(REG_BASE + 0x0008))
-#define REG_BG0CNT   REG_BGCNT[0]
-#define REG_BG1CNT   REG_BGCNT[1]
-#define REG_BG2CNT   REG_BGCNT[2]
-#define REG_BG3CNT   REG_BGCNT[3]
-#define REG_BG0HOFS  ((volatile uint16_t *)(REG_BASE + 0x0010))
-#define REG_BG0VOFS  ((volatile uint16_t *)(REG_BASE + 0x0012))
-
-#define MEM_PAL      0x05000000
-#define BG_PALETTE   ((volatile uint16_t *)MEM_PAL)
-#define OBJ_PALETTE  ((volatile uint16_t *)(MEM_PAL + 0x200))
-#define REG_PALETTE  BG_PALETTE
-
-#define VRAM         ((volatile uint16_t*)0x06000000)
-
-#define REG_IME      (*(volatile uint16_t*)0x04000208)
-#define REG_IE       (*(volatile uint16_t*)0x04000200)
-#define REG_IF       (*(volatile uint16_t*)0x04000202)
-
-#define IRQ_VBLANK  (1 << 0)
-#define IRQ_HBLANK  (1 << 1)
-#define IRQ_VCOUNT  (1 << 2)
-#define IRQ_TIMER0  (1 << 3)
-#define IRQ_KEYPAD  (1 << 12)
-
-volatile uint16_t frame_count = 0;
-void
-gba_intr_handler(void)
-{
-	uint16_t flags = REG_IF & REG_IE;
-
-	if (flags & IRQ_VBLANK) {
-		frame_count++;
-		if (frame_count & 1)
-			VRAM[0] = 0x7C00; // red
-		else
-			VRAM[0] = 0x001F; // blue
-	}
-
-	REG_IF = flags; // cleaer only processed
-}
-
-static inline void irq_enable(void)
-{
-	REG_IME = 0;
-
-	REG_IE = IRQ_VBLANK;
-	REG_IF = 0xFFFF; // clear all flags
-
-	REG_DISPSTAT |= (1 << 3); // enable VBLANK IRQ
-
-	REG_IME = 1;
 }
 
 /*
@@ -244,8 +287,18 @@ is_controller_alive(struct driver *driver, int unit)
 	return 0;
 }
 
+void
+sleep_ticks(uint32_t t)
+{
+	uint32_t target = myticks + t;
+	while (myticks < target);
+}
+
 extern void cpu_initclocks(void);
 extern void gba_intr_stub(void);
+
+//extern uint32_t stack1[256], stack2[256];
+extern void syscall_gateway(int sys_num);
 
 /*
  * Configure all controllers and devices as specified
@@ -254,30 +307,17 @@ extern void gba_intr_stub(void);
 void
 config(void)
 {
+
+    //*(void(**)())0x03007FF8 = syscall_gateway;
+
+//irq_enable();
+
 	struct conf_ctlr *ctlr;
 	struct conf_device *dev;
 
 	cpuidentify();
-	//cpu_initclocks();
-	//printf("bofore irq enable\n");
+	cpu_initclocks();
 
-	REG_DISPCNT = 0x0403;
-	//BG_PALETTE[0] = 0x7FFF;
-	//BG_PALETTE[1] = 0x001F;
-	//BG_PALETTE[2] = 0x03E0;
-	//BG_PALETTE[3] = 0x7C00;
-
-	for (int i = 0; i < 240*160; i++) {
-		VRAM[i] = 0x7C00;
-	}
-	irq_enable();
-	printf("after irq enable\n");
-
-	//while (1) {
-	//	if (*(volatile uint16_t *)0x04000202 & 1) {
-	//		*(volatile uint16_t *)0x05000000 = 0x001F;
-	//	}
-	//}
 	/* Probe and initialize controllers first. */
 	for (ctlr = conf_ctlr_init; ctlr->ctlr_driver; ctlr++) {
 		if ((*ctlr->ctlr_driver->d_init)(ctlr)) {
@@ -301,7 +341,7 @@ config(void)
 void
 idle(void)
 {
-#if 0
+#if 1
 	/* Indicate that no process is running. */
 	noproc = 1;
 
@@ -311,9 +351,9 @@ idle(void)
 	led_control(LED_KERNEL, 0);
 
 	/* Wait for something to happen. */
-	__DSB();
-	__ISB();
-	__WFI();
+	//__DSB();
+	//__ISB();
+	//__WFI();
 
 	/* Restore previous SPL. */
 	splx(x);
@@ -321,8 +361,18 @@ idle(void)
 }
 
 void
+cpu_reboot(void)
+{
+	extern size_t _start;
+	typedef void (*reset_func)(void);
+	reset_func reboot=(reset_func)_start;
+	reboot();
+}
+
+void
 boot(dev_t dev, int howto)
 {
+
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0 && bfreelist[0].b_forw) {
 		struct fs *fp;
 		struct buf *bp;
@@ -376,7 +426,7 @@ boot(dev_t dev, int howto)
 	cngetc();
 
 	/* Reset microcontroller. */
-	//NVIC_SystemReset();
+	cpu_reboot();
 	/* NOTREACHED */
 #endif
 

@@ -21,6 +21,9 @@
 
 #include <sys/swap.h>
 
+#ifdef MR_ENABLED
+#include <gba/dev/mrams.h>
+#endif
 #include <gba/dev/spi.h>
 #include <gba/dev/uart.h>
 
@@ -115,7 +118,12 @@ const struct bdevsw bdevsw[] = {
 		NOBDEV
 	},
 	{	/* 3 - mrams */
+#ifdef MR_ENABLED
+		mrams_open,	mrams_close,	mrams_strategy,
+		mrams_size,	mrams_ioctl,	0
+#else
 		NOBDEV
+#endif
 	},
 	{	/* 4 - swap */
 		swopen,		swclose,	swstrategy,

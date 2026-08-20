@@ -18,6 +18,8 @@
 
 int exec_aout_check(struct exec_params *epp)
 {
+//unsigned char *ptr = (unsigned char *)&epp->hdr.aout;
+//for (int i=0;i<32;i++) printf("%02x ", ptr[i]);
     int error;
 
     DEBUG("\texec_aout_check(): start\n");
@@ -36,8 +38,18 @@ int exec_aout_check(struct exec_params *epp)
 
     switch (N_GETMAGIC(epp->hdr.aout)) {
     case OMAGIC:
+        /*
+	 * Because OMAGIC's text area is writable, DiscBSD treats the entire 
+	 * area as data.  However, completely deleting the text segment 
+	 * leaves an invalid address (NO_ADDR) in exec_estab(), so the length 
+	 * is explicitly set to 0 to align the address with the base address.
+	 */
         epp->hdr.aout.a_data += epp->hdr.aout.a_text;
         epp->hdr.aout.a_text = 0;
+#if 0
+	epp->text.vaddr = (caddr_t)__user_data_start;
+	epp->text.len = 0;
+#endif
         break;
     default:
         printf("Bad a.out magic = %0o\n", N_GETMAGIC(epp->hdr.aout));
@@ -70,7 +82,13 @@ int exec_aout_check(struct exec_params *epp)
     /*
      * Set up memory allocation
      */
+#ifndef GBA
     epp->text.vaddr = epp->heap.vaddr = NO_ADDR;
+#else /* GBA */
+    /* To prevent runaway behavior in exec_estab(), explicitly set the 
+       initial value of text. */
+    epp->text.vaddr = epp->heap.vaddr = __user_data_start;
+#endif
     epp->text.len = epp->heap.len = 0;
 
     epp->data.vaddr = (caddr_t)__user_data_start;

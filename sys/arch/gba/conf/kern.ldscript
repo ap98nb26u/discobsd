@@ -2,55 +2,88 @@
  * Kernel common linker script for GBA.
  */
 
-/*
- * On STM32, a minimum of 128 kbytes of flash and 128 kbytes of RAM is needed.
- * Reserve for the kernel at least 128 kbytes of flash and 32 kbytes of RAM.
- * Reserve for userland at least 96 kbytes of RAM.
- */
-
-ENTRY(_start)
-
 MEMORY {
-    FLASH  (rx)  : ORIGIN = 0x08000000, LENGTH = 32M   /* 0x0800 0000 - 0x09FF FFFF */
-    RAM    (rwx) : ORIGIN = 0x03000000, LENGTH = 28K   /* 0x0300 0000 - 0x0300 6FFF */
-    EWRAM  (rwx) : ORIGIN = 0x02000000, LENGTH = 256K  /* 0x0200 0000 - 0x0203 FFFF */
+    FLASH   (rx)   : ORIGIN = 0x08000000, LENGTH = 32M   /* 0x0800 0000 - 0x09FF FFFF */
+
+    IWRAM   (rwx)  : ORIGIN = 0x03000000, LENGTH = 32K   /* 0x0300 0000 - 0x0300 7FFF */
+    SYSVEC  (rw!x) : ORIGIN = 0x03006400, LENGTH = 4     /* 0x0300 6400 - 0x0300 6403: syscall trampoline vector */
+    U0AREA  (rw!x) : ORIGIN = 0x03006800, LENGTH = 3K    /* 0x0300 6800 - 0x0300 73FF */
+    UAREA   (rw!x) : ORIGIN = 0x03007400, LENGTH = 3K    /* 0x0300 7400 - 0x0300 7FFF */
+
+    EWRAM   (rwx)  : ORIGIN = 0x02000000, LENGTH = 256K  /* 0x0200 0000 - 0x0203 FFFF */
+    USERRAM (rw!x) : ORIGIN = 0x02027000, LENGTH = 96K   /* 0x0202 7000 - 0x0203 EFFF */
+    SWAP    (rw!x) : ORIGIN = 0x0203F000, LENGTH = 64K   /* 0x0203 F000 - 0x0204 EFFF */
 }
 
 __kernel_flash_start	= ORIGIN(FLASH);
 __kernel_flash_end	= ORIGIN(FLASH) + LENGTH(FLASH);
-__kernel_data_start	= ORIGIN(RAM);
-__kernel_data_end	= ORIGIN(RAM) + LENGTH(RAM);
+__kernel_data_start	= ORIGIN(EWRAM);
+__kernel_data_end	= ORIGIN(USERRAM);
 __user_data_start	= ORIGIN(USERRAM);
-__user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
+__user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM) - LENGTH(SWAP);
+__swap_start		= ORIGIN(SWAP);
+__swap_end		= ORIGIN(SWAP) + LENGTH(SWAP);
 
+syscall_vector		= ORIGIN(SYSVEC);
 u0			= ORIGIN(U0AREA);
 u			= ORIGIN(UAREA);
-u_end			= ORIGIN(UAREA) + LENGTH(UAREA);
-_estack			= ORIGIN(UAREA) + LENGTH(UAREA);
+u_end			= ORIGIN(EWRAM) + LENGTH(UAREA);
+_estack			= u_end;
+
+ENTRY(_start)
 
 SECTIONS {
     .text : {
-        *(.text)
-        *(.text.*)
-        *(.rodata)
-        *(.rodata.*)
+        *(.text*)
+        *(.rodata*)
         . = ALIGN(4);
+    } > FLASH
+
+    .fast_text : ALIGN(4) {
+        __fast_start = .;
+        *(.iwram_text)
+        *longjmp.o(.text)
+        *setjmp.o(.text)
+        . = ALIGN(4);
+        __fast_end = .;
+    } > IWRAM AT > FLASH
+
+    _sifast = LOADADDR(.fast_text);
+
+    __etext = .;
+    _rom_end = ALIGN(4);
+
+    .fs : ALIGN(1024) {
+        __fs_start = . + 0x400; /* 1024 byte header */
+        *(.fs_image)
+        . = ALIGN(4);
+        __fs_end = .;
     } > FLASH
 
     .data : {
         __data_start__ = .;
-        *(.data)
-        *(.data.*)
+        _sdata = .;
+        *(.data*)
         . = ALIGN(4);
         __data_end__ = .;
-    } > RAM AT > FLASH
+        _edata = .;
+    } > IWRAM AT > FLASH
+
+    _sidata = LOADADDR(.data);
 
     .bss : {
         __bss_start__ = .;
-        *(.bss)
-        *(.bss.*)
+        _sbss = .;
+        *(.bss*)
         *(COMMON)
         . = ALIGN(4);
         __bss_end__ = .;
-    } > RAM
+        _ebss = .;
+    } > IWRAM
+
+    /* dummy section to check free space of IWRAM */
+    .stack_check : {
+        . = ALIGN(4);
+        ASSERT(. < (ORIGIN(IWRAM) + 25K), "Error: IWRAM overflowed into U0 area!");
+    } > IWRAM
 }

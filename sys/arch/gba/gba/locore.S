@@ -14,7 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#define UBASE 0x20000000	/* User space base address. */
+#define UBASE 0x03005c00 //0x20000000	/* User space base address. */
 #define USIZE 3072		/* From user.h */
 
 	.syntax	unified
@@ -29,24 +29,12 @@
  */
 	.text
 	.align	2
-	.thumb_func
+	.arm
 	.globl	setjmp
 	.type	setjmp, %function
 setjmp:
 	mov	ip, sp
-#ifdef __thumb2__
 	stmea	r0!, {r4-r10,fp,ip,lr}	/* Save regs in env arg. */
-#else /* __thumb__ */
-	stmea	r0!, {r4-r7}		/* Save v1-v4 in env arg. Incr r0. */
-	mov	r4, r8			/* Bring high register v5 to low. */
-	mov	r5, r9			/* Bring high register v6 to low. */
-	mov	r6, r10			/* Bring high register v7 to low. */
-	mov	r7, r11			/* Bring high register v8 to low. */
-	stmea	r0!, {r4-r7}		/* Save v5-v8 in env arg. Incr r0. */
-	mov	r4, ip			/* Bring high register ip to low. */
-	mov	r5, lr			/* Bring high register lr to low. */
-	stmea	r0!, {r4-r5}		/* Save ip and lr in env arg. */
-#endif
 	movs	r0, #0			/* Returns zero. */
 	bx	lr
 	.size	setjmp, . - setjmp
@@ -74,21 +62,22 @@ setjmp:
 
 	.text
 	.align	2
-	.thumb_func
+	.arm
 	.globl	longjmp
 	.type	longjmp, %function
 longjmp:
 	.globl	resume
 	.type	resume, %function
 resume:
-	.arm
+	@ u0area: 0x03006800-0x030073FF
+	@ uarea:  0x03007400-0x03007FFF
 	/* Disable interrupts. */
-	mrs r0, cpsr
-	orr r0, r0, #0x80
-	msr cpsr_c, r0
-	.thumb_func
+	mrs r3, cpsr
+	orr r3, r3, #0x80
+	msr cpsr_c, r3
 
-	mov	r10, a2			/* Save env (second arg). */
+	@ u=a1=r0, env=a2=r1
+	mov	r12, a2			/* Save env (second arg). */
 	ldr	r1, =u0			/* Pointer to u0. area start addr. */
 	ldr	r2, =u			/* Pointer to u. area start addr. */
 	cmp	a1, r2			/* If u (first arg) is not u. area, */
@@ -104,15 +93,8 @@ resume:
 	adds	r0, r2, #0		/* Pointer to u. area start addr. */
 
 	.rept	USIZE / 3 / 4		/* 4 * 3 * 256 = 3072 = USIZE */
-#ifdef __thumb2__
-	ldmia	r0, {r2-r4}
-	ldmia	r1, {r5-r7}
-#else /* __thumb__ */
 	ldmia	r0!, {r2-r4}
 	ldmia	r1!, {r5-r7}
-	subs	r0, #(3 * 4)
-	subs	r1, #(3 * 4)
-#endif
 	stmia	r1!, {r2-r4}
 	stmia	r0!, {r5-r7}
 	.endr
@@ -123,30 +105,14 @@ resume:
 	str	r2, [r3, #60]		/* Save &u in u.u_procp->p_addr. */
 2:
 	mov	a2, r10			/* Restore env (second arg). */
-#ifdef __thumb2__
 	ldmia	a2!, {r4-r10,fp,ip,lr}	/* Restore regs from env arg. */
-#else /* __thumb__ */
-	adds	a2, #(8 * 4)		/* Index to &env[8]. */
-	ldmia	a2!, {r4-r5}		/* Restore ip and lr to low regs. */
-	mov	ip, r4			/* Move temp low register to ip. */
-	mov	lr, r5			/* Move temp low register to lr. */
-	subs	a2, #(6 * 4)		/* Index to &env[4]. */
-	ldmia	a2!, {r4-r7}		/* Restore v5-v8 to low regs. */
-	mov	r8, r4			/* Move temp low register to v5. */
-	mov	r9, r5			/* Move temp low register to v6. */
-	mov	r10, r6			/* Move temp low register to v7. */
-	mov	r11, r7			/* Move temp low register to v8. */
-	subs	a2, #(8 * 4)		/* Index to &env[0]. */
-	ldmia	a2!, {r4-r7}		/* Restore v1-v4 to own registers. */
-#endif
 	mov	sp, ip
 
 	/* Enable interrupts. */
-	.arm
-	mrs r0, cpsr
-	bic r0, r0, #0x80
-	msr cpsr_c, r0
-	.thumb_func
+	mrs r3, cpsr
+	bic r3, r3, #0x80
+	msr cpsr_c, r3
+	nop
 
 	movs	a1, #1			/* Transfer back to setjmp() return */
 	bx	lr			/*   with a return value of one. */
@@ -159,19 +125,28 @@ resume:
  */
 	.text
 	.align	2
+	.arm
 	.globl	icode
 	.type	icode, %object
 icode:
-	.thumb_func
+	@.thumb_func
 	.type	icode1, %function
 icode1:
-	movs.n	r0, #(sbininit - icode)	/* Offset for /sbin/init path. */
-	movs.n	r1, #(argv - icode)	/* Offset for *argv[] array. */
+	movs	r0, #(sbininit - icode)	/* Offset for /sbin/init path. */
+	movs	r1, #(argv - icode)	/* Offset for *argv[] array. */
 	ldr	r2, =UBASE		/* User space base address. */
 	adds	r0, r2			/* execv() *name argument. */
 	adds	r1, r2			/* execv() *argv[] argument. */
-	svc	#11			/* Make SYS_execv syscall. */
-	svc	#1			/* Make SYS_exit syscall. */
+
+	.globl	simulate_swi_via_inline_data
+	@svc     #11			/* Make SYS_execv syscall. */
+	ldr	r3, =simulate_swi_via_inline_data
+	bx	r3
+	.word	11
+	@svc     #1			/* Make SYS_exit syscall. */
+	ldr	r3, =simulate_swi_via_inline_data
+	bx	r3
+	.word	1
 
 forever:				/* Catch runaway code. */
 	b	forever
@@ -198,3 +173,65 @@ argv:
 	.type	icodeend, %object
 icodeend:
 	.size	icode, . - icode
+
+@	.text
+@	.align 2
+@	.arm
+@	.global	syscall_gateway
+@	.type	syscall_gateway, %function
+@syscall_gateway:
+@	@ save user SP to ip (r12) (tf_ip is defined tf_sp in C)
+@	mov	ip, sp		@ save user sp to sp (r12)
+@
+@	ldr	r12, =u
+@	add	r12, r12, #3072	@ kernel stack top
+@	sub	r12, r12, #64	@ trapframe start
+@
+@	stmia	r12, {r0-r3}	@ first, save r0-r3 in safe
+@	mov	sp, r12		@ now change sp
+@
+@	@ change SP to fixed position (u+USIZE) of kernel stack
+@	@ldr	sp, =0x0203E000	@ 壊れない場所に置く
+@
+@	@sub	sp, sp, #64	@ prepare trapframe
+@
+@	stmia	sp, {r0-r3}	@ save r0-r3 to top of trapframe
+@
+@	str	ip, [sp, #16]	@ tf_sp / tf_ip (offset 16)
+@	str	lr, [sp, #20]	@ tf_lr (offset 20)
+@	str	lr, [sp, #24]	@ tf_pc (offset 24) (lr should be saved here)
+@	mrs	r0, spsr
+@	str	r0, [sp, #28]
+@
+@	@ second 8 regs
+@	add	r0, sp, #32
+@	stmia	r0, {r4-r11}
+@	
+@	@ call syscall_handler(sys_num, frame_ptr)
+@	@ syscall number to arg1 set in r7 at icode
+@	mov	r0, r7	@ sys_num
+@	mov	r1, sp	@ pointer to trapframe
+@
+@	ldr	r3, =syscall_handler
+@	mov	lr, pc
+@	bx	r3
+@
+@	@ --- syscall_handler restore process ---
+@
+@	@ save tf_pc (24) and tf_ip (16)
+@	ldr	r12, [sp, #24]	@ tf_pc 0x20000f9
+@	ldr	r2, [sp, #16]	@ tf_sp user SP
+@
+@	@ restore first half register
+@	add	r0, sp, #32	@ restore r0-r3
+@	ldmia	r0, {r4-r11}	@ restore r0-r3
+@
+@	@ restore first half register
+@	ldmia	sp, {r0-r3}	@ restore r0-r3
+@
+@	@ ----------
+@	mov	sp, r2		@ set User SP
+@
+@	@ for debug
+@	msr	cpsr_c, #0xDF
+@	bx	r12		@ go to User + Thumb

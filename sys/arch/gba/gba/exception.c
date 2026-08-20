@@ -1,9 +1,13 @@
+#if 0
+static int tick = 0;
+
 void timer_interrupt_handler() {
-    // 割り込み要因(REG_IF)の確認とクリア
-    if (*(volatile unsigned short*)0x04000202 & 0x0008) { // Timer 0 bit
-        *(volatile unsigned short*)0x04000202 = 0x0008; // クリア
-        
-        // カーネルの時計を更新
-        hardclock((caddr_t)0, 0);
+    if (timer0_flag == 1) {
+        //hardclock((caddr_t)0, 0);
+	if (tick % 100 == 0) {
+		printf("@");
+	i
+	timer0_flag = 0;
     }
 }
+#endif

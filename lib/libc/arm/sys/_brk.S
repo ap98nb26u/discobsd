@@ -16,6 +16,8 @@
 
 #include "SYS.h"
 
+#ifndef MACHINE_GBA
+
 ENTRY(_brk)
 	svc	#SYS_sbrk
 	bcs	1f			/* Error if carry set. */
@@ -26,3 +28,18 @@ ENTRY(_brk)
 	mvn	r0, r0
 	bx	lr			/* Error return. */
 END(_brk)
+
+#else /* GBA */
+
+ENTRY(_brk)
+	CALL_SIMSYS(SYS_sbrk)
+	bcs	1f			/* Error if carry set. */
+	bx	lr			/* Success return. */
+1:	ldr	r1, =errno
+	str	r0, [r1]
+	mov	r0, #0
+	mvn	r0, r0
+	bx	lr			/* Error return. */
+END(_brk)
+
+#endif

@@ -13,6 +13,7 @@
 #include <sys/kernel.h>
 #include <sys/systm.h>
 
+extern int sys_write(const char *);
 #define SQSIZE  16              /* Must be power of 2 */
 
 #define HASH(x) (((int)x >> 5) & (SQSIZE - 1))
@@ -191,6 +192,13 @@ tsleep (ident, priority, timo)
     if (p != &proc[0])
         wakeup((caddr_t) &runin);
     u.u_ru.ru_nvcsw++;
+#ifdef GBA
+//p->p_addr = (size_t)&u;
+//printf("before longjmp: cur u=%p target u=%p\n",&u,p->p_addr);
+//printf("target sp=%x lr=%x\n",
+//  ((struct user *)p->p_addr)->u_rsave.val[8],
+//  ((struct user *)p->p_addr)->u_rsave.val[9]);
+#endif
     swtch();
 resume:
     splx(s);
@@ -248,6 +256,7 @@ sleep (chan, pri)
      * EINTR - put into u_error for trap.c to find (interrupted syscall)
      * ERESTART - system call to be restared
      */
+//sys_write("sleep:bfr longjmp\n");
     longjmp (u.u_procp->p_addr, &u.u_qsave);
     /*NOTREACHED*/
 }
@@ -399,14 +408,23 @@ setpri (pp)
  * called and will return in at most 1hz time, e.g. it's not worth putting an
  * spl() in.
  */
+//#ifdef GBA
+//__attribute__((target("arm")))
+//void
+//swtch()
+//#else
 void
 swtch()
+//#endif
 {
     register struct proc *p, *q;
     register int n;
     struct proc *pp, *pq;
     int s;
-
+//printf("swtch u=%p\n", &u);
+//register unsigned int cpsr asm("r0");
+//__asm__ volatile("mrs %0, cpsr" : "=r"(cpsr));
+//printf("swtch cpsr=%x\n", cpsr);
 #ifdef UCB_METER
     cnt.v_swtch++;
 #endif
@@ -483,6 +501,7 @@ loop:
      */
     n = p->p_flag & SSWAP;
     p->p_flag &= ~SSWAP;
+//sys_write("swtch: bfr longjmp\n");
     longjmp (p->p_addr, n ? &u.u_ssave : &u.u_rsave);
 }
 

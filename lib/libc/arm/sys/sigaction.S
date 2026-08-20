@@ -19,6 +19,8 @@
  * really doesn't introduce much extra overhead, so our method for doing it on
  * a PDP-11 is alright too.
  */
+#ifndef MACHINE_GBA
+
 ENTRY(sigaction)
 	ldr	r3, =sigtramp		/* arg4: address of sigtramp. */
 	svc	SYS_sigaction
@@ -30,6 +32,22 @@ ENTRY(sigaction)
 	mvn	r0, r0
 	bx	lr			/* Error return. */
 END(sigaction)
+
+#else /* GBA */
+
+ENTRY(sigaction)
+	ldr	r3, =sigtramp		/* arg4: address of sigtramp. */
+	CALL_SIMSYS(SYS_sigaction)
+	bcs	1f			/* Error if carry set. */
+	bx	lr			/* Success return. */
+1:	ldr	r1, =errno
+	str	r0, [r1]
+	mov	r0, #0
+	mvn	r0, r0
+	bx	lr			/* Error return. */
+END(sigaction)
+
+#endif
 
 /*
  * sigtramp - Signal "Trampoline Code"
