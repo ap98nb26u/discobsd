@@ -22,6 +22,126 @@
 #include <sys/vm.h>
 
 #include <machine/frame.h>
+#include <machine/gba_syscall.h>
+#include <gba/dev/mgbalog.h>
+
+#include <sys/stdint.h>
+
+// GBAの割り込みマスタ有効化レジスタ (16bit)
+#define REG_IME_ADDR 0x04000208
+
+void my_custom_swi_handler(uint32_t swi_number, uint32_t *regs) {
+    // ここに独自のSWI処理を記述（IRQは禁止されています）
+    if (swi_number == 0x01) {
+        // 例: カスタム処理
+    }
+}
+
+__attribute__((target("arm"), noinline))
+void simulate_swi_via_inline_data(void) {
+    __asm__ volatile (
+        /* -------------------------------------------------------------
+         1. 割り込みを最速で禁止 (REG_IME = 0)
+         ------------------------------------------------------------- */
+        "mov r1, #0x04000000\n\t"
+        "add r1, #0x200\n\t"
+        "mov r2, #0\n\t"
+        "strh r2, [r1, #0x08]\n\t"    // REG_IME (0x04000208) に 0 を書き込み (16bit)
+
+        /* -------------------------------------------------------------
+         2. 汎用レジスタをスタックに退避
+         ------------------------------------------------------------- */
+        "stmdb sp!, {r0-r12}\n\t"     // R0〜R12、および呼び出し元の戻り先LRを退避
+        
+        /* -------------------------------------------------------------
+         3. 呼び出し元の状態（CPSR）を取得し、戻り先（LR_svc）を計算
+         ------------------------------------------------------------- */
+        "mrs r0, cpsr\n\t"            // 現在のCPSR（呼び出し元のモード情報含む）を取得
+        "ldr r1, [sp, #52]\n\t"       // スタックから退避したLRを取得
+        
+        /* -------------------------------------------------------------
+         4. 呼び出し元の命令状態（ARM/Thumb）を判定してSWI番号を取得
+         ------------------------------------------------------------- */
+        "tst r0, #0x20\n\t"           // Tビット（Thumbフラグ）をチェック
+        "ldrneh r2, [r1]\n\t"         // 【Thumb】2バイトとしてSWI番号を読み込む
+        "addne r1, r1, #2\n\t"        // 【Thumb】復帰先を2バイト進める
+        "ldreq r2, [r1]\n\t"          // 【ARM】4バイトとしてSWI番号を読み込む
+        "addeq r1, r1, #4\n\t"        // 【ARM】復帰先を4バイト進める
+        
+        "str r1, [sp, #52]\n\t"       // 修正済みの復帰先アドレスをスタックに書き戻す
+        
+        /* -------------------------------------------------------------
+         5. SVC（スーパーバイザ）モードへ強制移行
+         ------------------------------------------------------------- */
+        // ※ここではCPSRのIビット(割り込み禁止)も念のためセットしておきますが、
+        // すでにREG_IMEが0なので、CPU全体で割り込みは完全に遮断されています。
+        "msr cpsr_c, #0x93\n\t"       // SVCモード(0x13)へ移行 ＆ CPU側でもIRQ禁止
+        
+        /* -------------------------------------------------------------
+         6. SVCモードのレジスタ（SPSR_svc, LR_svc）を設定
+         ------------------------------------------------------------- */
+        "msr spsr, r0\n\t"            // 元のCPSRをSPSRにセット
+        "mov lr, r1\n\t"              // 修正済みの復帰先アドレスをLR_svcにセット
+        
+        /* -------------------------------------------------------------
+         7. C言語のハンドラ関数を呼び出し
+         ------------------------------------------------------------- */
+        "mov r0, r2\n\t"              // 第1引数: SWI番号
+        "mov r1, sp\n\t"              // 第2引数: 退避されたレジスタ配列へのポインタ
+        //"bl my_custom_swi_handler\n\t"
+        "bl syscall_handler\n\t"
+        
+        /* -------------------------------------------------------------
+         8. レジスタの復元と「MOVS PC, LR」による復帰
+         ------------------------------------------------------------- */
+        // 最後に「movs pc, lr」が実行されると、SPSRがCPSRに書き戻されます。
+        // 元のCPSR（割り込みが許可されていた状態）に戻ることで、自動的にCPU側の
+        // 割り込みが許可されます。
+        "ldmia sp!, {r0-r12}\n\t"     // R0〜R12を復元
+        "add sp, sp, #4\n\t"          // スタックのLR領域をスキップ
+        
+        // 【注意点への対策】
+        // この時点でCPUのCPSRはまだSVCモード（IRQ禁止）ですが、REG_IMEを有効に戻す
+        // 必要があります。
+        // 元々割り込みが許可されていた環境に戻すため、一足先にREG_IMEを1（有効）に
+        // 戻します。
+        "mov r1, #0x04000000\n\t"
+        "add r1, #0x200\n\t"
+        "mov r2, #1\n\t"
+        "strh r2, [r1, #0x08]\n\t"   // REG_IME = 1 (割り込みマスタ許可)
+        
+        "movs pc, lr\n\t"             // 元のモード・状態・割り込み許可状態へ完全復帰
+    );
+}
+
+int sys_write(const char *s)
+{
+    printf("%s", s);
+    //for (int i=0; *(s+i)!=0; i++)
+    //    cnputc(*(s+i));
+    return 0;
+}
+
+int sys_read(char *buf, int size)
+{
+    printf("sys_read called\n");
+    //MGBA_REG_DEBUG_FLAGS = 0x100|MGBA_LOG_INFO;
+    return 0;
+}
+
+#if 0
+int arch_syscall(int num)
+{
+    switch (num) {
+    case 0:
+        return sys_write();
+    case 1:
+        return sys_read();
+    default:
+        return -1;
+    }
+}
+#endif
 
 /*
  * SVC_Handler(frame)
@@ -63,34 +183,6 @@ __asm volatile (
 
 "	cpsid	i		\n\t"	/* Disable interrupts. */
 
-#ifdef __thumb2__
-	/*
-	 * ARMv7-M hardware already pushed r0-r3, ip, lr, pc, psr on PSP,
-	 * and then switched to MSP and is currently in Handler Mode.
-	 */
-"	push	{r4-r11}	\n\t"	/* Push v1-v8 registers onto MSP. */
-"	mrs	r1, PSP		\n\t"	/* Get pointer to trap frame. */
-"	ldmfd	r1, {r2-r9}	\n\t"	/* Copy trap frame from PSP. */
-"	mov	r6, r1		\n\t"	/* Set trap frame sp as PSP. */
-"	push	{r2-r9}		\n\t"	/* Push that trap frame onto MSP. */
-
-"	mrs	r0, MSP		\n\t"	/* MSP trap frame is syscall() arg. */
-"	bl	syscall		\n\t"	/* Call syscall() with MSP as arg. */
-
-"	pop	{r2-r9}		\n\t"	/* Pop off trap frame from MSP. */
-"	mov	r1, r6		\n\t"	/* PSP will be trap frame sp. */
-"	stmia	r1, {r2-r9}	\n\t"	/* Hardware pops off PSP on return. */
-"	msr	PSP, r1		\n\t"	/* Set PSP as trap frame sp. */
-"	pop	{r4-r11}	\n\t"	/* Pop from MSP into v1-v8 regs. */
-
-	/*
-	 * On return, ARMv7-M hardware sets PSP as stack pointer,
-	 * pops from PSP to registers r0-r3, ip, lr, pc, psr,
-	 * and then switches back to Thread Mode (exception completed).
-	 */
-"	mov	lr, #0xFFFFFFFD	\n\t"	/* EXC_RETURN Thread Mode, PSP */
-					/* Return to Thread Mode. */
-#else /* __thumb__ */
 	/*
 	 * ARMv6-M hardware already pushed r0-r3, ip, lr, pc, psr on PSP,
 	 * and then switched to MSP and is currently in Handler Mode.
@@ -134,26 +226,26 @@ __asm volatile (
 	 */
 "	ldr	r1, =0xFFFFFFFD	\n\t"	/* EXC_RETURN Thread Mode, PSP */
 "	mov	lr, r1		\n\t"	/* Return to Thread Mode. */
-#endif
 );
 #endif // 0
 }
 
 void
-syscall(struct trapframe *frame)
+syscall_handler(int sys_num, struct trapframe *frame)
 {
-#if 0
 	int psig;
 	time_t syst;
 	int code;
 	u_int sp;
 
+	//volatile struct trapframe *f = frame;
+
 	syst = u.u_ru.ru_stime;
 
-	if ((u_int)frame < (u_int)&u + sizeof(u)) {
-		panic("stack overflow");
-		/* NOTREACHED */
-	}
+	//if ((u_int)frame < (u_int)&u + sizeof(u)) {
+	//	panic("stack overflow");
+	//	/* NOTREACHED */
+	//}
 
 #ifdef UCB_METER
 	cnt.v_trap++;
@@ -167,7 +259,7 @@ syscall(struct trapframe *frame)
 	u.u_frame = frame;
 	u.u_code = u.u_frame->tf_pc - INSN_SZ;	/* Syscall for sig handler. */
 
-	led_control(LED_KERNEL, 1);
+	//led_control(LED_KERNEL, 1);
 
 	/* Check stack. */
 	sp = u.u_frame->tf_sp;
@@ -184,12 +276,14 @@ syscall(struct trapframe *frame)
 		u.u_ssize = u.u_procp->p_ssize;
 	}
 
-	code = *(int *)u.u_code & 0377;		/* Bottom 8 bits are index. */
+	code = frame->tf_r7; // icode側でmov r7, #11としている
 
-	const struct sysent *callp = &sysent[0];
+	//const struct sysent *callp = &sysent[0];
+	const struct sysent *callp;
 
 	if (code < nsysent)
-		callp += code;
+		//callp += code;
+		callp = sysent + code;
 
 	if (callp->sy_narg) {
 		/* In AAPCS, first four args are from trapframe regs r0-r3. */
@@ -198,11 +292,8 @@ syscall(struct trapframe *frame)
 		u.u_arg[2] = u.u_frame->tf_r2;	/* $a3 */
 		u.u_arg[3] = u.u_frame->tf_r3;	/* $a4 */
 
-		/* In AAPCS, stack must be double-word aligned. */
+		/* for ARM7TDMI */
 		int stkalign = 0;
-		if (u.u_frame->tf_psr & SCB_CCR_STKALIGN_Msk) {
-			stkalign = 4;		/* Skip over padding byte. */
-		}
 
 		/* Remaining args are from the stack, after the trapframe. */
 		if (callp->sy_narg > 4) {
@@ -221,6 +312,16 @@ syscall(struct trapframe *frame)
 
 	if (setjmp(&u.u_qsave) == 0) {
 		(*callp->sy_call)();		/* Make syscall. */
+
+		/*
+		 * execve(11)が成功した直後の処理
+		 * execveから戻る際、新しいプログラム(init)のLRが
+		 * カーネル内の古いアドレスを指していると、最初の
+		 * 関数から戻るときに暴走するため初期化する。
+		 */
+		if (code == 11 && u.u_error == 0) {
+			u.u_frame->tf_lr = 0;
+		}
 	}
 
 	switch (u.u_error) {
@@ -245,8 +346,9 @@ bad:
 	psignal(u.u_procp, psig);
 
 out:
+	frame->tf_pc |= 1;
+	frame->tf_psr |= 0x80;
 	userret(u.u_frame->tf_pc, syst);
 
-	led_control(LED_KERNEL, 0);
-#endif // 0
+	//led_control(LED_KERNEL, 0);
 }

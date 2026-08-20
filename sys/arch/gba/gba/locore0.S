@@ -1,5 +1,6 @@
 .section .text
 
+    .arm
 .global _start
 _start:
     @ GBA cart header
@@ -21,60 +22,228 @@ _start:
     .align 4
     .arm
 reset:
+    @ arrive here in ARM mode, SYS mode, with IRQ and FIQ disabled
+    @ SVC mode
+    @ BIOS default stack at 0x03007FE0 (64 bytes, from 0x03007FA0)
+    @@ldr, sp, =0x03007FE0
     @ IRQ mode
-    msr cpsr_c, #0xD2
-    ldr sp, =0x03007000 @ fit to BIOS
-
-    @ SYS mode for C
-    msr cpsr_c, #0xDF
-    ldr sp, =0x0303F000
+    @ BIOS default stack at 0x03007FA0 (160 bytes, from 0x03007F00)
+    @ IRQ disable, FIQ disable
+    @msr cpsr_c, #0xD2 @ cpsr: current psr, _c: control field mask (bit 3)
+    @nop
+    @@ldr sp, =0x03007FA0
+    @ SYS mode (same as USR mode)
+    @ BIOS default stack at 0x03007F00
+    @@ldr sp, =0x03007F00
+    ldr sp, =0x0203FFF8 @ do not use last 8 bytes
 
     @ register user intr handler
     ldr r0, =0x03007FFC
-    ldr r1, =gba_intr_stub
-    @orr r1, r1, #1 @ Thumb bit on
+    ldr r1, =c_gba_intr_handler @ ok
+    @ldr r1, =gba_intr_handler_mini
+    @ldr r1, =gba_intr_handler
     str r1, [r0]
 
+    @ copy .fast_text from ROM to IWRAM
+    ldr r0, =_sifast @ source addr in ROM
+    ldr r1, =__fast_start @ distination addr in IWRAM
+    ldr r2, =__fast_end
+fast_loop:
+    cmp r1, r2
+    bge fast_done
+    ldr r3, [r0], #4
+    str r3, [r1], #4
+    b fast_loop
+fast_done:
+
+    @ --- copy .data from ROM to IWRAM ---
+CopyDataInit:
+.global _sidata
+    ldr r0, =_sidata @ source addr in ROM
+    ldr r1, =_sdata @ distination addr in IWRAM
+    ldr r2, =_edata
+data_loop:
+    cmp r1, r2
+    bge data_done
+    ldr r3, [r0], #4
+    str r3, [r1], #4
+    b data_loop
+data_done:
+
     @ --- clear BSS ---
-    ldr r0, =__bss_start__
-    ldr r1, =__bss_end__
+FillZeroBss:
+    ldr r0, =_sbss
+    ldr r1, =_ebss
     mov r2, #0
 bss_loop:
     cmp r0, r1
     strlt r2, [r0], #4
     blt bss_loop
 
-    @ change to ARM mode
-    mrs r0, cpsr
-    bic r0, r0, #0x80   @ IRQ enable
-    msr cpsr_cxsf, r0
+    @ カーネルスタックを u に合わせる
+    ldr r0, =u
+    add sp, r0, #3072 @ USIZE
 
-.global main
+@.global gba_init_context
+    @bl gba_init_context
+.global main @Thumb
     ldr r0, =main
-    bx r0
+    @orr r0, r0, #1 @ Thumb mode
+    @ldr lr, =setup_user_mode_entry
+    bx r0 @ jump to main
 
-    b .
+    .align 2
+    @.thumb
+@setup_user_mode_entry:
+    @bx pc @ Thumb to ARM
+    @nop
+    @.arm
+@setup_user_mode:
+    @ldr sp, =__user_data_end - 8 @ 0x02018000 - 8 = 0x02017FF8
+
+    @ldr r0, =0x02000000
+    @bx r0
 
 .ltorg @ put out data fo reteral pool
 
 .align 4
 .arm
-.global gba_intr_stub
-gba_intr_stub:
-    stmfd sp!, {r0-r3, lr}
+.global gba_intr_handler_mini
+gba_intr_handler_mini:
+    @ enter IRQ mode
+    @ these conditions are met by BIOS:
+    @ ARM mode, IRQ mode, r0-r3, r12, r14 are saved to SP_irq (r13)
+    @ lr_irq holds return address
+    @ save general register and lr or IRQ mode
+    @ sub lr, lr, #4
+    @ stmdb sp!, {r0-r3, r12, lr}
 
-    @ldr r0, =0x04000202 @ REG_IF
-    @ldr r1, [r0]
-    @strh r1, [r0]
+    @ change to SYS mode to save LR of init (r14_usr)
+    @ mrs r0, cpsr
+    @ msr cpsr, #0xDF @ SYS mode
+    @ nop
+    @ stmdb sp!, {lr} @ save LR used by init to stack
 
-    ldr r0, =gba_intr_handler
-    orr r0, r0, #1
-    mov lr, pc
-    bx r0
+    @ call C function in kernel
+    bl gba_do_schedule
 
-    ldmfd sp!, {r0-r3, lr}
+    @ restore LR of init
+    ldmia sp!, {lr}
+
+    @ return to IRQ mode
+    @ msr cpsr_c, #0xD2 @ IRQ mode
+    @ nop
+
+    @ restore general register and PC, then return
+    @ldmia sp!, {r0-r3, r12, pc}^
+    
+
+
+.section .iwram_text,"ax" @ put in .fast_text area
+.align 4
+.arm
+.global gba_intr_handler
+gba_intr_handler:
+    ldr r0, =0x04000000
+    ldr r1, =0x001F
+    strh r1, [r0, #0x6D]
+
+    @ (二重)割り込み禁止
+    ldr r1, =0x04000208 @ REG_IME
+    mov r2, #0
+    strh r2, [r1]
+
+    @ (B) GBA割り込みフラグクリア
+    @ldr r1, =0x04000202 @ REG_IF
+    @ldrh r2, [r1]
+    @strh r2, [r1]
+ 
+    @ save registers (full)
+    push {r0-r3, r4-r11, r12, lr}
+
+    @ change to SYS mode
+    mrs r0, cpsr
+    bic r0, r0, #0x1F
+    orr r0, r0, #0x1F @ SYS
+    msr cpsr_c, r0
+    nop
+
+    @ call prep
+.global gba_do_schedule
+    @ldr r0, =gba_do_schedule
+    bl gba_do_schedule
+
+    @ return to IRQ mode
+    mrs r0, cpsr
+    bic r0, r0, #0x1F
+    orr r0, r0, #0x12 @ IRQ
+    msr cpsr_c, r0
+    nop
+
+    pop {r0-r3, r4-r11, r12, lr}
+
+    @ 割り込み許可
+    ldr r1, =0x04000208 @ REG_IME
+    mov r2, #1
+    strh r2, [r1]
+
+    bx lr @ BIOS経由で帰還
+
+#if 0
+.align 4
+.arm
+.global gba_irq_sched_stub
+.extern lwp_current
+.extern gba_sched_pick
+
+gba_irq_sched_stub:
+    @ 1. IRQ Mode: save IRQ context
+    push {r0-r3, r12, lr}
+    mrs r0, spsr
+    push {r0}
+
+    @ 2. SYS Mode: save to process stack
+    msr cpsr_c, #0xDF
+    nop
+    push {r4-r11, lr} @ push callee-saved to process stack
+    
+    @ 3. save to u.u_rsav (label_t)
+    ldr r0, =u
+    @ save current SP to index 9 (offset 36) of label_t
+    str sp, [r0, #36] @ u.u_rsav.val[9] = sp
+
+    @ 4. execute scheduler
+    @bl gba_sched_pick @ to next process (u and curproc updated)
+
+    @ 5. restore next process
+    ldr r0, =u
+    ldr sp, [r0, #36] @ restore SP of new process
+
+    pop {r4-r11, lr} @ restore resisters
+
+    @ 6. return via IRQ
+    msr cpsr_c, #0xD2
+    nop
+    pop {r0}
+    msr spsr_cxsf, r0
+    nop
+    pop {r0-r3, r12, lr}
     bx lr
+#endif
 
-.ltorg @ put out data for stub
+.align 2
+.arm
+.global savectx
+savectx:
+    @ r0 is label_t *env (usualy &u.u_rsav)
+    @ val[0..7]: r4-11
+    @ val[8]   : lr
+    @ val[9]   : sp
+    stmia r0!, {r4-r11, lr} @ save r4-r11, lr (9 regs)
+    str sp, [r0] @ save sp as 10th reg
 
+    mov r0, #0 @ return value 0
+    bx lr @ return to callee (Thumb/ARM auto detect)
+
+.ltorg @ put out data for handler
     @ end

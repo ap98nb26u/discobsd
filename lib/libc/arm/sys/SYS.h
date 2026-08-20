@@ -16,6 +16,12 @@
 
 #include <syscall.h>
 
+#ifdef MACHINE_GBA
+#include <machine/machparam.h>
+#endif
+
+#ifndef MACHINE_GBA
+
 #define	ENTRY(x) \
 	.text; \
 	.align	2; \
@@ -38,3 +44,38 @@ x:
 	mvn	r0, r0; \
 	bx	lr; \
 	END(x)
+
+#else /* GBA */
+
+#define	ENTRY(x) \
+	.text; \
+	.align	2; \
+	.globl	x; \
+	.type	x, %function; \
+	.arm; \
+x:
+
+#define	END(x) \
+	.pool; \
+	.thumb; \
+	.size	x, . - x
+
+#define CALL_SIMSYS(sys_no) \
+	ldr	r12, =SYSCALL_VECTOR_ADDR; \
+	ldr	r12, [r12]; \
+	mov	lr, pc; \
+	bx	r12; \
+	.word	sys_no
+
+#define SYS(x) \
+	ENTRY(x); \
+	CALL_SIMSYS(SYS_##x); \
+	bcc	2f; \
+	ldr	r1, =errno; \
+        str	r0, [r1]; \
+        mov	r0, #0; \
+        mvn	r0, r0; \
+2:	bx	lr; \
+	END(x)
+
+#endif

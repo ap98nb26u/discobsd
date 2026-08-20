@@ -1,4 +1,5 @@
 #
 # List of block devices and majors
 #
-sd      0
+#sd      0
+mr      3	# mrams - MRAM at FLASH or EWRAM
