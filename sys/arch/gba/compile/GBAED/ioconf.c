@@ -5,11 +5,13 @@
 
 extern struct driver uartdriver;
 extern struct driver uartdriver;
+extern struct driver eddriver;
 extern struct driver sdiodriver;
 extern struct driver sddriver;
 
 struct conf_ctlr conf_ctlr_init[] = {
 	/* driver,	unit,	addr,		pri,	flags,	alive */
+	{ &eddriver,	0,	C 0x00000000,	-1,	0x0,	0 },
 	{ &sdiodriver,	0,	C 0x00000000,	-1,	0x0,	0 },
 	{ 0 }
 };

@@ -36,6 +36,9 @@ options         "UART_BAUD=115200"          # default speed
 options         "CONS_MAJOR=UART_MAJOR"     # UART device
 options         "CONS_MINOR=0"              # uart1 is /dev/tty0
 
+# EverDrive GBA X5 expansion unit (SD, RTC, ... hang off this)
+controller      ed0                         # EverDrive cartridge registers
+
 # SDIO port
 controller      sdio0                       # SDIO port
 options         "SDIO_XFER_CLK_DIV=2"       # APB2 84MHz / (DIV + 2) < 25MHz
