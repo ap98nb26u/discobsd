@@ -7,11 +7,22 @@
 #include <sys/config.h>
 
 #include <gba/dev/mgbalog.h>
+#include <gba/dev/gba_text.h>
 
 void uartinit(int);
 
 void uartinit(int unit) {
     *(volatile unsigned short*)0x04FFF780 = 0xC0DE; // mGBA Enable
+
+    /*
+     * mGBA's debug log is emulator-only; real hardware has nowhere
+     * else to show console output until real UART is wired up, so
+     * mirror the console unit's output to the on-screen text console
+     * too. Only the console unit gets a screen -- uartinit() is also
+     * called once for the non-console UART during device attach.
+     */
+    if (unit == CONS_MINOR)
+        gtxt_init(0xFFFF, 0x0000); // white on black
 }
     
 static int
@@ -50,6 +61,8 @@ char uartgetc(dev_t dev) {
 }
 
 void uartputc(dev_t dev, char c) {
+    gtxt_putc(c);
+
     MGBA_REG_DEBUG_ENABLE = 0xC0DE; // mGBA Enable
 #if 1 // buffering
     static int i = 0;
