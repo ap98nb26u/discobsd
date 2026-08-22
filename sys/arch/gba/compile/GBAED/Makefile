@@ -12,7 +12,7 @@ PARAM += -DUART_BAUD=115200
 PARAM += -DHALTREBOOT
 PARAM += -DBUS_KHZ=16777
 PARAM += -DCPU_KHZ=16777
-LDSCRIPT = "GBA.ld"
+LDSCRIPT = "kern.ldscript"
 DEBUG = -g
 #
 # Makefile for DiscoBSD/gba
@@ -36,18 +36,19 @@ DEPFLAGS=	-MT $@ -MP -MD -MF .deps/$*.dep
 DEFS=		${INCLUDES} ${PARAM} -DKERNEL ${DEPFLAGS}
 CWARNFLAGS=	-Wall
 
-CMACHCPU=	-mcpu=arm7tdmi
-CMACHFLAGS=	-ffreestanding -fno-builtin -fcommon
-CMACHFLAGS+=	-mfloat-abi=soft
-CMACHFLAGS+=	-mthumb -mthumb-interwork -mabi=aapcs -mlittle-endian
+CMACHCPU=	-mcpu=arm7tdmi -march=armv4t -little-endian -mfloat-abi=soft
+CMACHFLAGS=	-mthumb -mabi=aapcs -mthumb-interwork
+CMACHFLAGS+=	-ffreestanding -fno-builtin -fcommon
 CMACHFLAGS+=	${CMACHCPU}
 
-COPTS?=		-O
+COPTS?=		#-O
 CFLAGS=		${DEBUG} ${CWARNFLAGS} ${CMACHFLAGS} ${COPTS}
 AFLAGS=		-x assembler-with-cpp ${CWARNFLAGS} ${CMACHFLAGS}
-LDFLAGS=	-T ${_confdir}/${LDSCRIPT} -T ${_confdir}/kern.ldscript
+LDFLAGS=	-T ${_confdir}/${LDSCRIPT}
 LDFLAGS+=	-nostdlib -Map=$@.map -z noexecstack
+LDFLAGS+=	-static -marmelf
 LDADD=		-L/usr/lib/gcc/arm-none-eabi/12.2.1/thumb/nofp -lgcc
+FIXBIN=		/mnt/c/msys64/usr/local/bin/gbafix.exe
 
 # compile rules: rules are named COMPILE_${SUFFIX}
 # SUFFIX is the file suffix, capitalized (e.g. C for a .c file).
@@ -66,7 +67,8 @@ OBJS = exec_aout.o exec_conf.o exec_elf.o exec_script.o exec_subr.o \
 	ufs_namei.o ufs_subr.o ufs_syscalls.o ufs_syscalls2.o \
 	vfs_vnops.o vm_sched.o vm_swap.o vm_swp.o cons.o mem.o swap.o \
 	clock.o conf.o fault.o machdep.o mpu.o sig_machdep.o syscall.o \
-	sysctl.o systick.o sd.o sdio.o sdio_card.o mgba_uart.o 
+	sysctl.o systick.o sched_test.o sd.o sdio.o sdio_card.o \
+	mgba_uart.o 
 
 CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/kern/exec_script.c $S/kern/exec_subr.c $S/kern/init_main.c \
@@ -89,16 +91,18 @@ CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/arch/gba/gba/fault.c $S/arch/gba/gba/machdep.c \
 	$S/arch/gba/gba/mpu.c $S/arch/gba/gba/sig_machdep.c \
 	$S/arch/gba/gba/syscall.c $S/arch/gba/gba/sysctl.c \
-	$S/arch/gba/gba/systick.c $S/arch/gba/dev/sd.c \
-	$S/arch/gba/dev/sdio.c $S/arch/gba/dev/sdio_card.c \
-	$S/arch/gba/dev/mgba_uart.c swapunix.c 
+	$S/arch/gba/gba/systick.c $S/arch/gba/gba/sched_test.c \
+	$S/arch/gba/dev/sd.c $S/arch/gba/dev/sdio.c \
+	$S/arch/gba/dev/sdio_card.c $S/arch/gba/dev/mgba_uart.c \
+	swapunix.c 
 
 # load lines for config "xxx" will be emitted as:
 # xxx: ${SYSTEM_DEP} swapxxx.o
 #	${SYSTEM_LD_HEAD}
 #	${SYSTEM_LD} swapxxx.o
 #	${SYSTEM_LD_TAIL}
-SYSTEM_OBJ=	locore0.o locore.o ${OBJS} ioconf.o
+SYSTEM_OBJ=	locore0.o locore.o switch.o ${OBJS} ioconf.o
+SYSTEM_OBJ+=	sdcard.o
 SYSTEM_DEP=	Makefile ioconf.c machine sys .deps ${SYSTEM_OBJ}
 SYSTEM_LD_HEAD=	sh $S/conf/newvers.sh > vers.c; ${CC} ${CFLAGS} -c vers.c; rm -f $@
 SYSTEM_LD=	-@echo ${LD} ${LDFLAGS} '$${SYSTEM_OBJ}' vers.o -o $@ ${LDADD}; \
@@ -106,6 +110,7 @@ SYSTEM_LD=	-@echo ${LD} ${LDFLAGS} '$${SYSTEM_OBJ}' vers.o -o $@ ${LDADD}; \
 SYSTEM_LD_TAIL=	${SIZE} $@; cp $@ $@.elf; \
 		${OBJCOPY} -O ihex $@ $@.hex; \
 		${OBJCOPY} -O binary $@ $@.bin; \
+		${FIXBIN} $@.bin; \
 		${OBJDUMP} -d -S $@ > $@.dis
 
 unix: ${SYSTEM_DEP} swapunix.o
@@ -119,7 +124,7 @@ swapunix.o: swapunix.c
 all: unix
 
 clean:
-	rm -rf .deps unix *.elf *.o *.map *.dis *.bin *.hex machine sys
+	rm -rf .deps unix *.elf *.o *.map *.dis *.bin *.sav *.hex machine sys
 
 clean-all: clean
 	rm -f *.h ioconf.c swap*.c vers.c
@@ -143,8 +148,17 @@ locore.o: ${_machdir}/${_mach}/locore.S
 locore0.o: ${_machdir}/${_mach}/locore0.S
 	${COMPILE_S}
 
+switch.o: ${_machdir}/${_mach}/switch.S
+	${COMPILE_S}
+
 ioconf.o: ioconf.c
 	${COMPILE_C}
+
+SDCARD_IMG=	${_machdir}/dev/sdcard.img
+sdcard.o: ${SDCARD_IMG}
+	${OBJCOPY} -I binary -O elf32-littlearm -B ${_arch} \
+	--rename-section .data=.fs_image \
+	$< $@
 
 exec_aout.o: $S/kern/exec_aout.c
 	${COMPILE_C}
@@ -324,6 +338,9 @@ sysctl.o: $S/arch/gba/gba/sysctl.c
 	${COMPILE_C}
 
 systick.o: $S/arch/gba/gba/systick.c
+	${COMPILE_C}
+
+sched_test.o: $S/arch/gba/gba/sched_test.c
 	${COMPILE_C}
 
 sd.o: $S/arch/gba/dev/sd.c
