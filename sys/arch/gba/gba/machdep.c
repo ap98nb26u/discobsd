@@ -363,9 +363,9 @@ idle(void)
 void
 cpu_reboot(void)
 {
-	extern size_t _start;
+	extern char _start;
 	typedef void (*reset_func)(void);
-	reset_func reboot=(reset_func)_start;
+	reset_func reboot = (reset_func)&_start;
 	reboot();
 }
 
