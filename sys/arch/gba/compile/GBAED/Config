@@ -23,9 +23,13 @@ options         "HALTREBOOT"                # If halted, press key to reboot
 #options         "GLOBAL_DEBUG"              # Enable debugging
 #options         "DIAGNOSTIC"                # Enable diagnostics
 
-# Root filesystem at /dev/sd0a, swap at /dev/sd0b
-config          unix    root on sd0a
-                        swap on sd0b
+# sd0a is the 1st MBR partition, which on real hardware is the
+# EverDrive's own FAT32 boot/menu partition, not DiscoBSD's -- see
+# sd.c's sd_setup(). DiscoBSD's own partitions come after it:
+# root filesystem at /dev/sd0b (2nd MBR partition), swap at /dev/sd0c
+# (3rd MBR partition).
+config          unix    root on sd0b
+                        swap on sd0c
 
 # Serial UART ports
 device          uart1                       # USART1 as console
