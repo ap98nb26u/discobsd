@@ -80,10 +80,11 @@ arch/gba/gba/sched_test.c		standard
 arch/gba/dev/mrams.c			optional mr
 arch/gba/dev/ed.c			optional ed
 arch/gba/dev/sd.c			optional sd
-arch/gba/dev/sdio.c			optional sdio
-arch/gba/dev/sdio_card.c		optional sd
+#arch/gba/dev/sdio.c			optional sdio
+#arch/gba/dev/sdio_card.c		optional sd
 #arch/gba/dev/spi.c			optional spi
 #arch/gba/dev/uart.c			optional uart
 arch/gba/dev/mgba_uart.c		optional uart
 arch/gba/dev/gba_text.c		optional uart
 arch/gba/dev/gba_font.c		optional uart
+arch/gba/dev/gba_sio_uart.c		optional uart
