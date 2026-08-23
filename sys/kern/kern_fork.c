@@ -160,7 +160,9 @@ again:
     parent->p_stat = SIDL;
     child->p_addr = parent->p_addr;
     child->p_stat = SRUN;
+    printf("DBG: newproc before swapout\n");
     swapout (child, X_DONTFREE, X_OLDSIZE, X_OLDSIZE);
+    printf("DBG: newproc after swapout\n");
     child->p_flag |= SSWAP;
     parent->p_stat = SRUN;
     u.u_procp = parent;
