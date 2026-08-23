@@ -8,6 +8,7 @@
 
 #include <gba/dev/mgbalog.h>
 #include <gba/dev/gba_text.h>
+#include <gba/dev/gba_sio_uart.h>
 
 void uartinit(int);
 
@@ -15,14 +16,17 @@ void uartinit(int unit) {
     *(volatile unsigned short*)0x04FFF780 = 0xC0DE; // mGBA Enable
 
     /*
-     * mGBA's debug log is emulator-only; real hardware has nowhere
-     * else to show console output until real UART is wired up, so
-     * mirror the console unit's output to the on-screen text console
-     * too. Only the console unit gets a screen -- uartinit() is also
-     * called once for the non-console UART during device attach.
+     * mGBA's debug log is emulator-only, and the on-screen text
+     * console is slow to work with over a rebuild/photo cycle; mirror
+     * the console unit's output to real hardware UART too (and read
+     * console input from it), for interactive debugging over a serial
+     * cable. Only the console unit gets set up here -- uartinit() is
+     * also called once for the non-console UART during device attach.
      */
-    if (unit == CONS_MINOR)
+    if (unit == CONS_MINOR) {
         gtxt_init(0xFFFF, 0x0000); // white on black
+        gsio_init(UART_BAUD);
+    }
 }
     
 static int
@@ -57,11 +61,12 @@ int uartselect(dev_t dev, int rw) { return 0; }
 
 /* r_read / r_write に相当する関数名 (conf.cの定義に合わせる) */
 char uartgetc(dev_t dev) {
-    return 0;
+    return (char)gsio_getc();
 }
 
 void uartputc(dev_t dev, char c) {
     gtxt_putc(c);
+    gsio_putc((unsigned char)c);
 
     MGBA_REG_DEBUG_ENABLE = 0xC0DE; // mGBA Enable
 #if 1 // buffering
