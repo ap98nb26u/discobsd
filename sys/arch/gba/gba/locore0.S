@@ -87,22 +87,19 @@ bss_loop:
 @.global gba_init_context
     @bl gba_init_context
 .global main @Thumb
-    ldr r0, =main
-    @orr r0, r0, #1 @ Thumb mode
-    @ldr lr, =setup_user_mode_entry
-    bx r0 @ jump to main
+    bl main
+    @ main() only ever returns here for the newly-forked process 1
+    @ (process 0 loops forever in sched()). It has just bcopy'd icode
+    @ to __user_data_start; jump there to start running it.
+    .extern printf
+    ldr r0, =dbg_jump_icode_msg
+    bl printf
+    ldr r0, =__user_data_start
+    bx r0
 
+dbg_jump_icode_msg:
+    .asciz "DBG: locore0 about to jump to icode\n"
     .align 2
-    @.thumb
-@setup_user_mode_entry:
-    @bx pc @ Thumb to ARM
-    @nop
-    @.arm
-@setup_user_mode:
-    @ldr sp, =__user_data_end - 8 @ 0x02018000 - 8 = 0x02017FF8
-
-    @ldr r0, =0x02000000
-    @bx r0
 
 .ltorg @ put out data fo reteral pool
 

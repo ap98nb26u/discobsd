@@ -161,6 +161,7 @@ main(void)
 		/* No return from sched. */
 		sched();
 	}
+	printf("DBG: main() child path pid=%d\n", u.u_procp->p_pid);
 
 	/* Child process with pid 1: init. */
 	s = splhigh();
@@ -170,6 +171,8 @@ main(void)
 	p->p_ssize = 1024;			/* One kbyte of stack. */
 	p->p_saddr = (size_t)__user_data_end - 1024;
 	bcopy((caddr_t)icode, (caddr_t)__user_data_start, icodeend - icode);
+	printf("DBG: icode bcopy done, dst=%x size=%d\n",
+	    (unsigned)__user_data_start, icodeend - icode);
 
 	/* Start in single user mode, if asked. */
 	if (boothowto & RB_SINGLE) {
