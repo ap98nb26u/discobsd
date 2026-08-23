@@ -71,15 +71,21 @@ swapout (p, freecore, odata, ostack)
         odata = p->p_dsize;
     if (ostack == (u_int) X_OLDSIZE)
         ostack = p->p_ssize;
+    printf("DBG: before malloc3\n");
     if (malloc3 (swapmap, btod (p->p_dsize), btod (p->p_ssize),
         btod (USIZE), a) == NULL)
         panic ("out of swap space");
+    printf("DBG: after malloc3\n");
     p->p_flag |= SLOCK;
     if (odata) {
+        printf("DBG: before swap a[0] odata=%u\n", odata);
         swap (a[0], p->p_daddr, odata, B_WRITE);
+        printf("DBG: after swap a[0]\n");
     }
     if (ostack) {
+        printf("DBG: before swap a[1] ostack=%u\n", ostack);
         swap (a[1], p->p_saddr, ostack, B_WRITE);
+        printf("DBG: after swap a[1]\n");
     }
     /*
      * Increment u_ru.ru_nswap for process being tossed out of core.
@@ -98,7 +104,9 @@ swapout (p, freecore, odata, ostack)
         u.u_ru.ru_nswap++;
         splx (s);
     }
+    printf("DBG: before swap a[2] (uarea)\n");
     swap (a[2], p->p_addr, USIZE, B_WRITE);
+    printf("DBG: after swap a[2]\n");
     p->p_daddr = a[0];
     p->p_saddr = a[1];
     p->p_addr = a[2];
