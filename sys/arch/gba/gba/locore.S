@@ -93,8 +93,8 @@ resume:
 	adds	r0, r2, #0		/* Pointer to u. area start addr. */
 
 	.rept	USIZE / 3 / 4		/* 4 * 3 * 256 = 3072 = USIZE */
-	ldmia	r0!, {r2-r4}
-	ldmia	r1!, {r5-r7}
+	ldmia	r0, {r2-r4}		/* No '!': stmia's own writeback */
+	ldmia	r1, {r5-r7}		/*   advances r0/r1 by 12 each. */
 	stmia	r1!, {r2-r4}
 	stmia	r0!, {r5-r7}
 	.endr
@@ -104,7 +104,7 @@ resume:
 	ldr	r3, [r2, #0]		/* Pointer to u.u_procp structure. */
 	str	r2, [r3, #60]		/* Save &u in u.u_procp->p_addr. */
 2:
-	mov	a2, r10			/* Restore env (second arg). */
+	mov	a2, r12			/* Restore env (second arg). */
 	ldmia	a2!, {r4-r10,fp,ip,lr}	/* Restore regs from env arg. */
 	mov	sp, ip
 

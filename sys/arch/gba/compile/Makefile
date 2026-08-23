@@ -1,7 +1,7 @@
 #
 # Kernels live in subdirectories, and have Makefiles of their own.
 #
-SUBDIR=		GBAED
+SUBDIR=		GBA GBAED
 
 default:
 
