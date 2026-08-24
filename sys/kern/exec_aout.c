@@ -82,13 +82,7 @@ int exec_aout_check(struct exec_params *epp)
     /*
      * Set up memory allocation
      */
-#ifndef GBA
     epp->text.vaddr = epp->heap.vaddr = NO_ADDR;
-#else /* GBA */
-    /* To prevent runaway behavior in exec_estab(), explicitly set the 
-       initial value of text. */
-    epp->text.vaddr = epp->heap.vaddr = __user_data_start;
-#endif
     epp->text.len = epp->heap.len = 0;
 
     epp->data.vaddr = (caddr_t)__user_data_start;

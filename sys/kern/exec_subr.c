@@ -258,21 +258,12 @@ int exec_estab(struct exec_params *epp)
      * Right now we can only handle the simple original a.out
      * case, so we double check for that case here.
      */
-#if 1 //GBA
     if (epp->text.vaddr != NO_ADDR || epp->data.vaddr == NO_ADDR ||
       epp->data.vaddr != (caddr_t)__user_data_start ||
       epp->stack.vaddr != (caddr_t)__user_data_end - epp->stack.len) {
         DEBUG("\texec_estab(): error: not an a.out executable\n");
         return ENOMEM;
     }
-#else /* 0 GBA */
-    if (epp->data.vaddr == NO_ADDR ||
-      epp->data.vaddr != (caddr_t)__user_data_start ||
-      epp->stack.vaddr != (caddr_t)__user_data_end - epp->stack.len) {
-        DEBUG("\texec_estab(): error: not an a.out executable\n");
-        return ENOMEM;
-    }
-#endif
 
     /*
      * Try out for overflow
