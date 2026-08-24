@@ -37,6 +37,11 @@ void my_custom_swi_handler(uint32_t swi_number, uint32_t *regs) {
     }
 }
 
+static void debug_print_return_target(unsigned v)
+{
+    printf("DBG: syscall return, jumping to %x\n", v);
+}
+
 __attribute__((target("arm"), noinline))
 void simulate_swi_via_inline_data(void) {
     __asm__ volatile (
@@ -100,11 +105,21 @@ void simulate_swi_via_inline_data(void) {
         /* -------------------------------------------------------------
          6. レジスタと復帰先アドレスの復元
          ------------------------------------------------------------- */
-        // bl syscall_handler 自体がlrを上書きするため、修正済みの復帰先アドレスは
-        // (呼び出し前にstrで書き戻しておいたスタックから)ここで改めて読み直す。
-        "ldmia sp!, {r0-r12}\n\t"     // R0〜R12を復元
-        "ldmia sp!, {lr}\n\t"         // 修正済みの復帰先アドレスをlrへ復元
-        "add sp, sp, #8\n\t"          // tf_pc/tf_psr分を破棄
+        // bl syscall_handler 自体がlrを上書きするため、復帰先アドレスはスタックから
+        // 読み直す。ここで必ずtf_pc(offset56)から読むこと - tf_lr(offset52)は
+        // 呼び出し前にこちらが計算した「icode内の次の命令」のスナップショットの
+        // ままだが、execve()成功時はexec_subr.c内のexec_setupstack()が
+        // u.u_frame->tf_pcを新しいエントリポイントへ書き換える(syscall_handler
+        // 末尾で frame->tf_pc |= 1 によりThumbビットも設定済み)。tf_lrから読むと
+        // execveが成功してもicode自身に戻ってしまい、新しいプロセスへ絶対に
+        // 遷移できない。
+        "ldr r0, [sp, #56]\n\t"       // デバッグ用: sp/r0-r12はまだ壊さずtf_pcを覗く
+        "bl debug_print_return_target\n\t"
+
+        "ldmia sp!, {r0-r12}\n\t"     // R0〜R12を復元 (52バイト、sp+52=tf_lr位置)
+        "add sp, sp, #4\n\t"          // tf_lrをスキップ (sp+56=tf_pc位置)
+        "ldmia sp!, {lr}\n\t"         // tf_pc(更新されている場合あり)をlrへ復元
+        "add sp, sp, #4\n\t"          // tf_psr分を破棄
 
         "mov r1, #0x04000000\n\t"
         "add r1, #0x200\n\t"
