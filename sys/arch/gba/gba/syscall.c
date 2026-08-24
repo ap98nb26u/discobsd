@@ -41,7 +41,25 @@ __attribute__((target("arm"), noinline))
 void simulate_swi_via_inline_data(void) {
     __asm__ volatile (
         /* -------------------------------------------------------------
-         1. 割り込みを最速で禁止 (REG_IME = 0)
+         1. struct trapframe一杯分(16ワード=64バイト)を確保し、
+            r0〜r12、および呼び出し元の戻り先LRを先頭14ワードへ退避
+         ------------------------------------------------------------- */
+        // struct trapframeはtf_r0..tf_r11(12)+tf_ip(=r12)+tf_lr+tf_pc+tf_psrの
+        // 16ワード。ここで14ワード分しか確保しないと、後段のsyscall_handler()が
+        // 読み書きするtf_pc/tf_psr(offset56/60)が未確保領域になる。今回のように
+        // frameがスタック上端付近(IWRAM終端0x03008000近く)にあるとIWRAMの物理範囲
+        // を超えて書き込むことになり、実機とmGBAで挙動が分かれてハングしていた。
+        //
+        // レジスタ退避は他の何よりも先に行う。以前はこの前にREG_IME無効化の
+        // コードがあり、そこでr1/r2を汎用レジスタとして使っていたため、
+        // icode側がr1に積んだ第2引数(execvのargvポインタ等)がここで退避される
+        // 前に0x04000200(REG_IME計算途中の値)へ上書きされてしまっていた。
+        // fnameが正しくargpだけ壊れていたのはr0を触らずr1/r2だけ使っていたため。
+        "sub sp, sp, #64\n\t"
+        "stmia sp, {r0-r12, lr}\n\t"  // sp+0..sp+53 (14ワード、書き戻しなし)
+
+        /* -------------------------------------------------------------
+         2. 割り込みを禁止 (REG_IME = 0)
          ------------------------------------------------------------- */
         "mov r1, #0x04000000\n\t"
         "add r1, #0x200\n\t"
@@ -49,16 +67,11 @@ void simulate_swi_via_inline_data(void) {
         "strh r2, [r1, #0x08]\n\t"    // REG_IME (0x04000208) に 0 を書き込み (16bit)
 
         /* -------------------------------------------------------------
-         2. 汎用レジスタをスタックに退避
-         ------------------------------------------------------------- */
-        "stmdb sp!, {r0-r12}\n\t"     // R0〜R12、および呼び出し元の戻り先LRを退避
-        
-        /* -------------------------------------------------------------
          3. 呼び出し元の状態（CPSR）を取得し、戻り先（LR_svc）を計算
          ------------------------------------------------------------- */
         "mrs r0, cpsr\n\t"            // 現在のCPSR（呼び出し元のモード情報含む）を取得
         "ldr r1, [sp, #52]\n\t"       // スタックから退避したLRを取得
-        
+
         /* -------------------------------------------------------------
          4. 呼び出し元の命令状態（ARM/Thumb）を判定してSWI番号を取得
          ------------------------------------------------------------- */
@@ -67,50 +80,39 @@ void simulate_swi_via_inline_data(void) {
         "addne r1, r1, #2\n\t"        // 【Thumb】復帰先を2バイト進める
         "ldreq r2, [r1]\n\t"          // 【ARM】4バイトとしてSWI番号を読み込む
         "addeq r1, r1, #4\n\t"        // 【ARM】復帰先を4バイト進める
-        
+
         "str r1, [sp, #52]\n\t"       // 修正済みの復帰先アドレスをスタックに書き戻す
-        
+        "str r1, [sp, #56]\n\t"       // tf_pc = 修正済みの復帰先アドレス
+        "str r0, [sp, #60]\n\t"       // tf_psr = 呼び出し元のCPSR
+
         /* -------------------------------------------------------------
-         5. SVC（スーパーバイザ）モードへ強制移行
+         5. C言語のハンドラ関数を呼び出し
          ------------------------------------------------------------- */
-        // ※ここではCPSRのIビット(割り込み禁止)も念のためセットしておきますが、
-        // すでにREG_IMEが0なので、CPU全体で割り込みは完全に遮断されています。
-        "msr cpsr_c, #0x93\n\t"       // SVCモード(0x13)へ移行 ＆ CPU側でもIRQ禁止
-        
-        /* -------------------------------------------------------------
-         6. SVCモードのレジスタ（SPSR_svc, LR_svc）を設定
-         ------------------------------------------------------------- */
-        "msr spsr, r0\n\t"            // 元のCPSRをSPSRにセット
-        "mov lr, r1\n\t"              // 修正済みの復帰先アドレスをLR_svcにセット
-        
-        /* -------------------------------------------------------------
-         7. C言語のハンドラ関数を呼び出し
-         ------------------------------------------------------------- */
+        // GBA移植では特権分離(SVCモード)を実装していない(USERMODE()は常に0)ため、
+        // ここでモードを切り替えると sp/lr がバンクされた別レジスタに切り替わり、
+        // 直後の「mov r1, sp」が今積んだr0-r12ではなく未初期化のsp_svc(BIOS既定値、
+        // IWRAM上のu/u0領域のすぐ近く)を指してしまい、フレームポインタが完全に
+        // 壊れる。呼び出し元と同じモード(SYS)のまま進める。
         "mov r0, r2\n\t"              // 第1引数: SWI番号
         "mov r1, sp\n\t"              // 第2引数: 退避されたレジスタ配列へのポインタ
-        //"bl my_custom_swi_handler\n\t"
         "bl syscall_handler\n\t"
-        
+
         /* -------------------------------------------------------------
-         8. レジスタの復元と「MOVS PC, LR」による復帰
+         6. レジスタと復帰先アドレスの復元
          ------------------------------------------------------------- */
-        // 最後に「movs pc, lr」が実行されると、SPSRがCPSRに書き戻されます。
-        // 元のCPSR（割り込みが許可されていた状態）に戻ることで、自動的にCPU側の
-        // 割り込みが許可されます。
+        // bl syscall_handler 自体がlrを上書きするため、修正済みの復帰先アドレスは
+        // (呼び出し前にstrで書き戻しておいたスタックから)ここで改めて読み直す。
         "ldmia sp!, {r0-r12}\n\t"     // R0〜R12を復元
-        "add sp, sp, #4\n\t"          // スタックのLR領域をスキップ
-        
-        // 【注意点への対策】
-        // この時点でCPUのCPSRはまだSVCモード（IRQ禁止）ですが、REG_IMEを有効に戻す
-        // 必要があります。
-        // 元々割り込みが許可されていた環境に戻すため、一足先にREG_IMEを1（有効）に
-        // 戻します。
+        "ldmia sp!, {lr}\n\t"         // 修正済みの復帰先アドレスをlrへ復元
+        "add sp, sp, #8\n\t"          // tf_pc/tf_psr分を破棄
+
         "mov r1, #0x04000000\n\t"
         "add r1, #0x200\n\t"
         "mov r2, #1\n\t"
         "strh r2, [r1, #0x08]\n\t"   // REG_IME = 1 (割り込みマスタ許可)
-        
-        "movs pc, lr\n\t"             // 元のモード・状態・割り込み許可状態へ完全復帰
+
+        "bx lr\n\t"                   // 呼び出し元へ復帰（モードは変えていないので
+                                       // movs不要。interworkingのためbxを使用）
     );
 }
 
@@ -240,12 +242,16 @@ syscall_handler(int sys_num, struct trapframe *frame)
 
 	//volatile struct trapframe *f = frame;
 
+	printf("DBG: syscall_handler entry, sys_num=%d frame=%x\n",
+	    sys_num, (unsigned)frame);
+
 	syst = u.u_ru.ru_stime;
 
-	//if ((u_int)frame < (u_int)&u + sizeof(u)) {
-	//	panic("stack overflow");
-	//	/* NOTREACHED */
-	//}
+	if ((u_int)frame < (u_int)&u + sizeof(u)) {
+		panic("stack overflow");
+		/* NOTREACHED */
+	}
+	printf("DBG: past overflow check\n");
 
 #ifdef UCB_METER
 	cnt.v_trap++;
@@ -275,8 +281,10 @@ syscall_handler(int sys_num, struct trapframe *frame)
 		u.u_procp->p_saddr = sp;
 		u.u_ssize = u.u_procp->p_ssize;
 	}
+	printf("DBG: past stack check, sp=%x\n", sp);
 
-	code = frame->tf_r7; // icode側でmov r7, #11としている
+	code = sys_num; /* Syscall number decoded from the inline .word by
+			 * simulate_swi_via_inline_data(), not from a register. */
 
 	//const struct sysent *callp = &sysent[0];
 	const struct sysent *callp;
@@ -310,7 +318,11 @@ syscall_handler(int sys_num, struct trapframe *frame)
 
 	u.u_rval = 0;
 
+	printf("DBG: before setjmp qsave, callp=%x sy_call=%x\n",
+	    (unsigned)callp, (unsigned)callp->sy_call);
+
 	if (setjmp(&u.u_qsave) == 0) {
+		printf("DBG: setjmp qsave=0, calling sy_call\n");
 		(*callp->sy_call)();		/* Make syscall. */
 
 		/*

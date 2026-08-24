@@ -99,6 +99,7 @@ execv()
 {
     struct execa *arg = (struct execa *)u.u_arg;
 
+    printf("DBG: execv() entry\n");
     arg->envp = NULL;
     execve();
 }
@@ -114,6 +115,9 @@ execve()
     struct exec_params eparam;
 
     DEBUG("\n\texecve(): start\n");
+    printf("DBG: uap=%x fname=%x argp=%x argp[0]=%x argp[1]=%x\n",
+      (unsigned)uap, (unsigned)uap->fname, (unsigned)uap->argp,
+      (unsigned)uap->argp[0], (unsigned)uap->argp[1]);
     DEBUG("\texecve(): args: '%s', ['%s', '%s', ...]\n",
       uap->fname, uap->argp[0], uap->argp[1]);
     NDINIT (ndp, LOOKUP, FOLLOW, uap->fname);

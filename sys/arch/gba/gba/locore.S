@@ -14,7 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#define UBASE 0x03005c00 //0x20000000	/* User space base address. */
+#define UBASE __user_data_start	/* User space base addr (see kern.ldscript). */
 #define USIZE 3072		/* From user.h */
 
 	.syntax	unified
@@ -138,13 +138,26 @@ icode1:
 	adds	r0, r2			/* execv() *name argument. */
 	adds	r1, r2			/* execv() *argv[] argument. */
 
+	/*
+	 * icode never uses a stack, so r12 is whatever garbage the last
+	 * function call (locore0.S's debug printf) happened to leave
+	 * behind - unspecified per AAPCS, and observed to differ between
+	 * builds/platforms. syscall_handler() reads r12 back as tf_sp
+	 * (the process's stack pointer) for its stack bounds check, so
+	 * give it the same deterministic value init_main.c already uses
+	 * for p_saddr instead of leaving it undefined.
+	 */
+	ldr	r12, =(__user_data_end - 1024)
+
 	.globl	simulate_swi_via_inline_data
 	@svc     #11			/* Make SYS_execv syscall. */
 	ldr	r3, =simulate_swi_via_inline_data
-	bx	r3
+	mov	lr, pc			/* lr = addr of the .word below, */
+	bx	r3			/*   matching CALL_SIMSYS's convention. */
 	.word	11
 	@svc     #1			/* Make SYS_exit syscall. */
 	ldr	r3, =simulate_swi_via_inline_data
+	mov	lr, pc
 	bx	r3
 	.word	1
 
