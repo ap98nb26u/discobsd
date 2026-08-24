@@ -15,7 +15,10 @@ SECTIONS
 {
   /* Read-only sections, merged into text segment: */
 /* XXX PROVIDE (__executable_start = SEGMENT_START("text-segment", 0x8000)); . = SEGMENT_START("text-segment", 0x8000); */
-  PROVIDE (__executable_start = 0x02000000); . = 0x02000000;
+  /* Must match __user_data_start (ORIGIN(USERRAM)) in
+     sys/arch/gba/conf/kern.ldscript - the kernel always loads a.out
+     images at that address, not at the start of EWRAM. */
+  PROVIDE (__executable_start = 0x02027000); . = 0x02027000;
   .interp         : { *(.interp) }
   .note.gnu.build-id : { *(.note.gnu.build-id) }
   .hash           : { *(.hash) }

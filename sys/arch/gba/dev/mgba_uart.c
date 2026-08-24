@@ -4,6 +4,7 @@
 #include <sys/ioctl.h>
 #include <sys/tty.h>
 #include <sys/systm.h>
+#include <sys/uio.h>
 #include <sys/config.h>
 
 #include <gba/dev/mgbalog.h>
@@ -11,6 +12,7 @@
 #include <gba/dev/gba_sio_uart.h>
 
 void uartinit(int);
+void uartputc(dev_t dev, char c);
 
 void uartinit(int unit) {
     *(volatile unsigned short*)0x04FFF780 = 0xC0DE; // mGBA Enable
@@ -55,7 +57,31 @@ uartprobe(struct conf_device *config) {
 int uartopen(dev_t dev, int flag, int mode) { return 0; }
 int uartclose(dev_t dev, int flag, int mode) { return 0; }
 int uartread(dev_t dev, struct uio *uio, int flag) { return 0; }
-int uartwrite(dev_t dev, struct uio *uio, int flag) { return 0; }
+int uartwrite(dev_t dev, struct uio *uio, int flag)
+{
+    /*
+     * No tty line discipline is wired up yet (uartopen()/uartioctl()
+     * are still stubs), so this can't go through ttwrite()/ttstart()
+     * like the other ports do. Just push bytes straight out through
+     * uartputc() - the same raw path the kernel's own printf() uses -
+     * so userland write(2) to the console is actually visible instead
+     * of silently discarded (as it always was up to this point).
+     */
+    char buf[16];
+    int n, i, error;
+
+    while (uio->uio_resid > 0) {
+        n = uio->uio_resid;
+        if (n > sizeof(buf))
+            n = sizeof(buf);
+        error = uiomove(buf, n, uio);
+        if (error)
+            return error;
+        for (i = 0; i < n; i++)
+            uartputc(dev, buf[i]);
+    }
+    return 0;
+}
 int uartioctl(dev_t dev, u_int cmd, caddr_t addr, int flag) { return -1; }
 int uartselect(dev_t dev, int rw) { return 0; }
 
