@@ -38,10 +38,17 @@ reset:
     ldr sp, =0x0203FFF8 @ do not use last 8 bytes
 
     @ register user intr handler
+    @ c_gba_intr_handler is a plain compiled C function - the BIOS
+    @ trampoline (add lr,pc,#0 / ldr pc,[r0,#-4]) does not save any
+    @ registers before jumping here, so calling a normal C function
+    @ directly clobbers r0-r3/r12 of whatever code was interrupted
+    @ (harmless while the kernel carefully keeps IME=0 through its own
+    @ register-juggling, but corrupts any real userland code the
+    @ instant IME=1). gba_intr_handler below saves/restores r0-r12,lr
+    @ around the same work (via gba_do_schedule) and is safe to call
+    @ from arbitrary interrupted context.
     ldr r0, =0x03007FFC
-    ldr r1, =c_gba_intr_handler @ ok
-    @ldr r1, =gba_intr_handler_mini
-    @ldr r1, =gba_intr_handler
+    ldr r1, =gba_intr_handler
     str r1, [r0]
 
     @ copy .fast_text from ROM to IWRAM
@@ -165,10 +172,22 @@ gba_intr_handler:
     msr cpsr_c, r0
     nop
 
+    @ SYS and USR modes share sp/lr (unlike IRQ, which is banked), so
+    @ this lr is the *interrupted* code's own live lr - e.g. a kernel
+    @ syscall trampoline mid-return with the userland entry address
+    @ sitting in lr, about to bx to it. The push {..., lr} above (still
+    @ in IRQ mode at that point) only saved lr_irq; without saving this
+    @ one too, bl gba_do_schedule below clobbers the interrupted code's
+    @ lr with its own return address, so control jumps to garbage the
+    @ next time that code does "bx lr" after the interrupt returns.
+    push {lr}
+
     @ call prep
 .global gba_do_schedule
     @ldr r0, =gba_do_schedule
     bl gba_do_schedule
+
+    pop {lr}
 
     @ return to IRQ mode
     mrs r0, cpsr
