@@ -164,16 +164,11 @@ void simulate_swi_via_inline_data(void) {
         "mov sp, r12\n\t"
         "1:\n\t"
 
-        // デバッグ用: 切替後の実際のsp/lrを確認する。lrはbl debug_print_sp_lr
-        // 自体で上書きされるので、レジスタ(callee-savedのr4等)に頼らずメモリ
-        // (debug_target_scratch)に退避してから読み直す。
-        "ldr r3, =debug_target_scratch\n\t"
-        "str lr, [r3]\n\t"
-        "mov r0, sp\n\t"
-        "mov r1, lr\n\t"
-        "bl debug_print_sp_lr\n\t"
-        "ldr r3, =debug_target_scratch\n\t"
-        "ldr lr, [r3]\n\t"
+        // 以前ここにsp/lr確認用のデバッグ出力があったが、r0-r12を正しく復元した
+        // *あと*にr0/r1/r3/r5を退避せず上書きしたまま戻していなかった。r0は
+        // システムコールの戻り値そのもの(fstat等の成功/失敗)なので、呼び出し元に
+        // 渡る直前にspの値で上書きされ、戻り値を見て分岐するコードが誤動作していた
+        // (fstat復帰後、呼び出し元が壊れた戻り値で誤った分岐をして暴走していた)。
 
         "mov r1, #0x04000000\n\t"
         "add r1, #0x200\n\t"
