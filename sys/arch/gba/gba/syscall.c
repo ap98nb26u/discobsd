@@ -437,7 +437,21 @@ syscall_handler(int sys_num, struct trapframe *frame)
 		break;
 	}
 out:
-	frame->tf_pc |= 1;
+	/*
+	 * Only force the Thumb bit for the just-succeeded execve() case:
+	 * tf_pc there is the new process's entry point, and crt0 is always
+	 * compiled Thumb. Every ordinary syscall wrapper on this port (the
+	 * GBA branch of SYS.h's ENTRY macro, and icode in locore.S) is
+	 * written in ARM (.arm), so the trampoline's computed return address
+	 * always points back into ARM code. Forcing the Thumb bit there
+	 * unconditionally made the CPU decode those ARM instruction bytes as
+	 * Thumb after every ordinary syscall returned - harmless-looking for
+	 * a few instructions by chance, but eventually wandering off into
+	 * whatever those bytes happened to decode to (observed: execution
+	 * ending up inside a .rodata table after sigaction() returned).
+	 */
+	if (gba_exec_switched_stack)
+		frame->tf_pc |= 1;
 	frame->tf_psr |= 0x80;
 	userret(u.u_frame->tf_pc, syst);
 
