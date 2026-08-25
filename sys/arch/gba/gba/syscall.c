@@ -282,10 +282,8 @@ __asm volatile (
 void
 syscall_handler(int sys_num, struct trapframe *frame)
 {
-	int psig;
 	time_t syst;
 	int code;
-	u_int sp;
 
 	//volatile struct trapframe *f = frame;
 
@@ -321,21 +319,30 @@ syscall_handler(int sys_num, struct trapframe *frame)
 
 	//led_control(LED_KERNEL, 1);
 
-	/* Check stack. */
-	sp = u.u_frame->tf_sp;
-	if (sp < u.u_procp->p_daddr + u.u_dsize) {
-		/* Process has trashed its stack; give it an illegal
-		 * instruction violation to halt it in its tracks. */
-		psig = SIGSEGV;
-		goto bad;
-	}
-	if (u.u_procp->p_ssize < (size_t)__user_data_end - sp) {
-		/* Expand stack. */
-		u.u_procp->p_ssize = (size_t)__user_data_end - sp;
-		u.u_procp->p_saddr = sp;
-		u.u_ssize = u.u_procp->p_ssize;
-	}
-	printf("DBG: past stack check, sp=%x\n", sp);
+	/*
+	 * Stack overflow/growth tracking (disabled on GBA): on stm32/pic32
+	 * this reads tf_sp from a *real* hardware-saved SP (Cortex-M's PSP,
+	 * captured by PendSV_Handler; MIPS's $sp, captured by the exception
+	 * vector before switching stacks) - a legitimate live value there.
+	 * On GBA, syscalls are dispatched through simulate_swi_via_inline_data,
+	 * a hand-rolled function-call trampoline with no hardware exception
+	 * entry. Userland's CALL_SIMSYS macro (lib/libc/arm/sys/SYS.h) uses
+	 * r12 purely as scratch to hold the trampoline's own address before
+	 * jumping, so tf_sp/tf_ip here is garbage for any syscall except the
+	 * one boot-time execve() dispatched from icode (which happens to set
+	 * r12 to a real value beforehand - see locore.S). This check was
+	 * carried over from pic32/stm32 without accounting for that, and
+	 * was corrupting p_saddr/p_ssize with the trampoline's own address.
+	 *
+	 * Known gap from disabling this: p_ssize/p_saddr stay fixed at
+	 * whatever exec_setupstack() set (SSIZE, 2048 bytes) instead of
+	 * tracking real growth, so vm_swap.c's swapout() would only save
+	 * that initial region - if a process's stack ever grows past SSIZE
+	 * and then gets swapped, the deeper part won't survive a swap back
+	 * in. Not yet a problem since swap isn't exercised on this port yet;
+	 * revisit if/when it is (would need CALL_SIMSYS to hand off the real
+	 * SP some other way, since r12 is otherwise spoken for here).
+	 */
 
 	code = sys_num; /* Syscall number decoded from the inline .word by
 			 * simulate_swi_via_inline_data(), not from a register. */
@@ -405,12 +412,6 @@ syscall_handler(int sys_num, struct trapframe *frame)
 		u.u_frame->tf_r0 = u.u_error;	/* $a1 - result. */
 		break;
 	}
-	goto out;
-
-bad:
-	/* From this point and further the interrupts must be enabled. */
-	psignal(u.u_procp, psig);
-
 out:
 	frame->tf_pc |= 1;
 	frame->tf_psr |= 0x80;
