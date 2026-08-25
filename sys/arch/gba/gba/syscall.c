@@ -55,6 +55,16 @@ static void debug_print_sp_lr(unsigned sp, unsigned lr)
  */
 static volatile unsigned debug_target_scratch;
 
+/*
+ * Set by syscall_handler() only when execve() just replaced the calling
+ * process's memory image - the one case where tf_ip/tf_sp (r12) legitimately
+ * holds a new stack pointer (written by exec_setupstack() in exec_subr.c)
+ * instead of CALL_SIMSYS's leftover trampoline jump-target scratch value.
+ * simulate_swi_via_inline_data() below checks this before deciding whether
+ * to switch the live sp to r12 on return.
+ */
+static volatile int gba_exec_switched_stack;
+
 __attribute__((target("arm"), noinline))
 void simulate_swi_via_inline_data(void) {
     __asm__ volatile (
@@ -136,11 +146,23 @@ void simulate_swi_via_inline_data(void) {
 
         // tf_ip(=r12)は通常のレジスタだが、exec_setupstack()(exec_subr.c)は
         // 新しいプロセスの実際のユーザースタックポインタをtf_sp(=tf_ipの別名、
-        // frame.hで#defineされている)へ書き込む。ここでカーネルスタックから
-        // 新しいユーザースタックへ実際に切り替えないと、新しいプロセスは
-        // カーネルのu領域スタックの上で動き続けてしまう(execve成功後も画面に
-        // 何も出ない原因)。
+        // frame.hで#defineされている)へ書き込む。execve()成功直後に限り、
+        // カーネル(=呼び出し元)のスタックから新しいユーザースタックへ実際に
+        // 切り替える必要がある(execve成功後も画面に何も出ない原因だった)。
+        //
+        // 通常のシステムコール(CALL_SIMSYS経由)では、r12はこのトランポリン
+        // 自身のジャンプ先アドレスを一時的に保持するスクラッチ値でしかなく、
+        // 実際のスタックポインタではない。ここで無条件にmov sp, r12すると、
+        // 直前のldmiaで既に正しく復元されているsp(呼び出し元が元々使っていた
+        // 実スタック)をそのゴミ値で上書きしてしまい、execve以外の全ての
+        // システムコール復帰後にスタックが破壊されていた
+        // (fstat等の直後にJumped to invalid addressで落ちていた原因)。
+        "ldr r5, =gba_exec_switched_stack\n\t"
+        "ldr r5, [r5]\n\t"
+        "cmp r5, #0\n\t"
+        "beq 1f\n\t"
         "mov sp, r12\n\t"
+        "1:\n\t"
 
         // デバッグ用: 切替後の実際のsp/lrを確認する。lrはbl debug_print_sp_lr
         // 自体で上書きされるので、レジスタ(callee-savedのr4等)に頼らずメモリ
@@ -316,6 +338,7 @@ syscall_handler(int sys_num, struct trapframe *frame)
 	u.u_error = 0;
 	u.u_frame = frame;
 	u.u_code = u.u_frame->tf_pc - INSN_SZ;	/* Syscall for sig handler. */
+	gba_exec_switched_stack = 0;
 
 	//led_control(LED_KERNEL, 1);
 
@@ -394,6 +417,7 @@ syscall_handler(int sys_num, struct trapframe *frame)
 		 */
 		if (code == 11 && u.u_error == 0) {
 			u.u_frame->tf_lr = 0;
+			gba_exec_switched_stack = 1;
 		}
 	}
 
