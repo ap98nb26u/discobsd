@@ -42,6 +42,19 @@ static void debug_print_return_target(unsigned v)
     printf("DBG: syscall return, jumping to %x\n", v);
 }
 
+static void debug_print_sp_lr(unsigned sp, unsigned lr)
+{
+    printf("DBG: about to bx, sp=%x lr=%x\n", sp, lr);
+}
+
+/*
+ * Scratch cell for stashing the jump target across the debug call
+ * below, in memory rather than a register - AAPCS says r4-r11 must
+ * survive a well-formed call, but this sidesteps having to trust that
+ * across every function in the printf/uartputc chain.
+ */
+static volatile unsigned debug_target_scratch;
+
 __attribute__((target("arm"), noinline))
 void simulate_swi_via_inline_data(void) {
     __asm__ volatile (
@@ -120,6 +133,25 @@ void simulate_swi_via_inline_data(void) {
         "add sp, sp, #4\n\t"          // tf_lrをスキップ (sp+56=tf_pc位置)
         "ldmia sp!, {lr}\n\t"         // tf_pc(更新されている場合あり)をlrへ復元
         "add sp, sp, #4\n\t"          // tf_psr分を破棄
+
+        // tf_ip(=r12)は通常のレジスタだが、exec_setupstack()(exec_subr.c)は
+        // 新しいプロセスの実際のユーザースタックポインタをtf_sp(=tf_ipの別名、
+        // frame.hで#defineされている)へ書き込む。ここでカーネルスタックから
+        // 新しいユーザースタックへ実際に切り替えないと、新しいプロセスは
+        // カーネルのu領域スタックの上で動き続けてしまう(execve成功後も画面に
+        // 何も出ない原因)。
+        "mov sp, r12\n\t"
+
+        // デバッグ用: 切替後の実際のsp/lrを確認する。lrはbl debug_print_sp_lr
+        // 自体で上書きされるので、レジスタ(callee-savedのr4等)に頼らずメモリ
+        // (debug_target_scratch)に退避してから読み直す。
+        "ldr r3, =debug_target_scratch\n\t"
+        "str lr, [r3]\n\t"
+        "mov r0, sp\n\t"
+        "mov r1, lr\n\t"
+        "bl debug_print_sp_lr\n\t"
+        "ldr r3, =debug_target_scratch\n\t"
+        "ldr lr, [r3]\n\t"
 
         "mov r1, #0x04000000\n\t"
         "add r1, #0x200\n\t"
@@ -262,11 +294,18 @@ syscall_handler(int sys_num, struct trapframe *frame)
 
 	syst = u.u_ru.ru_stime;
 
-	if ((u_int)frame < (u_int)&u + sizeof(u)) {
-		panic("stack overflow");
-		/* NOTREACHED */
-	}
-	printf("DBG: past overflow check\n");
+	/*
+	 * Unlike STM32/pic32, GBA has no MMU and no separate always-in-IWRAM
+	 * kernel stack: syscall_handler() runs on whatever stack the calling
+	 * process is currently using. Once a process has exec'd, that's its
+	 * own EWRAM stack (see the sp switch in simulate_swi_via_inline_data
+	 * below __attribute__((target("arm")))), which is numerically always
+	 * less than any IWRAM address - so comparing frame against &u+sizeof(u)
+	 * (an IWRAM address) here would always look like an underflow for any
+	 * real userland syscall. The actual per-process stack bounds check
+	 * further down (against tf_sp/p_daddr/p_dsize) is the correct one for
+	 * this architecture.
+	 */
 
 #ifdef UCB_METER
 	cnt.v_trap++;

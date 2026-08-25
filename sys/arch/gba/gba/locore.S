@@ -69,8 +69,8 @@ longjmp:
 	.globl	resume
 	.type	resume, %function
 resume:
-	@ u0area: 0x03006800-0x030073FF
-	@ uarea:  0x03007400-0x03007FFF
+	@ u0area: 0x030067FC-0x030073FB
+	@ uarea:  0x030073FC-0x03007FFB (0x03007FFC-0x03007FFF is the IRQ vector)
 	/* Disable interrupts. */
 	mrs r3, cpsr
 	orr r3, r3, #0x80
