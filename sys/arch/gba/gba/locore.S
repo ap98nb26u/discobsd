@@ -82,8 +82,19 @@ resume:
 	ldr	r2, =u			/* Pointer to u. area start addr. */
 	cmp	a1, r2			/* If u (first arg) is not u. area, */
 	bne	1f			/*   then remap u. area. */
-	ldr	r3, =(2f + 1)		/*   else no need to remap u. area. */
-	bx	r3			/*   The +1 sets Thumb mode bit. */
+	/*
+	 * No remap needed - this is the "process 0 resuming itself" case
+	 * (u.u_procp->p_addr already equals u, so a1==r2 here). Label 2:
+	 * below is ordinary ARM code within this same .arm-scoped function
+	 * (no mode switch between here and there), so a plain branch stays
+	 * in ARM - unlike the removed "ldr r3,=(2f+1); bx r3", which forced
+	 * the Thumb bit and made the CPU decode those ARM-encoded bytes as
+	 * Thumb instead, corrupting execution. This path is only exercised
+	 * the first time process 0 resumes via its own u_rsave (every other
+	 * resume() call in this port always had a genuine u/u0 remap to do,
+	 * taking the 1: branch below instead, which never hit this bug).
+	 */
+	b	2f
 	.pool				/* Insert literal pool for labels. */
 1:
 	ldr	r3, [r2, #0]		/* Pointer to u.u_procp structure. */
