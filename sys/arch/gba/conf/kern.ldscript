@@ -21,8 +21,29 @@ MEMORY {
     UAREA   (rw!x) : ORIGIN = 0x030073FC, LENGTH = 3K    /* 0x0300 73FC - 0x0300 7FFB */
 
     EWRAM   (rwx)  : ORIGIN = 0x02000000, LENGTH = 256K  /* 0x0200 0000 - 0x0203 FFFF */
-    USERRAM (rw!x) : ORIGIN = 0x02027000, LENGTH = 96K   /* 0x0202 7000 - 0x0203 EFFF */
-    SWAP    (rw!x) : ORIGIN = 0x0203F000, LENGTH = 64K   /* 0x0203 F000 - 0x0204 EFFF */
+    /*
+     * USERRAM is just the user process's own addressable data+stack
+     * window (32K - big enough for a single process like /sbin/init,
+     * ~30K observed); SWAP is mrams.c's (GBA/mGBA-only) swap staging
+     * area, a *real* EWRAM range that mrams_write()/mrams_read() copy
+     * to/from directly (see __swap_start/__swap_end there) - it is NOT
+     * a disk partition on this config, unlike GBAED's real sd.c.
+     *
+     * These two used to be declared as one 96K USERRAM block with SWAP
+     * carved out of its LENGTH via subtraction, but SWAP's ORIGIN was
+     * computed from the *wrong* end of that block (ORIGIN(USERRAM) +
+     * LENGTH(USERRAM), not the actual end of the live user window) -
+     * SWAP's declared end (0x0204F000) overshot EWRAM's real 256K
+     * boundary (0x02040000) by 60K. GBA's EWRAM bus wraps every 256K,
+     * so writes into that overshoot silently aliased back into the
+     * kernel's own static data at the *start* of EWRAM (0x02000000+),
+     * corrupting it - this went unnoticed until swap was actually
+     * exercised by a second process for the first time. Now declared
+     * as two separate, contiguous, non-overlapping blocks that together
+     * exactly fill the rest of real EWRAM after the user window.
+     */
+    USERRAM (rw!x) : ORIGIN = 0x02027000, LENGTH = 32K   /* 0x0202 7000 - 0x0202 EFFF */
+    SWAP    (rw!x) : ORIGIN = 0x0202F000, LENGTH = 68K   /* 0x0202 F000 - 0x0203 FFFF */
 }
 
 __kernel_flash_start	= ORIGIN(FLASH);
@@ -30,7 +51,7 @@ __kernel_flash_end	= ORIGIN(FLASH) + LENGTH(FLASH);
 __kernel_data_start	= ORIGIN(EWRAM);
 __kernel_data_end	= ORIGIN(USERRAM);
 __user_data_start	= ORIGIN(USERRAM);
-__user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM) - LENGTH(SWAP);
+__user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
 __swap_start		= ORIGIN(SWAP);
 __swap_end		= ORIGIN(SWAP) + LENGTH(SWAP);
 
