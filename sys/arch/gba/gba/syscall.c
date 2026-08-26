@@ -65,7 +65,20 @@ static volatile unsigned debug_target_scratch;
  */
 static volatile int gba_exec_switched_stack;
 
-__attribute__((target("arm"), noinline))
+/*
+ * naked: without this, GCC emits its own "push {fp}" prologue for this
+ * function (frame-pointer setup) - but the inline asm below returns by
+ * jumping directly via "bx lr" at the very end, never falling through to
+ * the compiler-generated epilogue that would "pop {fp}" to match. That
+ * silently leaked 4 bytes of stack on every single syscall: the caller's
+ * own pushed lr (CALL_SIMSYS's "push {lr}"/"pop {lr}" pairing, see SYS.h)
+ * ended up 4 bytes below where the trampoline's return actually left sp,
+ * so "pop {lr}" read whatever unrelated word sat above it (typically 0)
+ * instead of the real return address - observed as fstat() returning via
+ * "bx lr" with lr=0, jumping straight into the BIOS reset vector. naked
+ * guarantees no prologue/epilogue exists to get bypassed like this.
+ */
+__attribute__((target("arm"), naked))
 void simulate_swi_via_inline_data(void) {
     __asm__ volatile (
         /* -------------------------------------------------------------
