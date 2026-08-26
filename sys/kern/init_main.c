@@ -75,6 +75,21 @@ main(void)
 	u.u_procp = p;			/* init user structure */
 	u.u_cmask = CMASK;
 	u.u_lastfile = -1;
+	/*
+	 * u_uid/u_ruid/u_svuid/u_groups[0] are never written anywhere else
+	 * before a process explicitly calls setuid()/setgid() - every port
+	 * has relied on the u/u0 memory happening to read as zero here. On
+	 * GBA that memory isn't backed by a real .bss section (see UAREA in
+	 * kern.ldscript), so it holds whatever was left there earlier in
+	 * boot instead of zero, and getuid() returning nonzero for process 1
+	 * makes init() exit(1) immediately (see init.c's "getuid() != 0"
+	 * check). Set explicitly so process 0/1's credentials are root
+	 * regardless of what this memory happened to contain.
+	 */
+	u.u_uid = 0;
+	u.u_ruid = 0;
+	u.u_svuid = 0;
+	u.u_groups[0] = 0;
 	for (i = 1; i < NGROUPS; i++)
 		u.u_groups[i] = NOGROUP;
 	for (i = 0; i < sizeof(u.u_rlimit)/sizeof(u.u_rlimit[0]); i++)
