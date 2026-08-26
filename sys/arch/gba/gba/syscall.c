@@ -56,6 +56,14 @@ static void debug_print_sp_lr(unsigned sp, unsigned lr)
 static volatile unsigned debug_target_scratch;
 
 /*
+ * Holds tf_psr (the CPSR syscall_handler computed, with PSR_C set/cleared
+ * to reflect success/failure) across the r0-r12 restore below, so it can
+ * be applied to the real CPSR right before the final bx lr - see the long
+ * comment at the store/restore sites in simulate_swi_via_inline_data().
+ */
+static volatile unsigned saved_tf_psr;
+
+/*
  * Set by syscall_handler() only when execve() just replaced the calling
  * process's memory image - the one case where tf_ip/tf_sp (r12) legitimately
  * holds a new stack pointer (written by exec_setupstack() in exec_subr.c)
@@ -152,10 +160,23 @@ void simulate_swi_via_inline_data(void) {
         "ldr r0, [sp, #56]\n\t"       // デバッグ用: sp/r0-r12はまだ壊さずtf_pcを覗く
         "bl debug_print_return_target\n\t"
 
+        // tf_psr(呼び出し元へ返すべきCPSR、syscall_handler側でPSR_Cを成功/失敗に
+        // 応じて設定・クリア済み)をここで退避する。r0はこの直後のldmiaでどうせ
+        // 上書きされるので自由に使える。呼び出し元(SYS.hのSYS()マクロが生成する
+        // 各ラッパー)は復帰後に「bcc 2f」でキャリーフラグを見て成功/失敗を判定する
+        // が、以前はtf_psrを一切CPUの実CPSRへ反映しておらず、少し下のexec切替判定
+        // の「cmp r5, #0」がr5=0(execve以外は常にそう)のたびにキャリーを1(セット)
+        // にしてしまっていた。その結果、あらゆる通常システムコールが成功していても
+        // 呼び出し元からは「エラー」にしか見えず、戻り値がすべて-1にすり替わって
+        // いた(fstat以外の全ての戻り値を使う呼び出し元が誤動作していた実際の原因)。
+        "ldr r0, [sp, #60]\n\t"
+        "ldr r1, =saved_tf_psr\n\t"
+        "str r0, [r1]\n\t"
+
         "ldmia sp!, {r0-r12}\n\t"     // R0〜R12を復元 (52バイト、sp+52=tf_lr位置)
         "add sp, sp, #4\n\t"          // tf_lrをスキップ (sp+56=tf_pc位置)
         "ldmia sp!, {lr}\n\t"         // tf_pc(更新されている場合あり)をlrへ復元
-        "add sp, sp, #4\n\t"          // tf_psr分を破棄
+        "add sp, sp, #4\n\t"          // tf_psr分を破棄(値は上でメモリへ退避済み)
 
         // tf_ip(=r12)は通常のレジスタだが、exec_setupstack()(exec_subr.c)は
         // 新しいプロセスの実際のユーザースタックポインタをtf_sp(=tf_ipの別名、
@@ -187,6 +208,16 @@ void simulate_swi_via_inline_data(void) {
         "add r1, #0x200\n\t"
         "mov r2, #1\n\t"
         "strh r2, [r1, #0x08]\n\t"   // REG_IME = 1 (割り込みマスタ許可)
+
+        // 呼び出し元のSYS()マクロ生成ラッパーは復帰後「bcc 2f」でキャリーフラグを
+        // チェックして成功/失敗を判定する。ここまでに来る間の複数のcmp/tst命令が
+        // 実CPSRのフラグを勝手に書き換えているため、bx lrの直前でsyscall_handlerが
+        // 計算したtf_psr(のフラグ部分)を明示的に復元しないと、その判定は常に無関係な
+        // 値を見ることになる。cpsr_fはフラグビットのみ書き換え、モード/割り込み
+        // マスクなどの制御ビットには触れない。
+        "ldr r5, =saved_tf_psr\n\t"
+        "ldr r5, [r5]\n\t"
+        "msr cpsr_f, r5\n\t"
 
         "bx lr\n\t"                   // 呼び出し元へ復帰（モードは変えていないので
                                        // movs不要。interworkingのためbxを使用）
