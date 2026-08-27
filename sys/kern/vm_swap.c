@@ -11,6 +11,19 @@
 #include <sys/systm.h>
 #include <sys/vm.h>
 
+/* Diagnostic only: checksum a memory range to check a swap round trip. */
+static unsigned
+dbg_cksum(size_t addr, size_t len)
+{
+    unsigned char *p = (unsigned char *)addr;
+    unsigned sum = 0;
+    size_t i;
+
+    for (i = 0; i < len; i++)
+        sum = (sum << 1 | sum >> 31) ^ p[i];
+    return sum;
+}
+
 /*
  * Swap a process in.
  * Allocate data and possible text separately.  It would be better
@@ -28,6 +41,9 @@ swapin (p)
 
     if (p->p_dsize) {
         swap (p->p_daddr, daddr, p->p_dsize, B_READ);
+        printf("DBG: swapin pid=%d data blkno=%u len=%u cksum=%x\n",
+            p->p_pid, (unsigned)p->p_daddr, (unsigned)p->p_dsize,
+            dbg_cksum(daddr, p->p_dsize));
         mfree (swapmap, btod (p->p_dsize), p->p_daddr);
     }
     if (p->p_ssize) {
@@ -78,7 +94,8 @@ swapout (p, freecore, odata, ostack)
     printf("DBG: after malloc3\n");
     p->p_flag |= SLOCK;
     if (odata) {
-        printf("DBG: before swap a[0] odata=%u\n", odata);
+        printf("DBG: before swap a[0] odata=%u pid=%d blkno=%u cksum=%x\n",
+            odata, p->p_pid, (unsigned)a[0], dbg_cksum(p->p_daddr, odata));
         swap (a[0], p->p_daddr, odata, B_WRITE);
         printf("DBG: after swap a[0]\n");
     }
