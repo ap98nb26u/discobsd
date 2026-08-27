@@ -64,6 +64,22 @@ static volatile unsigned debug_target_scratch;
 static volatile unsigned saved_tf_psr;
 
 /*
+ * Holds the caller's real r5 (a callee-saved AAPCS register, r4-r11)
+ * across the r0-r12 restore below - the trampoline uses r5 as scratch
+ * *after* that restore (for the gba_exec_switched_stack check and again
+ * to reload saved_tf_psr), clobbering whatever the caller actually had
+ * there, with nothing putting it back before the final bx lr. Any
+ * caller that keeps a live value in r5 across a syscall (legitimate,
+ * since AAPCS guarantees r4-r11 survive a call) had it silently
+ * replaced by 0/1 (gba_exec_switched_stack) or the raw tf_psr word -
+ * observed as a userland base-address computation using r5 turning
+ * into garbage after several syscalls, corrupting a later execve()'s
+ * arguments even though the exec_estab()/swap data underneath it was
+ * byte-for-byte correct the whole time.
+ */
+static volatile unsigned saved_user_r5;
+
+/*
  * Set by syscall_handler() only when execve() just replaced the calling
  * process's memory image - the one case where tf_ip/tf_sp (r12) legitimately
  * holds a new stack pointer (written by exec_setupstack() in exec_subr.c)
@@ -173,6 +189,15 @@ void simulate_swi_via_inline_data(void) {
         "ldr r1, =saved_tf_psr\n\t"
         "str r0, [r1]\n\t"
 
+        // r5も同様に、下でexec切替判定/tf_psr再読み込みのスクラッチとして
+        // 使われ、最後まで元の値へ戻されていなかった(呼び出し元がr4-r11を
+        // 呼び出しをまたいで保持できることに依存していると、その値が0/1や
+        // tf_psrの生値にすり替わっていた)。ここでr0はもう用済みなので使って
+        // 退避する。
+        "ldr r0, [sp, #20]\n\t"       // tf_r5 (r0=sp+0起点でr5はsp+20)
+        "ldr r1, =saved_user_r5\n\t"
+        "str r0, [r1]\n\t"
+
         "ldmia sp!, {r0-r12}\n\t"     // R0〜R12を復元 (52バイト、sp+52=tf_lr位置)
         "add sp, sp, #4\n\t"          // tf_lrをスキップ (sp+56=tf_pc位置)
         "ldmia sp!, {lr}\n\t"         // tf_pc(更新されている場合あり)をlrへ復元
@@ -218,6 +243,11 @@ void simulate_swi_via_inline_data(void) {
         "ldr r5, =saved_tf_psr\n\t"
         "ldr r5, [r5]\n\t"
         "msr cpsr_f, r5\n\t"
+
+        // r5をここまでスクラッチとして使っていた分を、呼び出し元の本来の値へ
+        // 最後に復元する(上のsaved_user_r5への退避コメント参照)。
+        "ldr r5, =saved_user_r5\n\t"
+        "ldr r5, [r5]\n\t"
 
         "bx lr\n\t"                   // 呼び出し元へ復帰（モードは変えていないので
                                        // movs不要。interworkingのためbxを使用）
