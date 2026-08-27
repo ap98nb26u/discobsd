@@ -62,6 +62,19 @@ gsio_init(unsigned int baud)
                  SIO_RECV_ENABLE | SIO_USE_UART;
 }
 
+/*
+ * Non-blocking peek: is a fully-received byte currently sitting in
+ * REG_SIODATA8? Pure read of the status bit gsio_getc()'s own wait
+ * loop blocks on below - no side effects, so it's safe to call from
+ * select() without disturbing a pending byte the way calling
+ * gsio_getc() itself (which re-arms the flag first) would.
+ */
+int
+gsio_avail(void)
+{
+    return (REG_SIOCNT & 0x0020) == 0;
+}
+
 unsigned char
 gsio_getc(void)
 {

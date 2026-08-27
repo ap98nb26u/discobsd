@@ -6,6 +6,7 @@
 #include <sys/systm.h>
 #include <sys/uio.h>
 #include <sys/config.h>
+#include <sys/fcntl.h>
 
 #include <gba/dev/mgbalog.h>
 #include <gba/dev/gba_text.h>
@@ -13,6 +14,7 @@
 
 void uartinit(int);
 void uartputc(dev_t dev, char c);
+char uartgetc(dev_t dev);
 
 void uartinit(int unit) {
     *(volatile unsigned short*)0x04FFF780 = 0xC0DE; // mGBA Enable
@@ -56,7 +58,24 @@ uartprobe(struct conf_device *config) {
 /* conf.o が期待するシンボル名に変更 */
 int uartopen(dev_t dev, int flag, int mode) { return 0; }
 int uartclose(dev_t dev, int flag, int mode) { return 0; }
-int uartread(dev_t dev, struct uio *uio, int flag) { return 0; }
+int uartread(dev_t dev, struct uio *uio, int flag)
+{
+    /*
+     * No tty line discipline yet (see uartwrite()'s comment below), so
+     * read one already-arrived byte per call directly off the wire via
+     * gsio_getc() - select()'s uartselect() is what actually confirms
+     * a byte is waiting before a caller reads, so this doesn't block
+     * indefinitely on an idle line.
+     */
+    char c;
+    int error;
+
+    if (uio->uio_resid <= 0)
+        return 0;
+    c = (char)uartgetc(dev);
+    error = uiomove(&c, 1, uio);
+    return error;
+}
 int uartwrite(dev_t dev, struct uio *uio, int flag)
 {
     /*
@@ -83,7 +102,23 @@ int uartwrite(dev_t dev, struct uio *uio, int flag)
     return 0;
 }
 int uartioctl(dev_t dev, u_int cmd, caddr_t addr, int flag) { return -1; }
-int uartselect(dev_t dev, int rw) { return 0; }
+int uartselect(dev_t dev, int rw)
+{
+    /*
+     * Was a permanent "never ready" stub, so any select()/poll() on the
+     * console blocked forever regardless of actual input (confirmed:
+     * typing at the serial terminal had no effect). Writes are always
+     * immediately possible (uartwrite() never blocks), so only the
+     * read direction needs a real check; FWRITE mirrors seltrue()'s
+     * always-ready behavior for the other direction.
+     */
+    if (rw == FREAD) {
+        int avail = gsio_avail();
+        printf("DBG: uartselect FREAD avail=%d\n", avail);
+        return avail;
+    }
+    return 1;
+}
 
 /* r_read / r_write に相当する関数名 (conf.cの定義に合わせる) */
 char uartgetc(dev_t dev) {
