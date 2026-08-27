@@ -15,6 +15,7 @@
 void            gsio_init(unsigned int baud);
 unsigned char   gsio_getc(void);
 void            gsio_putc(unsigned char c);
+int             gsio_avail(void);
 
 #endif /* KERNEL */
 
