@@ -158,6 +158,17 @@ void simulate_swi_via_inline_data(void) {
         // 直後の「mov r1, sp」が今積んだr0-r12ではなく未初期化のsp_svc(BIOS既定値、
         // IWRAM上のu/u0領域のすぐ近く)を指してしまい、フレームポインタが完全に
         // 壊れる。呼び出し元と同じモード(SYS)のまま進める。
+        //
+        // 注意: REG_IME=0はここではまだ解除しない。以前ここで
+        // syscall_handler呼び出し直前にREG_IME=1へ戻す変更を試したが、
+        // このnaked関数はr0-r2をSWI番号/復帰先などの生きたスクラッチとして
+        // 複数命令にまたがって保持しており、通常のC呼び出し規約(呼び出しの
+        // たびにr0-r3は破棄されて構わない)を前提にしたISR(gba_do_schedule等)
+        // がここで割り込むとr0-r2が破壊され、ゴミのSWI番号でsyscall_handlerが
+        // 呼ばれて即クラッシュした(GDBでr0=0x4000000等になっているのを確認)。
+        // select()のブロック対策としての割り込み再許可は、生きたレジスタ状態を
+        // 抱えていない安全な場所(swtch()がidle()を呼ぶ直前、通常のC関数呼び出し
+        // 境界)で行う(kern_synch.c参照)。
         "mov r0, r2\n\t"              // 第1引数: SWI番号
         "mov r1, sp\n\t"              // 第2引数: 退避されたレジスタ配列へのポインタ
         "bl syscall_handler\n\t"
@@ -453,17 +464,33 @@ syscall_handler(int sys_num, struct trapframe *frame)
 		u.u_arg[2] = u.u_frame->tf_r2;	/* $a3 */
 		u.u_arg[3] = u.u_frame->tf_r3;	/* $a4 */
 
-		/* for ARM7TDMI */
-		int stkalign = 0;
-
-		/* Remaining args are from the stack, after the trapframe. */
+		/*
+		 * Remaining args (5th, 6th, ...) are on the caller's real
+		 * stack, per AAPCS, right at the SP value the callee (the
+		 * SYS()-generated wrapper in SYS.h) saw at its own entry.
+		 * This used to read from tf_sp (=tf_ip, r12) + a fixed
+		 * offset - tf_sp is the wrong value on this port for any
+		 * ordinary (non-execve) syscall, same as every other tf_sp
+		 * bug fixed this session (CALL_SIMSYS uses r12 purely as
+		 * scratch for its own jump target, never a real SP).
+		 *
+		 * `frame` itself IS a real, live stack address here - it's
+		 * simulate_swi_via_inline_data()'s own sp right after its
+		 * "sub sp, sp, #64" trapframe reservation, i.e. exactly 64
+		 * bytes below whatever sp was when "bx r12" (CALL_SIMSYS)
+		 * jumped in. CALL_SIMSYS itself opens with "push {lr}"
+		 * (4 more bytes) before that jump, so frame + 64 + 4 = the
+		 * wrapper's own entry sp - exactly where AAPCS says its
+		 * caller (whatever called e.g. select(), not the kernel)
+		 * placed the 5th argument onward.
+		 */
 		if (callp->sy_narg > 4) {
-			u_int addr = (u.u_frame->tf_sp + 32 + stkalign) & ~3;
+			u_int addr = (u_int)frame + 64 + 4;
 			if (!baduaddr((caddr_t)addr))
 				u.u_arg[4] = *(u_int *)addr;
 		}
 		if (callp->sy_narg > 5) {
-			u_int addr = (u.u_frame->tf_sp + 36 + stkalign) & ~3;
+			u_int addr = (u_int)frame + 64 + 4 + 4;
 			if (!baduaddr((caddr_t)addr))
 				u.u_arg[5] = *(u_int *)addr;
 		}

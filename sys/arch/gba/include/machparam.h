@@ -128,7 +128,21 @@
  * Macros to decode processor status word.
  */
 #define USERMODE(psr)   0//((psr & IPSR_ISR_Msk) == 0)     /* No exceptions. */
-#define BASEPRI(psr)    0//(__get_BASEPRI() == 0)          /* No masking. */
+/*
+ * Ported from stm32 (Cortex-M's BASEPRI register, real hardware
+ * priority-level masking) as a literal "0" stub, i.e. always false.
+ * hardclock() (kern_clock.c) only calls softclock() - which actually
+ * runs due callout-queue entries, including tsleep()'s timeout wakeup
+ * via endtsleep() - when "needsoft && BASEPRI(ps)" is true. Since GBA
+ * has no such hardware and this port's IRQ handling is a single,
+ * non-nested level (see gba_intr_handler in locore0.S), there's no
+ * priority conflict to guard against here: it's always safe to run
+ * softclock(). Left at 0 (always false), tsleep()'s timeout could be
+ * correctly registered and hardclock() would tick it down to zero, but
+ * softclock() would never actually run to fire it - a real timeout
+ * would sit expired forever instead of waking its sleeper.
+ */
+#define BASEPRI(psr)    1
 
 #define noop()          asm volatile("nop")
 

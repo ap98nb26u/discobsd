@@ -175,6 +175,18 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
         myticks++;
         timer0_flag = 1;
         need_resched = 1;
+        /*
+         * The code that was supposed to do this (clock.c's
+         * timer_interrupt_handler()) was left #if 0'd out, so TIMER0's
+         * interrupt fired (REG_IE has it enabled, cpu_initclocks()
+         * configures it) but hardclock() - which advances lbolt and
+         * processes the timeout/callout queue - was never actually
+         * called. tsleep() with a real timeout (e.g. select()'s ts
+         * argument, once that was reaching the kernel at all) would
+         * compute a valid wakeup tick but then wait forever, since
+         * nothing ever checked whether it had expired.
+         */
+        hardclock((caddr_t)0, 0);
     }
     if (flag & IRQ_VBLANK) { // VBLANK
         flag = IRQ_VBLANK;
@@ -333,6 +345,35 @@ config(void)
 			}
 		}
 	}
+}
+
+/*
+ * Toggle the GBA's global interrupt master enable around swtch()'s idle
+ * wait. The syscall trampoline (gba/syscall.c) keeps REG_IME=0 for the
+ * entire duration of syscall_handler(), because it uses r0-r2 as live
+ * scratch across several raw instructions with no protection against a
+ * reentrant interrupt (confirmed via GDB: enabling REG_IME mid-trampoline
+ * let an interrupt clobber r0-r2 with garbage, crashing the very next
+ * syscall). But that leaves a real deadlock: select()'s tsleep()+swtch()
+ * can genuinely block waiting on a timeout, and swtch()'s idle() loop is
+ * ordinary compiler-generated C (a normal function call boundary, so no
+ * live scratch registers to protect) - if TIMER0 can never fire while
+ * idling, hardclock()/softclock() can never run to expire that timeout,
+ * so the sleeper can never be woken. Bracketing exactly the idle() call
+ * with these keeps interrupts enabled only while there is truly nothing
+ * else running, then re-masks them before resuming whatever process was
+ * found, restoring the invariant the syscall trampoline depends on.
+ */
+void
+gba_irq_allow(void)
+{
+	REG_IME = 1;
+}
+
+void
+gba_irq_block(void)
+{
+	REG_IME = 0;
 }
 
 /*

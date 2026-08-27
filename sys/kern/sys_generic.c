@@ -293,6 +293,9 @@ select1(uap, is_pselect)
     getbits(ex, 2);
 #undef  getbits
 
+    printf("DBG: select1 nd=%d ts=%x in[0]=%x\n", uap->nd,
+        (unsigned)uap->ts, *(unsigned *)&ibits[0]);
+
     if (uap->maskp) {
         error = copyin ((caddr_t) uap->maskp, (caddr_t) &sigmsk, sizeof(sigmsk));
         sigmsk &= ~sigcantmask;
@@ -303,6 +306,8 @@ select1(uap, is_pselect)
         error = copyin ((caddr_t) uap->ts, (caddr_t) &atv, sizeof (atv));
         if (error)
             goto done;
+        printf("DBG: select1 requested tv_sec=%u tv_usec=%u\n",
+            (unsigned)atv.tv_sec, (unsigned)atv.tv_usec);
         /*
          * nanoseconds ('struct timespec') on a PDP-11 are stupid since a 50 or 60 hz
          * clock is all we have.   Keeping the names and logic made porting easier
@@ -342,6 +347,7 @@ retry:
         timo = hzto(&atv);
         if (timo == 0)
             timo = 1;
+        printf("DBG: select1 timo=%u hz=%d\n", timo, hz);
     }
     if ((u.u_procp->p_flag & P_SELECT) == 0 || nselcoll != ncoll) {
         u.u_procp->p_flag &= ~P_SELECT;

@@ -199,7 +199,9 @@ tsleep (ident, priority, timo)
 //  ((struct user *)p->p_addr)->u_rsave.val[8],
 //  ((struct user *)p->p_addr)->u_rsave.val[9]);
 #endif
+    printf("DBG: tsleep pid=%d before swtch, chan=%x\n", p->p_pid, (unsigned)ident);
     swtch();
+    printf("DBG: tsleep pid=%d after swtch (resumed)\n", p->p_pid);
 resume:
     splx(s);
     p->p_flag &= ~P_SINTR;
@@ -486,7 +488,24 @@ loop:
      */
     p = pp;
     if (p == NULL) {
+#ifdef GBA
+        /*
+         * Nothing runnable: let TIMER0 fire while we idle so a sleeper
+         * blocked with a real timeout (e.g. select()) can eventually be
+         * woken by hardclock()/softclock(). Re-masked immediately below,
+         * before resuming any process, to restore the invariant the
+         * syscall trampoline (gba/syscall.c) depends on. See the comment
+         * on gba_irq_allow() in gba/machdep.c for why this can't just be
+         * done inside the trampoline itself.
+         */
+        extern void gba_irq_allow(void);
+        extern void gba_irq_block(void);
+        gba_irq_allow();
         idle();
+        gba_irq_block();
+#else
+        idle();
+#endif
         goto loop;
     }
     if (pq)
