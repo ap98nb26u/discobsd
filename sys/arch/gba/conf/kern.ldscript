@@ -7,20 +7,35 @@ MEMORY {
 
     IWRAM   (rwx)  : ORIGIN = 0x03000000, LENGTH = 32K   /* 0x0300 0000 - 0x0300 7FFF */
     SYSVEC  (rw!x) : ORIGIN = 0x03006400, LENGTH = 4     /* 0x0300 6400 - 0x0300 6403: syscall trampoline vector */
-    /*
-     * U0AREA/UAREA shifted down 4 bytes from IWRAM's very end: the GBA
-     * BIOS reads the user IRQ handler pointer from a fixed hardware
-     * location, 0x03007FFC-0x03007FFF (the last word of IWRAM). UAREA
-     * used to run right up to 0x03008000, so every u/u0 context switch
-     * (which swaps the *entire* USIZE-byte contents of u and u0, see
-     * resume()/longjmp() in locore.S) clobbered that word with whatever
-     * garbage sat at the matching offset in u0, silently corrupting the
-     * interrupt vector on every process switch after the first one.
-     */
-    U0AREA  (rw!x) : ORIGIN = 0x030067FC, LENGTH = 3K    /* 0x0300 67FC - 0x0300 73FB */
-    UAREA   (rw!x) : ORIGIN = 0x030073FC, LENGTH = 3K    /* 0x0300 73FC - 0x0300 7FFB */
 
     EWRAM   (rwx)  : ORIGIN = 0x02000000, LENGTH = 256K  /* 0x0200 0000 - 0x0203 FFFF */
+    /*
+     * U0AREA/UAREA used to live in IWRAM, right up against IWRAM's very
+     * end (with a 4-byte shift to dodge the GBA BIOS's fixed user-IRQ-
+     * handler-pointer word at 0x03007FFC-0x03007FFF - every u/u0 context
+     * switch swaps the *entire* USIZE-byte contents of u and u0, see
+     * resume()/longjmp() in locore.S, so anything living right past
+     * UAREA's end got clobbered by whatever garbage sat at the matching
+     * offset in u0). That put two whole USIZE-byte process contexts -
+     * including every process's kernel-mode C stack, since this port has
+     * no separate always-resident kernel stack - into the last 6K of a
+     * 32K IWRAM already packed with .data/.bss/.fast_text right up to
+     * SYSVEC. A long-sleeping process's saved stack frame (proc 0's,
+     * blocked in tsleep() since early boot) was found corrupted when
+     * finally resumed after another process had been actively running
+     * for a while - root cause not fully nailed down, but GBA's IWRAM is
+     * far smaller than pic32/stm32 (which use this same two-slot u/u0
+     * design without incident), making any layout collision here far
+     * more likely. Moved both slots to EWRAM - not touching a fixed BIOS
+     * vector to worry about here - which also frees the 6K they occupied
+     * back to IWRAM for other use. Cost: process kernel-mode execution
+     * (every syscall body, and hardclock()/softclock() work done while
+     * "running as" a process) now stacks through EWRAM, which is slower
+     * than IWRAM to access - a correctness-over-speed tradeoff while this
+     * port is still getting to a stable interactive shell.
+     */
+    U0AREA  (rw!x) : ORIGIN = 0x02000000, LENGTH = 3K    /* 0x0200 0000 - 0x0200 0BFF */
+    UAREA   (rw!x) : ORIGIN = 0x02000C00, LENGTH = 3K    /* 0x0200 0C00 - 0x0200 17FF */
     /*
      * USERRAM is just the user process's own addressable data+stack
      * window (32K - big enough for a single process like /sbin/init,
@@ -58,7 +73,7 @@ __swap_end		= ORIGIN(SWAP) + LENGTH(SWAP);
 syscall_vector		= ORIGIN(SYSVEC);
 u0			= ORIGIN(U0AREA);
 u			= ORIGIN(UAREA);
-u_end			= ORIGIN(EWRAM) + LENGTH(UAREA);
+u_end			= ORIGIN(UAREA) + LENGTH(UAREA);
 _estack			= u_end;
 
 ENTRY(_start)
@@ -112,9 +127,15 @@ SECTIONS {
         _ebss = .;
     } > IWRAM
 
-    /* dummy section to check free space of IWRAM */
+    /*
+     * dummy section to check free space of IWRAM - .data/.bss/.fast_text
+     * must not grow past SYSVEC (0x03006400); U0AREA/UAREA no longer sit
+     * past this boundary (moved to EWRAM, see MEMORY block above), so
+     * there's slack between here and IWRAM's actual end (0x03008000)
+     * now, this bound just protects SYSVEC specifically.
+     */
     .stack_check : {
         . = ALIGN(4);
-        ASSERT(. < (ORIGIN(IWRAM) + 25K), "Error: IWRAM overflowed into U0 area!");
+        ASSERT(. < (ORIGIN(IWRAM) + 25K), "Error: IWRAM overflowed into SYSVEC!");
     } > IWRAM
 }
