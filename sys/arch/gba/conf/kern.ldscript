@@ -42,23 +42,27 @@ MEMORY {
      * ~30K observed); SWAP is mrams.c's (GBA/mGBA-only) swap staging
      * area, a *real* EWRAM range that mrams_write()/mrams_read() copy
      * to/from directly (see __swap_start/__swap_end there) - it is NOT
-     * a disk partition on this config, unlike GBAED's real sd.c.
+     * a disk partition on this config, unlike GBAED's real sd.c (which
+     * uses an 8MB SD partition instead and was never the bottleneck
+     * here).
      *
-     * These two used to be declared as one 96K USERRAM block with SWAP
-     * carved out of its LENGTH via subtraction, but SWAP's ORIGIN was
-     * computed from the *wrong* end of that block (ORIGIN(USERRAM) +
-     * LENGTH(USERRAM), not the actual end of the live user window) -
-     * SWAP's declared end (0x0204F000) overshot EWRAM's real 256K
-     * boundary (0x02040000) by 60K. GBA's EWRAM bus wraps every 256K,
-     * so writes into that overshoot silently aliased back into the
-     * kernel's own static data at the *start* of EWRAM (0x02000000+),
-     * corrupting it - this went unnoticed until swap was actually
-     * exercised by a second process for the first time. Now declared
-     * as two separate, contiguous, non-overlapping blocks that together
-     * exactly fill the rest of real EWRAM after the user window.
+     * USERRAM used to sit right after UAREA's *old* IWRAM location, with
+     * SWAP filling the rest of EWRAM after it (68K) - once u0/uarea
+     * moved to EWRAM (see above), that left ~150K of EWRAM completely
+     * unused between UAREA's new end and USERRAM's old start. Moved
+     * USERRAM to directly follow UAREA and grew SWAP to fill everything
+     * else, reclaiming that dead space: with only one process fitting in
+     * USERRAM (32K) at a time, every other loaded-but-not-running
+     * process's data+stack+u-area sits parked in SWAP until sched()
+     * finds room to swap it in (see vm_sched.c) - 68K was only enough
+     * for about two ~30K processes' worth of parked state at once,
+     * which newproc()'s malloc3() ran out of the moment a third process
+     * (itself still just waiting its turn, not yet swapped in) tried to
+     * fork - not a leak, just too little room for more than a couple of
+     * queued processes.
      */
-    USERRAM (rw!x) : ORIGIN = 0x02027000, LENGTH = 32K   /* 0x0202 7000 - 0x0202 EFFF */
-    SWAP    (rw!x) : ORIGIN = 0x0202F000, LENGTH = 68K   /* 0x0202 F000 - 0x0203 FFFF */
+    USERRAM (rw!x) : ORIGIN = 0x02001800, LENGTH = 32K   /* 0x0200 1800 - 0x0200 97FF */
+    SWAP    (rw!x) : ORIGIN = 0x02009800, LENGTH = 218K  /* 0x0200 9800 - 0x0203 FFFF */
 }
 
 __kernel_flash_start	= ORIGIN(FLASH);
