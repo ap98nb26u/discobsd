@@ -78,14 +78,22 @@
 /* Bytes to disk blocks */
 #define btod(x)         (((x) + DEV_BSIZE-1) >> DEV_BSHIFT)
 
-#if 1 /* XXX Needed for ps, w, smlrc. To be removed. */
-//#define USER_DATA_START         (0x20000000)
-//#define USER_DATA_SIZE          (96 * 1024)     /* 96kb for user RAM. */
-//#define USER_DATA_END           (USER_DATA_START + USER_DATA_SIZE)
+/*
+ * Needed by userland tools (ps, w) that read another process's memory
+ * directly (via /dev/kmem) rather than through the kernel - they have no
+ * way to see the kernel's own __user_data_start/__user_data_end linker
+ * symbols (kern.ldscript), so the same USERRAM bounds are duplicated here
+ * as plain constants. Previously stale (0x20000000/96K, matching neither
+ * this port's actual USERRAM origin nor its 32K size - ps.c wouldn't even
+ * compile with them commented out) - keep in sync with kern.ldscript's
+ * USERRAM MEMORY block by hand if that ever moves again.
+ */
+#define USER_DATA_START         (0x02001800)
+#define USER_DATA_SIZE          (32 * 1024)     /* 32kb for user RAM. */
+#define USER_DATA_END           (USER_DATA_START + USER_DATA_SIZE)
 
-//#define stacktop(siz)           (USER_DATA_END)
-//#define stackbas(siz)           (USER_DATA_END-(siz))
-#endif /* XXX Needed for ps, w, smlrc. To be removed. */
+#define stacktop(siz)           (USER_DATA_END)
+#define stackbas(siz)           (USER_DATA_END-(siz))
 
 /*
  * User area: a user structure, followed by the kernel
@@ -127,7 +135,7 @@
 /*
  * Macros to decode processor status word.
  */
-#define USERMODE(psr)   0//((psr & IPSR_ISR_Msk) == 0)     /* No exceptions. */
+#define USERMODE(psr)   0 /* ((psr & IPSR_ISR_Msk) == 0) */ /* No exceptions. */
 /*
  * Ported from stm32 (Cortex-M's BASEPRI register, real hardware
  * priority-level masking) as a literal "0" stub, i.e. always false.
@@ -172,7 +180,7 @@ void clkstart(void);
 
 void led_control(int mask, int on);
 
-//void LL_GPIO_EnableClock(GPIO_TypeDef *GPIOx);
+/* void LL_GPIO_EnableClock(GPIO_TypeDef *GPIOx); */
 
 #endif /* KERNEL */
 
