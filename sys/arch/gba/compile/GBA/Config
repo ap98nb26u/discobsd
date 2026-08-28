@@ -20,7 +20,6 @@ makeoptions     DEBUG="-g"                  # Debug symbols
 options         "CPU_KHZ=16777"             # Oscillator frequency of CPU core
 options         "BUS_KHZ=16777"             # Frequency of peripheral bus
 options         "HALTREBOOT"                # If halted, press key to reboot
-options         "HZ=60"
 
 options         "GLOBAL_DEBUG"              # Enable debugging
 options         "DIAGNOSTIC"                # Enable diagnostics
