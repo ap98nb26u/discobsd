@@ -238,13 +238,13 @@ hardclock(pc, ps)
     if (++lbolt >= hz) {
         lbolt -= hz;
         ++time.tv_sec;
-        printf("DBG: hardclock tick, time.tv_sec=%u\n", (unsigned)time.tv_sec);
+        //printf("DBG: hardclock tick, time.tv_sec=%u\n", (unsigned)time.tv_sec);
     }
 
     if (needsoft && BASEPRI(ps)) {  /* if ps is high, just return */
         (void) splsoftclock();
-        printf("DBG: hardclock calling softclock, calltodo.c_next=%x\n",
-            (unsigned)calltodo.c_next);
+        //printf("DBG: hardclock calling softclock, calltodo.c_next=%x\n",
+        //    (unsigned)calltodo.c_next);
         softclock (pc, ps);
     }
 }
@@ -278,8 +278,8 @@ timeout (fun, arg, t)
     pnew->c_time = t;
     if (p2)
         p2->c_time -= t;
-    printf("DBG: timeout fun=%x arg=%x treq=%d p=%x c_time=%d\n",
-        (unsigned)fun, (unsigned)arg, treq, (unsigned)pnew, pnew->c_time);
+    //printf("DBG: timeout fun=%x arg=%x treq=%d p=%x c_time=%d\n",
+    //    (unsigned)fun, (unsigned)arg, treq, (unsigned)pnew, pnew->c_time);
     splx(s);
 }
 
@@ -298,8 +298,8 @@ untimeout (fun, arg)
     s = splclock();
     for (p1 = &calltodo; (p2 = p1->c_next) != 0; p1 = p2) {
         if (p2->c_func == fun && p2->c_arg == arg) {
-            printf("DBG: untimeout fun=%x arg=%x p=%x c_time=%d\n",
-                (unsigned)fun, (unsigned)arg, (unsigned)p2, p2->c_time);
+            //printf("DBG: untimeout fun=%x arg=%x p=%x c_time=%d\n",
+            //    (unsigned)fun, (unsigned)arg, (unsigned)p2, p2->c_time);
             if (p2->c_next && p2->c_time > 0)
                 p2->c_next->c_time += p2->c_time;
             p1->c_next = p2->c_next;

@@ -41,7 +41,18 @@
 #define HZ              100
 #endif
 
-#define MAXMEM		(128*1024)
+/*
+ * Maximum core (text+data+bss+stack) a single process may occupy - on
+ * this port that's a hard physical limit, not just a policy knob: only
+ * one process's core is ever resident at a time (see kern.ldscript's
+ * USERRAM), so this MUST match USERRAM's LENGTH exactly. Previously a
+ * stale 128K (unrelated to the actual 32K window of the time), which let
+ * exec_estab()'s overflow check silently pass a too-large /bin/sh image
+ * that then overran USERRAM into SWAP - see kern.ldscript for the full
+ * story. Keep in sync with USER_DATA_SIZE below and with USERRAM by hand
+ * if either ever moves again.
+ */
+#define MAXMEM		(64*1024)
 
 /*
  * System parameter formulae.
@@ -89,7 +100,7 @@
  * USERRAM MEMORY block by hand if that ever moves again.
  */
 #define USER_DATA_START         (0x02001800)
-#define USER_DATA_SIZE          (32 * 1024)     /* 32kb for user RAM. */
+#define USER_DATA_SIZE          (64 * 1024)     /* must match USERRAM/MAXMEM. */
 #define USER_DATA_END           (USER_DATA_START + USER_DATA_SIZE)
 
 #define stacktop(siz)           (USER_DATA_END)

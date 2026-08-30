@@ -102,7 +102,11 @@ void exec_setupstack(unsigned entryaddr, struct exec_params *epp)
     topp = (char ***)(epp->stack.vaddr + epp->stack.len - NBPW);            /* Last word of RAM */
     ucp = (char *)((unsigned)topp - roundup(epp->envbc + epp->argbc,NBPW)); /* arg string space */
     envp = (char **)(ucp - (epp->envc+1)*NBPW); /* Make place for envp[...], +1 for the 0 */
-    argp = envp - (epp->argc+1)*NBPW;           /* Make place for argv[...] */
+    argp = (char **)((char *)envp - (epp->argc+1)*NBPW); /* Make place for argv[...] */
+    /* envp is char**, so "envp - N*NBPW" above used to subtract
+     * N*NBPW *pointer-sized slots* (i.e. 4x too far on this 32-bit
+     * port) instead of N*NBPW bytes - cast to char* first so this
+     * matches the byte-offset math used for envp/ucp above it. */
 
 DEBUG("\texec_setupstack(): writing to argp = %p, ucp = %p\n", argp, ucp);
 #ifdef __mips__
@@ -267,8 +271,19 @@ int exec_estab(struct exec_params *epp)
 
     /*
      * Try out for overflow
+     *
+     * bss.len must be counted here too: it's part of the same
+     * data+bss region (u_procp->p_dsize below is data.len+bss.len),
+     * sitting directly below the stack's fixed top-of-USERRAM
+     * position. Omitting it let a large-bss binary (e.g. fsck,
+     * bss ~28K) pass this check while its actual data+bss span
+     * still overran into the stack's address range, silently
+     * corrupting bss globals via ordinary stack pushes - confirmed
+     * via a real-hardware run where fsck's `imax` global turned into
+     * a stack-pushed return-address-shaped value between setup()
+     * returning and pass1() reading it.
      */
-    if (epp->text.len + epp->data.len + epp->heap.len + epp->stack.len > MAXMEM) {
+    if (epp->text.len + epp->data.len + epp->bss.len + epp->heap.len + epp->stack.len > MAXMEM) {
         DEBUG("\texec_estab(): error: memory overflow\n");
         return ENOMEM;
     }

@@ -134,9 +134,13 @@ main(argc, argv)
 	 * that the file descriptors are already set up for us.
 	 * J. Gettys - MIT Project Athena.
 	 */
-	if (argc <= 2 || strcmp(argv[2], "-") == 0)
-	    strcpy(ttyn, ttyname(0));
-	else {
+	if (argc <= 2 || strcmp(argv[2], "-") == 0) {
+	    /* ttyname(0) can legitimately return NULL - see the %t case
+	     * in putf() below for why strcpy()ing it unchecked is unsafe
+	     * on this MMU-less port. */
+	    char *tn0 = ttyname(0);
+	    strcpy(ttyn, tn0 ? tn0 : "");
+	} else {
 	    strcpy(ttyn, dev);
 	    strncat(ttyn, argv[2], sizeof(ttyn)-sizeof(dev));
 	    if (strcmp(argv[0], "+") != 0) {
@@ -440,6 +444,21 @@ putf(cp)
 
 		case 't':
 			ttyn = ttyname(0);
+			if (ttyn == (char *) 0) {
+				/*
+				 * ttyname(0) can legitimately fail (e.g. no
+				 * /dev entry matches this fd's inode) - it
+				 * used to be passed straight to rindex()/
+				 * putstr() with no NULL check, which on this
+				 * MMU-less port doesn't fault but instead
+				 * prints raw BIOS ROM/open-bus bytes until a
+				 * stray NUL turns up, hanging getty's banner
+				 * indefinitely (observed on real GBAED
+				 * hardware right after the %h hostname field).
+				 */
+				putstr("?");
+				break;
+			}
 			slash = rindex(ttyn, '/');
 			if (slash == (char *) 0)
 				putstr(ttyn);

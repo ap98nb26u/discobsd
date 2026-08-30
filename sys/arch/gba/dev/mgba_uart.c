@@ -7,6 +7,7 @@
 #include <sys/uio.h>
 #include <sys/config.h>
 #include <sys/fcntl.h>
+#include <sys/errno.h>
 
 #include <gba/dev/mgbalog.h>
 #include <gba/dev/gba_text.h>
@@ -15,6 +16,7 @@
 void uartinit(int);
 void uartputc(dev_t dev, char c);
 char uartgetc(dev_t dev);
+extern struct tty uartttys[];
 
 void uartinit(int unit) {
     *(volatile unsigned short*)0x04FFF780 = 0xC0DE; // mGBA Enable
@@ -101,7 +103,31 @@ int uartwrite(dev_t dev, struct uio *uio, int flag)
     }
     return 0;
 }
-int uartioctl(dev_t dev, u_int cmd, caddr_t addr, int flag) { return -1; }
+int uartioctl(dev_t dev, u_int cmd, caddr_t addr, int flag)
+{
+    /*
+     * Was an unconditional `return -1;` stub - every sgtty ioctl
+     * (TIOCGETP/TIOCSETP/TIOCGETC/...) failed for this console no
+     * matter what, which silently broke isatty() (used by ttyname(),
+     * in turn used by login's rootterm() /etc/ttys "secure" check -
+     * confirmed root cause of "root login refused on this terminal"
+     * on real GBAED hardware) and every stty(1)/getty/login attempt
+     * to configure tty modes (ECHO included) on this console, and
+     * surfaced elsewhere as e.g. stty's "TIOCMGET: Unknown error: 0".
+     * uartread()/uartwrite() still bypass the tty line discipline
+     * entirely (no ttyinput()/ttstart() wiring - see their own
+     * comments), so this only fixes the *query/set flags* half of
+     * the tty API, not cooked-mode echo/line-editing - but that's
+     * exactly what isatty()/stty/tcgetattr-style callers need.
+     */
+    register struct tty *tp = &uartttys[minor(dev)];
+    int error;
+
+    error = ttioctl(tp, cmd, addr, flag);
+    if (error < 0)
+        error = ENOTTY;
+    return (error);
+}
 int uartselect(dev_t dev, int rw)
 {
     /*

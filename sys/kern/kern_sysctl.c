@@ -249,6 +249,16 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	case KERN_POSIX1:
 	case KERN_SAVED_IDS:
 		return (sysctl_rdint(oldp, oldlenp, newp, 0));
+	case KERN_ROMROOT:
+		/*
+		 * True when root is on a device that can never accept
+		 * writes (e.g. the GBA's mrams driver, which returns
+		 * EROFS for its filesystem partition - see mrams_strategy()
+		 * in arch/gba/dev/mrams.c). Lets /etc/rc skip fsck/mount
+		 * on a build where the root image is baked into the ROM
+		 * itself and can neither become dirty nor be repaired.
+		 */
+		return (sysctl_rdint(oldp, oldlenp, newp, major(rootdev) == 3));
 	default:
 		return (EOPNOTSUPP);
 	}

@@ -10,6 +10,7 @@
  */
 #include <sys/param.h>
 #include <sys/config.h>
+#include <sys/systm.h>
 
 #include <gba/dev/ed.h>
 
@@ -43,6 +44,28 @@
 #define DMA_DST (*(volatile uint32_t *)0x040000D8)
 #define DMA_LEN (*(volatile uint16_t *)0x040000DC)
 #define DMA_CTR (*(volatile uint16_t *)0x040000DE)
+
+/*
+ * Wait for channel 3's DMA_CTR busy bit to clear, bounded. Every
+ * "while (DMA_CTR & 0x8000) ;" in this file used to be unbounded like
+ * ed_sd_wait_f0()'s inner loop was (see the long comment there) - the
+ * same class of real-hardware hang is possible here too, since three
+ * of the four call sites DMA directly from the SD data register
+ * (ED_REG_SD_DAT), so a stuck/slow SD response can stall the DMA
+ * itself, not just plain memory-to-memory copies. Returns 0 on
+ * success, 1 on timeout.
+ */
+static int
+ed_dma_wait(void)
+{
+    volatile uint32_t i;
+
+    for (i = 0; i < 50000; i++) {
+        if ((DMA_CTR & 0x8000) == 0)
+            return 0;
+    }
+    return 1;
+}
 
 static uint16_t ed_cart_cfg;
 static uint16_t ed_sd_cfg;
@@ -110,20 +133,35 @@ ed_sd_speed(uint16_t speed)
     ed_reg_wr(ED_REG_SD_CFG, ed_sd_cfg);
 }
 
+/*
+ * Same fix as ed_sd_dat_wr()/ed_sd_dat_rd() below - these are the
+ * command-line equivalents (sd_cmd()'s per-byte command/response
+ * transfer in sd.c), found by re-auditing this file for any
+ * remaining unbounded ED_STAT_SD_BUSY waits after the data-line pair
+ * turned out not to be the only ones left.
+ */
 void
 ed_sd_cmd_wr(uint8_t data)
 {
+    volatile uint32_t i;
+
     ed_reg_wr(ED_REG_SD_CMD, data);
-    while (ed_reg_rd(ED_REG_STATUS) & ED_STAT_SD_BUSY)
-        ;
+    for (i = 0; i < 50000; i++) {
+        if ((ed_reg_rd(ED_REG_STATUS) & ED_STAT_SD_BUSY) == 0)
+            break;
+    }
 }
 
 uint8_t
 ed_sd_cmd_rd(void)
 {
     uint8_t dat = (uint8_t)ed_reg_rd(ED_REG_SD_CMD);
-    while (ed_reg_rd(ED_REG_STATUS) & ED_STAT_SD_BUSY)
-        ;
+    volatile uint32_t i;
+
+    for (i = 0; i < 50000; i++) {
+        if ((ed_reg_rd(ED_REG_STATUS) & ED_STAT_SD_BUSY) == 0)
+            break;
+    }
     return dat;
 }
 
@@ -133,20 +171,47 @@ ed_sd_cmd_val(void)
     return (uint8_t)ed_reg_rd(ED_REG_SD_CMD + 2);
 }
 
+/*
+ * These two are called once per byte during multi-block writes
+ * (sd_write_sectors()'s CRC/token handshake in sd.c) - by far the
+ * hottest and, until now, the only remaining unbounded
+ * ED_STAT_SD_BUSY waits left in this file (see ed_sd_wait_f0()'s and
+ * ed_dma_wait()'s comments for the earlier fixes in this same class
+ * of bug). Confirmed by real-hardware testing: fsck -p's first
+ * preen-mode repair write hung forever here, right where the earlier
+ * fixes (ed_sd_wait_f0(), ed_dma_wait()) didn't reach - this is the
+ * first code path in this whole port to exercise a real multi-byte
+ * SD write handshake under load. Neither function's signature has a
+ * failure return (ed_sd_dat_rd() returns the byte read, not a status
+ * code, and threading an error path through every caller in
+ * sd_write_sectors() is a bigger change than this needs) - just
+ * bound the wait so a stuck card times out instead of freezing the
+ * kernel forever; the caller ends up using possibly-stale status
+ * bits on timeout, but that's a far smaller problem than a total
+ * hang.
+ */
 void
 ed_sd_dat_wr(uint8_t data)
 {
+    volatile uint32_t i;
+
     ed_reg_wr(ED_REG_SD_DAT, 0xff00 | data);
-    while (ed_reg_rd(ED_REG_STATUS) & ED_STAT_SD_BUSY)
-        ;
+    for (i = 0; i < 50000; i++) {
+        if ((ed_reg_rd(ED_REG_STATUS) & ED_STAT_SD_BUSY) == 0)
+            break;
+    }
 }
 
 uint8_t
 ed_sd_dat_rd(void)
 {
     uint8_t dat = (uint8_t)(ed_reg_rd(ED_REG_SD_DAT) >> 8);
-    while (ed_reg_rd(ED_REG_STATUS) & ED_STAT_SD_BUSY)
-        ;
+    volatile uint32_t i;
+
+    for (i = 0; i < 50000; i++) {
+        if ((ed_reg_rd(ED_REG_STATUS) & ED_STAT_SD_BUSY) == 0)
+            break;
+    }
     return dat;
 }
 
@@ -161,14 +226,48 @@ ed_sd_wait_f0(void)
     uint16_t i;
     uint8_t mode = ED_SD_MODE4 | ED_SD_WAIT_F0 | ED_SD_STRT_F0;
 
-    for (i = 0; i < 65000; i++) {
+    /*
+     * This outer loop retries up to "i" times, each retry doing its
+     * own bounded inner busy-wait below - the two bounds multiply.
+     * At 65000 outer retries, a case where the inner wait genuinely
+     * times out every single time (not the common case, but exactly
+     * what happens when the card really isn't responding) turned
+     * into a real-hardware hang of well over 6 hours before this
+     * fix - not a "spurious timeout from too little patience" as
+     * first assumed, but this exact multiplication making a bounded
+     * inner loop practically unbounded in aggregate. Cut sharply;
+     * this many attempts at "change mode and retry" was never really
+     * the point of the outer loop (that's a small, fixed number of
+     * legitimate retry strategies) - it was only ever this large
+     * because the inner wait used to be unbounded, so overall
+     * patience had to come from somewhere.
+     */
+    for (i = 0; i < 50; i++) {
+        uint32_t busywait;
+
         ed_sd_mode(mode);
         ed_reg_rd(ED_REG_SD_DAT);
-        for (;;) {
+        /*
+         * ED_STAT_SD_BUSY can get stuck set (observed on real GBAED
+         * hardware under fsck's scattered read/write access pattern,
+         * never hit by this port's earlier, mostly-sequential disk
+         * I/O) - this used to be an unbounded "for (;;)", hanging the
+         * whole kernel forever with interrupts masked. Bound it and
+         * report a timeout like every other wait in this file does,
+         * rather than spin forever. (A post-execve crash right after
+         * this fix was first added turned out to be caused by
+         * booting unix.bin directly as \GBASYS\GBAOS.gba on the
+         * EverDrive rather than through its stock menu - unrelated
+         * to this loop; confirmed by reverting this exact change and
+         * seeing the same crash. Restored as originally written.)
+         */
+        for (busywait = 0; busywait < 50000; busywait++) {
             resp = ed_reg_rd(ED_REG_STATUS);
             if ((resp & ED_STAT_SD_BUSY) == 0)
                 break;
         }
+        if (busywait == 50000)
+            return 1;
         if ((resp & ED_STAT_SDC_TOUT) == 0)
             return 0;
         mode = ED_SD_MODE4 | ED_SD_WAIT_F0;
@@ -185,8 +284,8 @@ ed_sd_dma_wr(const void *src)
     DMA_DST = (uint32_t)(ED_REG_BASE + ED_REG_SD_DAT * 2);
     DMA_LEN = 256;
     DMA_CTR = 0x8040;
-    while (DMA_CTR & 0x8000)
-        ;
+    if (ed_dma_wait())
+        return 1;
     return 0;
 }
 
@@ -198,8 +297,15 @@ ed_sd_read_crc_ram(void *dst)
     DMA_DST = (uint32_t)dst;
     DMA_LEN = 256;
     DMA_CTR = 0x8100;
-    while (DMA_CTR & 0x8000)
-        ;
+    /*
+     * No error return here (void, pre-existing signature - see
+     * sd_crc16()'s caller in sd.c, which has no failure path of its
+     * own to propagate into either). A timeout just leaves whatever
+     * partial/stale data was already in dst rather than hanging
+     * forever - a wrong CRC on the next write is a far smaller
+     * problem than freezing the kernel.
+     */
+    (void)ed_dma_wait();
 }
 
 /*
@@ -220,8 +326,10 @@ ed_sd_dma_to_rom(void *dst, int slen)
         DMA_DST = (uint32_t)buf;
         DMA_LEN = 256;
         DMA_CTR = 0x8000;
-        while (DMA_CTR & 0x8000)
-            ;
+        if (ed_dma_wait()) {
+            ed_reg_wr(ED_REG_CFG, ed_cart_cfg);
+            return 1;
+        }
         ed_reg_wr(ED_REG_CFG, ed_cart_cfg);
 
         slen--;
@@ -244,8 +352,8 @@ ed_sd_dma_rd(void *dst, int slen)
         DMA_DST = (uint32_t)dst;
         DMA_LEN = 256;
         DMA_CTR = 0x8000;
-        while (DMA_CTR & 0x8000)
-            ;
+        if (ed_dma_wait())
+            return 1;
 
         slen--;
         dst = (char *)dst + 512;

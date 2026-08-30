@@ -24,7 +24,19 @@
 
 extern  int returntosingle;
 
-static char memdata[16 * sizeof(BUFAREA)];
+/*
+ * 16 BUFAREA-worth (~16.7K) doesn't fit alongside the rest of fsck's
+ * data+bss in this port's fixed 64K USERRAM window - exec_estab()'s
+ * overflow check let the resulting ~67K image load anyway (a separate
+ * bug, since fixed: see exec_subr.c), which silently overran the
+ * process's fixed-position stack into the tail of this array,
+ * corrupting fsck's own globals (observed corrupting `imax` between
+ * setup() and pass1()). This filesystem only ever needs ~1.4K here
+ * (see setup()'s bmapsz+smapsz+lncntsz) - 4 buffers' worth leaves
+ * ample headroom before setup()'s /dev/temp0 scratch-file fallback
+ * would ever be needed, while fitting comfortably under 64K.
+ */
+static char memdata[4 * sizeof(BUFAREA)];
 
 char *
 unrawname(cp)
@@ -116,11 +128,13 @@ checkfilesys(filesys)
     register ino_t *zp;
 
     devnam = filesys;
+    printf("DBG: checkfilesys before setup(%s)\n", filesys);
     if (setup(filesys) == 0) {
         if (preen)
             pfatal("CAN'T CHECK FILE SYSTEM.\n");
         return;
     }
+    printf("DBG: checkfilesys after setup, before pass1\n");
     /*
      * 1: scan inodes tallying blocks used
      */
@@ -131,6 +145,7 @@ checkfilesys(filesys)
         printf("** Phase 1 - Check Blocks and Sizes\n");
     }
     pass1();
+    printf("DBG: checkfilesys after pass1\n");
 
     /*
      * 1b: locate first references to duplicates, if any
@@ -148,6 +163,7 @@ checkfilesys(filesys)
     if (preen == 0)
         printf("** Phase 2 - Check Pathnames\n");
     pass2();
+    printf("DBG: checkfilesys after pass2\n");
 
     /*
      * 3: scan inodes looking for disconnected directories
@@ -155,6 +171,7 @@ checkfilesys(filesys)
     if (preen == 0)
         printf("** Phase 3 - Check Connectivity\n");
     pass3();
+    printf("DBG: checkfilesys after pass3\n");
 
     /*
      * 4: scan inodes looking for disconnected files; check reference counts
@@ -162,6 +179,7 @@ checkfilesys(filesys)
     if (preen == 0)
         printf("** Phase 4 - Check Reference Counts\n");
     pass4();
+    printf("DBG: checkfilesys after pass4\n");
 
     flush(&dfile, &fileblk);
 
@@ -171,6 +189,7 @@ checkfilesys(filesys)
     if (preen == 0)
         printf("** Phase 5 - Check Free List\n");
     pass5();
+    printf("DBG: checkfilesys after pass5\n");
 
     /*
      * print out summary statistics

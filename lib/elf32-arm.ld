@@ -17,8 +17,21 @@ SECTIONS
 /* XXX PROVIDE (__executable_start = SEGMENT_START("text-segment", 0x8000)); . = SEGMENT_START("text-segment", 0x8000); */
   /* Must match __user_data_start (ORIGIN(USERRAM)) in
      sys/arch/gba/conf/kern.ldscript - the kernel always loads a.out
-     images at that address, not at the start of EWRAM. */
-  PROVIDE (__executable_start = 0x02027000); . = 0x02027000;
+     images at that address, not at the start of EWRAM. USERRAM moved
+     from 0x02027000 to 0x02001800 in the same session as the u/u0-to-
+     EWRAM and SWAP-enlargement changes (see kern.ldscript) - this file
+     was missed at the time, so every userland program built since then
+     (including /sbin/init) was linked assuming the *old* address, while
+     the kernel actually loads them at the new one. Most code still ran
+     fine (relative branches/PC-relative addressing don't care), but any
+     absolute address baked into the binary - e.g. a literal-pool
+     pointer to a global variable - pointed at the wrong physical
+     location once loaded, silently landing wherever that stale address
+     now falls (in this port's case, partway into the enlarged SWAP
+     region, since it occupies roughly where USERRAM used to be).
+     Whenever USERRAM moves again, update *both* files together and
+     rebuild every userland binary, not just the kernel. */
+  PROVIDE (__executable_start = 0x02001800); . = 0x02001800;
   .interp         : { *(.interp) }
   .note.gnu.build-id : { *(.note.gnu.build-id) }
   .hash           : { *(.hash) }
