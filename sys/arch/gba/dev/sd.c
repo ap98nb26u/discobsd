@@ -92,7 +92,18 @@
 #define SD_ERR_CMD_TIMEOUT  1
 #define SD_ERR_CRC_ERROR    2
 
-#define SD_CMD_WAIT     2048
+/*
+ * This bounds retry loops that call ed_sd_cmd_rd()/ed_sd_cmd_wr()
+ * (ed.c) each iteration - those already retry internally with their
+ * own bound, so any large count here multiplies the two bounds
+ * together. This was 2048 and, combined with sd_cmd()'s own
+ * SD_CMD_WAIT-bounded response-wait loop below (also multiplying
+ * against ed_sd_cmd_rd()'s internal bound), was part of what turned
+ * a genuinely-unresponsive-card case into a many-hour real-hardware
+ * hang before any of these bounds were sized with this multiplication
+ * in mind. Cut sharply.
+ */
+#define SD_CMD_WAIT     50
 
 static uint8_t sd_resp_buff[18];
 static uint8_t sd_card_flags;          /* SD_TYPE_HC | SD_TYPE_V2 */
@@ -299,7 +310,16 @@ sd_close_rw(void)
     ed_sd_dat_rd();
     ed_sd_mode(ED_SD_MODE2);
 
-    i = 65535;
+    /*
+     * ed_sd_dat_rd() (ed.c) already retries internally with its own
+     * bound (added this session) before giving up - looping this
+     * many more times around it multiplies the two bounds together,
+     * the same "outer x inner" mistake ed_sd_wait_f0() had (see its
+     * comment in ed.c) and just as capable of turning a bounded wait
+     * into a many-hour real-hardware hang when the card genuinely
+     * isn't responding. Cut sharply for the same reason.
+     */
+    i = 50;
     while (--i) {
         if (ed_sd_dat_rd() == 0xff)
             break;
@@ -394,7 +414,8 @@ sd_write_sectors(uint32_t sd_addr, const void *src, uint16_t slen)
         ed_sd_dat_wr(0xff);
         ed_sd_dat_rd();
 
-        i = 1024;
+        /* Same outer-x-inner multiplication concern as below - cut. */
+        i = 50;
         while ((ed_sd_dat_rd() & 1) != 0 && --i != 0)
             ;
         if (i == 0)
@@ -413,7 +434,15 @@ sd_write_sectors(uint32_t sd_addr, const void *src, uint16_t slen)
         ed_sd_mode(ED_SD_MODE1);
         ed_sd_dat_rd();
 
-        i = 65535;
+        /*
+         * ed_sd_dat_rd() already retries internally with its own
+         * bound - looping this many more times around it multiplies
+         * the two bounds together (the same "outer x inner" mistake
+         * ed_sd_wait_f0() had, see its comment in ed.c), capable of
+         * turning a bounded wait into a many-hour real-hardware hang
+         * when the card genuinely isn't responding. Cut sharply.
+         */
+        i = 50;
         while (--i) {
             if (ed_sd_dat_rd() == 0xff)
                 break;
@@ -438,6 +467,47 @@ card_init(int unit)
 
     if (unit != 0)
         return 0;
+
+    /*
+     * Power/signal settle delay before talking to the card. Standard
+     * SD initialization practice calls for >=1ms of settle time after
+     * power-up before issuing the first command, on top of the >=74
+     * clock cycles already sent below - this port never had either
+     * (mdelay(), machdep.c, is an empty GBA stub, never implemented).
+     * Booting through the EverDrive's stock ROM-selection menu first
+     * happened to provide enough incidental delay to mask this; a
+     * cold power-on straight into this ROM (as \GBASYS\GBAOS.gba)
+     * does not, and card_init() below can then fail or hang mid
+     * command depending on how unsettled the card/FPGA still is.
+     * mdelay() itself is unusable (no real timebase behind it on this
+     * port), so busy-wait on raw CPU cycles instead - not precise,
+     * just needs to be "clearly more than a few ms" at ~16.78MHz.
+     */
+    {
+        /*
+         * This runs from config() (init_main.c's main(), before
+         * proc[0]/u are set up), but cpu_initclocks() (also called
+         * from config(), just before device probing) has already
+         * armed TIMER0 - so a busy-wait this long left interrupts
+         * enabled through several timer ticks, and this session's
+         * first attempt at this delay (interrupts left alone)
+         * regressed a previously-working A-button/menu boot into
+         * crash-rebooting at the same spot every time. Almost
+         * certainly hardclock()/schedcpu() firing against process
+         * state that doesn't exist yet. Block interrupts for the
+         * duration and explicitly re-enable after - nothing between
+         * here and the real interrupt-enable point later in boot
+         * needs them.
+         */
+        extern void gba_irq_allow(void);
+        extern void gba_irq_block(void);
+        volatile uint32_t settle;
+
+        gba_irq_block();
+        for (settle = 0; settle < 100000; settle++)
+            ;
+        gba_irq_allow();
+    }
 
     sd_card_flags = 0;
 
@@ -808,6 +878,10 @@ bad:    bp->b_flags |= B_ERROR;
         dk_bytes[du->dkindex] += bp->b_bcount;
     }
 #endif
+
+    //printf("DBG: sdstrategy unit=%d %s offset=%d bcount=%d\n",
+    //    unit, (bp->b_flags & B_READ) ? "READ" : "WRITE",
+    //    offset, bp->b_bcount);
 
     if (bp->b_flags & B_READ) {
         card_read(unit, offset, bp->b_addr, bp->b_bcount);
