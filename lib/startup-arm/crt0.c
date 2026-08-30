@@ -64,19 +64,6 @@ _start (argc, argv, env)
 	char **argv;
 	char **env;
 {
-	/*
-	 * Raw VRAM write, no libc/syscall dependency at all - if this
-	 * doesn't show up, we never even reached this instruction (crt0
-	 * entry itself is failing); if it shows but the printf() below
-	 * never appears, the problem is specifically in stdio/write().
-	 */
-	{
-		volatile unsigned short *vram = (volatile unsigned short *)0x06000000;
-		int i;
-		for (i = 0; i < 240*4; i++)
-			vram[i] = 0x03E0; /* green, Mode 3 top rows */
-	}
-
 	printf("DBG: _start entered, argc=%d argv=%x env=%x\n",
 	    argc, (unsigned)argv, (unsigned)env);
 	environ = env;

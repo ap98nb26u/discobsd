@@ -1005,6 +1005,10 @@ ttyinput (c, tp)
     long t_flags = tp->t_flags;
     int i;
 
+    printf("DBG: ttyinput c=%x t_flags=%lx RAW=%d CBREAK=%d ECHO=%d\n",
+        c & 0377, t_flags, (t_flags & RAW) != 0, (t_flags & CBREAK) != 0,
+        (t_flags & ECHO) != 0);
+
     /*
      * If input is pending take it first.
      */

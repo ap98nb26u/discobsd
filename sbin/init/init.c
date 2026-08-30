@@ -59,6 +59,17 @@ int	mergflag;
 char	tty[20];
 jmp_buf	sjbuf, shutpass;
 time_t	time0;
+int	dbgfd = -1;	/* DBG: fd to /dev/console, opened in main(), used
+			 * directly (not via 0/1/2) since children reassign
+			 * 0/1/2 to other things before we'd get a chance to
+			 * print anything on them. */
+
+void
+dbg(const char *s)
+{
+	if (dbgfd >= 0)
+		write(dbgfd, s, strlen(s));
+}
 
 void	reset();
 void	setsecuritylevel();
@@ -314,10 +325,13 @@ runcom(oldhowto)
 			dup2(f, 0);
 		dup2(0, 1);
 		dup2(0, 2);
-		if (oldhowto & RB_SINGLE)
+		if (oldhowto & RB_SINGLE) {
+			dbg("DBG: runcom exec WITHOUT autoboot\n");
 			execl(shell, shell, runc, (char *)0);
-		else
+		} else {
+			dbg("DBG: runcom exec WITH autoboot\n");
 			execl(shell, shell, runc, "autoboot", (char *)0);
+		}
 		exit(1);
 	}
 	while (wait(&status) != pid)
@@ -528,6 +542,16 @@ main(argc, argv)
         return 0;
 #else
 	int howto, oldhowto;
+	char dbgbuf[80];
+
+	/* DBG: open a dedicated fd to /dev/console for dbg() - init's own
+	 * fds 0/1/2 aren't connected to anything at this point, and even
+	 * once dup2'd, single()/runcom() reassign 0/1/2 again in their
+	 * forked children before we'd get a chance to print anything on
+	 * them (e.g. runcom's child dup2's fd 0, opened on "/", onto both
+	 * 1 and 2 - writing to a directory fd just fails silently). Keep
+	 * this on its own fd instead of fighting over 1/2. */
+	dbgfd = open(ctty, O_RDWR, 0);
 
 	time0 = time(0);
 	if (argc > 1 && argv[1][0] == '-') {
@@ -546,6 +570,13 @@ main(argc, argv)
 	} else {
 		howto = RB_SINGLE;
 	}
+	sprintf(dbgbuf, "DBG: init argc=%d argv1=%s howto=%#x\n",
+	    argc, argc > 1 ? argv[1] : "(none)", howto);
+	dbg(dbgbuf);
+	sprintf(dbgbuf, "DBG: init raw argv=%x argv0=%x argv1raw=%x\n",
+	    (unsigned)argv, (unsigned)argv[0],
+	    argc > 1 ? (unsigned)argv[1] : 0xdeadbeef);
+	dbg(dbgbuf);
 	if (getuid() != 0)
 		exit(1);
 	if (getpid() != 1)
@@ -563,6 +594,8 @@ main(argc, argv)
 	for (;;) {
 		oldhowto = howto;
 		howto = RB_SINGLE;
+		sprintf(dbgbuf, "DBG: init loop top, oldhowto=%#x\n", oldhowto);
+		dbg(dbgbuf);
 		if (setjmp(shutpass) == 0)
 			shutdown();
 		if (oldhowto & RB_SINGLE)

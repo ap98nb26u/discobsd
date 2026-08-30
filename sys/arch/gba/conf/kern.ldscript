@@ -38,13 +38,11 @@ MEMORY {
     UAREA   (rw!x) : ORIGIN = 0x02000C00, LENGTH = 3K    /* 0x0200 0C00 - 0x0200 17FF */
     /*
      * USERRAM is just the user process's own addressable data+stack
-     * window (32K - big enough for a single process like /sbin/init,
-     * ~30K observed); SWAP is mrams.c's (GBA/mGBA-only) swap staging
-     * area, a *real* EWRAM range that mrams_write()/mrams_read() copy
-     * to/from directly (see __swap_start/__swap_end there) - it is NOT
-     * a disk partition on this config, unlike GBAED's real sd.c (which
-     * uses an 8MB SD partition instead and was never the bottleneck
-     * here).
+     * window; SWAP is mrams.c's (GBA/mGBA-only) swap staging area, a
+     * *real* EWRAM range that mrams_write()/mrams_read() copy to/from
+     * directly (see __swap_start/__swap_end there) - it is NOT a disk
+     * partition on this config, unlike GBAED's real sd.c (which uses an
+     * 8MB SD partition instead and was never the bottleneck here).
      *
      * USERRAM used to sit right after UAREA's *old* IWRAM location, with
      * SWAP filling the rest of EWRAM after it (68K) - once u0/uarea
@@ -52,17 +50,28 @@ MEMORY {
      * unused between UAREA's new end and USERRAM's old start. Moved
      * USERRAM to directly follow UAREA and grew SWAP to fill everything
      * else, reclaiming that dead space: with only one process fitting in
-     * USERRAM (32K) at a time, every other loaded-but-not-running
-     * process's data+stack+u-area sits parked in SWAP until sched()
-     * finds room to swap it in (see vm_sched.c) - 68K was only enough
-     * for about two ~30K processes' worth of parked state at once,
-     * which newproc()'s malloc3() ran out of the moment a third process
-     * (itself still just waiting its turn, not yet swapped in) tried to
-     * fork - not a leak, just too little room for more than a couple of
-     * queued processes.
+     * USERRAM at a time, every other loaded-but-not-running process's
+     * data+stack+u-area sits parked in SWAP until sched() finds room to
+     * swap it in (see vm_sched.c).
+     *
+     * Raised from 32K to 64K after /bin/sh (data+bss ~46K, far bigger
+     * than /sbin/init's ~28K) silently overran USERRAM's old end into
+     * SWAP during exec: exec_estab()'s overflow check compared against
+     * MAXMEM (a stale 128K, unrelated to this port's actual physical
+     * window - see machparam.h) instead of the real USERRAM size, so it
+     * never caught the mismatch, and the too-large image was read
+     * straight over both the SWAP region and the fixed stack address
+     * exec_setupstack() computed from the old, too-small window - both
+     * mGBA and real GBAED hardware just went silent right after
+     * "reading a.out image", no crash. MAXMEM now matches USERRAM's
+     * length so this fails cleanly (ENOMEM) instead, for anything still
+     * too big (e.g. /sbin/fsck, ~67K). Every KB added here comes
+     * straight out of SWAP, which must keep shrinking to match - keep
+     * USERRAM, MAXMEM (param.h/machparam.h), and USER_DATA_SIZE
+     * (machparam.h) all in sync by hand if this moves again.
      */
-    USERRAM (rw!x) : ORIGIN = 0x02001800, LENGTH = 32K   /* 0x0200 1800 - 0x0200 97FF */
-    SWAP    (rw!x) : ORIGIN = 0x02009800, LENGTH = 218K  /* 0x0200 9800 - 0x0203 FFFF */
+    USERRAM (rw!x) : ORIGIN = 0x02001800, LENGTH = 64K   /* 0x0200 1800 - 0x0201 17FF */
+    SWAP    (rw!x) : ORIGIN = 0x02011800, LENGTH = 186K  /* 0x0201 1800 - 0x0203 FFFF */
 }
 
 __kernel_flash_start	= ORIGIN(FLASH);
