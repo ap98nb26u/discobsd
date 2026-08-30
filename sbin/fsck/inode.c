@@ -119,8 +119,11 @@ ginode(inumber)
     daddr_t iblk;
     register DINODE *dp;
 
-    if (inumber < ROOTINO || inumber > imax)
+    if (inumber < ROOTINO || inumber > imax) {
+        printf("DBG: ginode fail inumber=%u ROOTINO=%u imax=%u &imax=%p\n",
+            inumber, ROOTINO, imax, (void *)&imax);
         errexit("bad inode number %u to ginode\n", inumber);
+    }
     iblk = itod(inumber);
     if (iblk < startib || iblk >= startib + NINOBLK) {
         if (inoblk.b_dirty) {

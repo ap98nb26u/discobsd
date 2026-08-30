@@ -141,11 +141,36 @@ malloc(nbytes)
 		if ((INT)q == -1)
 			return(NULL);
 		ASSERT(q > alloct);
-		alloct->ptr = q;
-		if (q != alloct+1)
-			alloct->ptr = setbusy(alloct->ptr);
-		alloct = q->ptr = q+temp-1;
-		alloct->ptr = setbusy(allocs);
+		{
+			/*
+			 * Finalize the new region (q's own free-block link,
+			 * and the new top's terminator) *before* publishing
+			 * it via alloct->ptr = q below. This used to link q
+			 * in first and set up q/the new top second, leaving
+			 * a window where q was reachable from the existing
+			 * arena (via the old alloct) but its own ->ptr and
+			 * the new top's terminator weren't set yet - freshly
+			 * sbrk()'d memory, so not necessarily zero or
+			 * anything else predictable. A malloc() reentered in
+			 * that window (e.g. from a signal handler) walking
+			 * into q via the coalescing while() above would chase
+			 * whatever garbage was there. Same bug, same fix as
+			 * bin/sh's addblok() (see blok.c) - that one was
+			 * confirmed with a hardware watchpoint; this is the
+			 * same "publish before finalize" pattern in the
+			 * general-purpose allocator every other program here
+			 * links against.
+			 */
+			union store *newtop = q + temp - 1;
+
+			q->ptr = newtop;
+			newtop->ptr = setbusy(allocs);
+
+			alloct->ptr = q;
+			if (q != alloct+1)
+				alloct->ptr = setbusy(alloct->ptr);
+			alloct = newtop;
+		}
 	}
 found:
 	allocp = p + nw;

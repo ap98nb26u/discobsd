@@ -107,7 +107,7 @@ int	sysctl_mpu(char *, char **, int *, int, int *);
 int	findname(char *, char *, char **, struct list *);
 void	usage(void);
 
-int	Aflag, aflag, nflag, wflag;
+int	Aflag, aflag, nflag, qflag, wflag;
 
 extern char *optarg;
 extern int optind, errno;
@@ -127,7 +127,7 @@ main(int argc, char *argv[])
 {
 	int ch, lvl1;
 
-	while ((ch = getopt(argc, argv, "Aanw")) != EOF) {
+	while ((ch = getopt(argc, argv, "Aanqw")) != EOF) {
 		switch (ch) {
 		case 'A':
 			Aflag = 1;
@@ -138,6 +138,21 @@ main(int argc, char *argv[])
 			break;
 
 		case 'n':
+			nflag = 1;
+			break;
+
+		case 'q':
+			/*
+			 * Test-only mode for a single CTLTYPE_INT name: exit
+			 * status reflects the fetched value (0 = nonzero/true,
+			 * 1 = zero/false) instead of printing anything - lets
+			 * a boot script use a plain "if sysctl -q name; then"
+			 * without backticks/pipes, which pull in far more of
+			 * this port's shell (fork+pipe+read) than a single
+			 * "wait for exit status" the shell already exercises
+			 * for every other command it runs.
+			 */
+			qflag = 1;
 			nflag = 1;
 			break;
 
@@ -357,6 +372,19 @@ parse(char *string, int flags)
 	size = BUFSIZ;
 	if (sysctl(mib, len, buf, &size, newsize ? newval : (void *)0,
 	    newsize) == -1) {
+		/*
+		 * -q only overrode the *success* path (inside the
+		 * CTLTYPE_INT case below) - on failure this fell through
+		 * every case here to main()'s normal "return(0)", which a
+		 * caller testing exit status ("if sysctl -q name; then")
+		 * reads as success/true. A name this kernel doesn't
+		 * support (e.g. querying kern.romroot against a kernel
+		 * built before that name existed) failed exactly this way,
+		 * confirmed on real GBAED hardware misreporting itself as
+		 * ROM-backed via a stale kernel that predated kern.romroot.
+		 */
+		if (qflag)
+			exit(1);
 		if (flags == 0)
 			return;
 		switch (errno) {
@@ -408,6 +436,8 @@ parse(char *string, int flags)
 	}
 	switch (type) {
 	case CTLTYPE_INT:
+		if (qflag)
+			exit(*(int *)buf ? 0 : 1);
 		if (newsize == 0) {
 			if (!nflag)
 				fprintf(stdout, "%s%s", string, equ);

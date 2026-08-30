@@ -64,20 +64,50 @@ static volatile unsigned debug_target_scratch;
 static volatile unsigned saved_tf_psr;
 
 /*
- * Holds the caller's real r5 (a callee-saved AAPCS register, r4-r11)
- * across the r0-r12 restore below - the trampoline uses r5 as scratch
- * *after* that restore (for the gba_exec_switched_stack check and again
- * to reload saved_tf_psr), clobbering whatever the caller actually had
- * there, with nothing putting it back before the final bx lr. Any
- * caller that keeps a live value in r5 across a syscall (legitimate,
- * since AAPCS guarantees r4-r11 survive a call) had it silently
- * replaced by 0/1 (gba_exec_switched_stack) or the raw tf_psr word -
- * observed as a userland base-address computation using r5 turning
- * into garbage after several syscalls, corrupting a later execve()'s
- * arguments even though the exec_estab()/swap data underneath it was
- * byte-for-byte correct the whole time.
+ * Why the trapframe now lives on a dedicated kernel stack (UAREA, u/u_end)
+ * instead of directly on top of whatever sp the caller had: it used to be
+ * built on the calling process's OWN user-mode stack, and syscall_handler()
+ * ran on it unmodified - meaning every syscall's C call chain, including
+ * execve()'s exec_clear()/exec_setupstack(), executed on the SAME memory
+ * that exec_clear() then bzero()s out as the new image's stack (both old
+ * and new stacks are always pinned to the same fixed top address,
+ * __user_data_end/u_end - see kern.ldscript). Once a new image's stack
+ * needed clearing more bytes than the current call depth had *not yet*
+ * used, the bzero loop marched forward and overwrote its own live locals
+ * (including epp/exec_params itself) out from under itself - observed as
+ * /bin/sh's exec hanging inside exec_clear()'s bzero(stack) with a
+ * corrupted, effectively-infinite byte count, while /sbin/init's much
+ * shallower boot-time exec happened not to reach far enough to clobber
+ * anything load-bearing. Fixed by relocating the entire trapframe onto
+ * the kernel stack for the whole syscall body (the same physical stack
+ * every other port's syscall entry, and this port's own boot-time
+ * main()/icode jump in locore0.S, already uses).
+ *
+ * The caller's real sp - needed to restore it verbatim on a normal
+ * return - is stashed directly in the trapframe's own tf_ip (r12) slot
+ * rather than a separate global, and deliberately NOT restored to its
+ * original r12 value: a first attempt used a "saved_user_sp" global
+ * instead, which broke fork()'s child - the child doesn't resume through
+ * this trampoline's normal call/return at all, but via a setjmp/longjmp
+ * captured deep inside newproc() (see kern_fork.c) that gets replayed
+ * whenever the scheduler eventually swaps it in, arbitrarily later and
+ * interleaved with any number of *unrelated* processes' own syscalls in
+ * between - each of which stomped the single shared global with its own
+ * caller's sp before the fork()ed child ever got a chance to read it
+ * back, observed as both mGBA and real GBAED hardware hanging completely
+ * silent (no more hardclock ticks - IME never got re-enabled) right
+ * after "newproc resumed via longjmp (child, pid=N)". The trapframe
+ * itself doesn't have this problem: it lives on the kernel stack, which
+ * IS part of the per-process "u" struct the swtch()/resume() u/u0
+ * ping-pong already swaps wholesale on every context switch (see the
+ * long comment on U0AREA/UAREA in kern.ldscript) - so stashing the value
+ * there instead makes it correctly follow whichever process it belongs
+ * to, no matter how much unrelated activity happens before that process
+ * next resumes. tf_ip's original incoming r12 doesn't need preserving:
+ * per the existing gba_exec_switched_stack comment below, CALL_SIMSYS
+ * (lib/libc/arm/sys/SYS.h) only ever puts its own disposable jump-target
+ * scratch there, never anything a caller reads back.
  */
-static volatile unsigned saved_user_r5;
 
 /*
  * Set by syscall_handler() only when execve() just replaced the calling
@@ -122,6 +152,47 @@ void simulate_swi_via_inline_data(void) {
         // fnameが正しくargpだけ壊れていたのはr0を触らずr1/r2だけ使っていたため。
         "sub sp, sp, #64\n\t"
         "stmia sp, {r0-r12, lr}\n\t"  // sp+0..sp+53 (14ワード、書き戻しなし)
+
+        /* -------------------------------------------------------------
+         1.5. トラップフレームをカーネルスタック(UAREA, u_end手前)へ
+              退避する。このあとsyscall_handler()とその呼び出し先
+              (execve()のexec_clear()/exec_setupstack()等)は全て
+              *ここに切り替えた後の* spの上で動く。呼び出し元自身の
+              ユーザースタック上にフレームを置いたままにしておくと、
+              execve()が新イメージのスタック領域(常に同じ固定終端
+              __user_data_end/u_endに置かれる)をbzero()でクリアする
+              際、まだ実行中のこの呼び出しチェーン自身(このフレーム
+              やepp/exec_paramsのローカル変数を含む)を踏み潰してし
+              まう - 実際に/bin/shのexecでexec_clear()のbzero(stack)
+              が巨大化けした長さでハングする形で再現した(このファイル
+              冒頭のコメント参照)。
+         ------------------------------------------------------------- */
+        "mov r0, sp\n\t"               // r0 = コピー元(呼び出し元スタック上の現フレーム)
+        "add r5, r0, #64\n\t"          // r5 = 呼び出し元の本来のsp(sub #64より前の値)。
+                                        // コピーループでr0-r4を使い切るのでr5に温存する。
+
+        "ldr r1, =u_end\n\t"
+        "sub r1, r1, #64\n\t"          // r1 = コピー先(カーネルスタック上のフレーム位置)
+        "mov r2, r1\n\t"               // r2 = コピー先の先頭(切替後のsp値として温存)
+        "mov r3, #16\n\t"              // 64バイト = 16ワード
+        "9:\n\t"
+        "ldr r4, [r0], #4\n\t"
+        "str r4, [r1], #4\n\t"
+        "subs r3, r3, #1\n\t"
+        "bne 9b\n\t"
+
+        // 呼び出し元の本来のsp(r5)を、コピー後のフレームのtf_ip(=r12)
+        // スロット(オフセット48)へ書き込む。通常のシステムコールでは
+        // r12は使い捨てのスクラッチ値でしかないので、ここで温存用途に
+        // 転用しても安全(下のgba_exec_switched_stackの説明コメント参照)。
+        // グローバル変数(saved_user_sp)ではなくフレーム自身に持たせる
+        // ことで、fork()の子プロセスがずっと後でlongjmp経由で復帰した
+        // ときも正しい値が付いてくる - フレームはカーネルスタック上に
+        // あり、u/u0の切り替えでプロセスごとに正しくスワップされる
+        // ため(詳細はファイル冒頭のコメント参照)。
+        "str r5, [r2, #48]\n\t"
+
+        "mov sp, r2\n\t"               // ここからカーネルスタック上のフレームを使う
 
         /* -------------------------------------------------------------
          2. 割り込みを禁止 (REG_IME = 0)
@@ -200,46 +271,20 @@ void simulate_swi_via_inline_data(void) {
         "ldr r1, =saved_tf_psr\n\t"
         "str r0, [r1]\n\t"
 
-        // r5も同様に、下でexec切替判定/tf_psr再読み込みのスクラッチとして
-        // 使われ、最後まで元の値へ戻されていなかった(呼び出し元がr4-r11を
-        // 呼び出しをまたいで保持できることに依存していると、その値が0/1や
-        // tf_psrの生値にすり替わっていた)。ここでr0はもう用済みなので使って
-        // 退避する。
-        "ldr r0, [sp, #20]\n\t"       // tf_r5 (r0=sp+0起点でr5はsp+20)
-        "ldr r1, =saved_user_r5\n\t"
-        "str r0, [r1]\n\t"
-
-        "ldmia sp!, {r0-r12}\n\t"     // R0〜R12を復元 (52バイト、sp+52=tf_lr位置)
-        "add sp, sp, #4\n\t"          // tf_lrをスキップ (sp+56=tf_pc位置)
-        "ldmia sp!, {lr}\n\t"         // tf_pc(更新されている場合あり)をlrへ復元
-        "add sp, sp, #4\n\t"          // tf_psr分を破棄(値は上でメモリへ退避済み)
-
-        // tf_ip(=r12)は通常のレジスタだが、exec_setupstack()(exec_subr.c)は
-        // 新しいプロセスの実際のユーザースタックポインタをtf_sp(=tf_ipの別名、
-        // frame.hで#defineされている)へ書き込む。execve()成功直後に限り、
-        // カーネル(=呼び出し元)のスタックから新しいユーザースタックへ実際に
-        // 切り替える必要がある(execve成功後も画面に何も出ない原因だった)。
-        //
-        // 通常のシステムコール(CALL_SIMSYS経由)では、r12はこのトランポリン
-        // 自身のジャンプ先アドレスを一時的に保持するスクラッチ値でしかなく、
-        // 実際のスタックポインタではない。ここで無条件にmov sp, r12すると、
-        // 直前のldmiaで既に正しく復元されているsp(呼び出し元が元々使っていた
-        // 実スタック)をそのゴミ値で上書きしてしまい、execve以外の全ての
-        // システムコール復帰後にスタックが破壊されていた
-        // (fstat等の直後にJumped to invalid addressで落ちていた原因)。
-        "ldr r5, =gba_exec_switched_stack\n\t"
-        "ldr r5, [r5]\n\t"
-        "cmp r5, #0\n\t"
-        "beq 1f\n\t"
-        "mov sp, r12\n\t"
-        "1:\n\t"
-
-        // 以前ここにsp/lr確認用のデバッグ出力があったが、r0-r12を正しく復元した
-        // *あと*にr0/r1/r3/r5を退避せず上書きしたまま戻していなかった。r0は
-        // システムコールの戻り値そのもの(fstat等の成功/失敗)なので、呼び出し元に
-        // 渡る直前にspの値で上書きされ、戻り値を見て分岐するコードが誤動作していた
-        // (fstat復帰後、呼び出し元が壊れた戻り値で誤った分岐をして暴走していた)。
-
+        // REG_IME再許可とCPSRフラグ復元は、以前は下のldmia(r0-r12の本復元)
+        // の*あと*に置かれていて、r1/r2をスクラッチとして使い潰したまま
+        // 一切元に戻していなかった(r5だけは別の一時変数経由で復元する
+        // 特別扱いがあったが、r1/r2にはその対応がなかった)。通常のシステム
+        // コールは呼び出し元がr0(戻り値)以外の生存を仮定しないため気付かれずに
+        // 済んでいたが、execve()成功時だけは別 - exec_setupstack()
+        // (exec_subr.c)がr0/r1/r2にargc/argv/envpを積んで新プロセスの
+        // エントリポイント(crt0の_start)へ渡す契約になっており、この
+        // 破壊によりargv(r1)が本来のargpではなく「REG_IME再許可コードが
+        // 計算した0x04000200(I/Oレジスタアドレス)」にすり替わっていた
+        // (initのmain()でargv[1]が実際にNULLになる形で顕在化・実機で確認)。
+        // ここでは逆に、r0-r12がまだ本復元されていない今のうちに
+        // r1/r2/r5を自由なスクラッチとして使い切ってしまうことで、
+        // 下のldmia以降は本当に一切のレジスタを壊さないようにする。
         "mov r1, #0x04000000\n\t"
         "add r1, #0x200\n\t"
         "mov r2, #1\n\t"
@@ -255,11 +300,26 @@ void simulate_swi_via_inline_data(void) {
         "ldr r5, [r5]\n\t"
         "msr cpsr_f, r5\n\t"
 
-        // r5をここまでスクラッチとして使っていた分を、呼び出し元の本来の値へ
-        // 最後に復元する(上のsaved_user_r5への退避コメント参照)。
-        "ldr r5, =saved_user_r5\n\t"
-        "ldr r5, [r5]\n\t"
+        "ldmia sp!, {r0-r12}\n\t"     // R0〜R12を復元 (52バイト、sp+52=tf_lr位置)
+        "add sp, sp, #4\n\t"          // tf_lrをスキップ (sp+56=tf_pc位置)
+        "ldmia sp!, {lr}\n\t"         // tf_pc(更新されている場合あり)をlrへ復元
+        "add sp, sp, #4\n\t"          // tf_psr分を破棄(値は上でメモリへ退避済み)
 
+        // tf_ip(=r12)は通常、上の1.5節で書き込んだ「呼び出し元の本来の
+        // sp」を保持している。execve()成功時に限り、exec_setupstack()
+        // (exec_subr.c)がこの同じスロット(tf_sp、frame.hでtf_ipの別名)
+        // を新しいプロセスの実際のユーザースタックポインタで上書きする。
+        // どちらの場合もこのスロットには「復帰後に使うべきsp」がそのまま
+        // 入っているので、ここでは無条件にそれへ切り替えるだけでよい
+        // (以前はgba_exec_switched_stackで分岐し、execve以外の場合は
+        // 別のグローバル変数saved_user_spから読み直していたが、その
+        // グローバルはfork()の子プロセスがlongjmp経由でずっと後に復帰
+        // したときに無関係な値へ上書きされてしまっていた - ファイル
+        // 冒頭のコメント参照)。
+        "mov sp, r12\n\t"
+
+        // ここから下、bx lrまでの間はr0-r12を一切触らない - 上でldmiaした
+        // 値がそのまま呼び出し元(または新プロセスのエントリポイント)へ渡る。
         "bx lr\n\t"                   // 呼び出し元へ復帰（モードは変えていないので
                                        // movs不要。interworkingのためbxを使用）
     );
@@ -389,22 +449,22 @@ syscall_handler(int sys_num, struct trapframe *frame)
 
 	//volatile struct trapframe *f = frame;
 
-	printf("DBG: syscall_handler entry, sys_num=%d frame=%x\n",
-	    sys_num, (unsigned)frame);
+	//printf("DBG: syscall_handler entry, sys_num=%d frame=%x\n",
+	//    sys_num, (unsigned)frame);
 
 	syst = u.u_ru.ru_stime;
 
 	/*
-	 * Unlike STM32/pic32, GBA has no MMU and no separate always-in-IWRAM
-	 * kernel stack: syscall_handler() runs on whatever stack the calling
-	 * process is currently using. Once a process has exec'd, that's its
-	 * own EWRAM stack (see the sp switch in simulate_swi_via_inline_data
-	 * below __attribute__((target("arm")))), which is numerically always
-	 * less than any IWRAM address - so comparing frame against &u+sizeof(u)
-	 * (an IWRAM address) here would always look like an underflow for any
-	 * real userland syscall. The actual per-process stack bounds check
-	 * further down (against tf_sp/p_daddr/p_dsize) is the correct one for
-	 * this architecture.
+	 * GBA has no MMU and no hardware-assisted exception stack switch
+	 * (unlike STM32/pic32's PSP/MSP or MIPS exception vector). Since
+	 * this session, simulate_swi_via_inline_data() switches sp by hand
+	 * before calling here (see the frame-relocation comment near the
+	 * top of this file), so syscall_handler() does run on a genuine,
+	 * dedicated kernel stack now (UAREA, in EWRAM) - not IWRAM though,
+	 * so comparing frame against &u+sizeof(u) (an IWRAM address) would
+	 * still always look like an underflow. The actual per-process stack
+	 * bounds check further down (against tf_sp/p_daddr/p_dsize) is the
+	 * correct one for this architecture regardless.
 	 */
 
 #ifdef UCB_METER
@@ -427,24 +487,24 @@ syscall_handler(int sys_num, struct trapframe *frame)
 	 * this reads tf_sp from a *real* hardware-saved SP (Cortex-M's PSP,
 	 * captured by PendSV_Handler; MIPS's $sp, captured by the exception
 	 * vector before switching stacks) - a legitimate live value there.
-	 * On GBA, syscalls are dispatched through simulate_swi_via_inline_data,
-	 * a hand-rolled function-call trampoline with no hardware exception
-	 * entry. Userland's CALL_SIMSYS macro (lib/libc/arm/sys/SYS.h) uses
-	 * r12 purely as scratch to hold the trampoline's own address before
-	 * jumping, so tf_sp/tf_ip here is garbage for any syscall except the
-	 * one boot-time execve() dispatched from icode (which happens to set
-	 * r12 to a real value beforehand - see locore.S). This check was
-	 * carried over from pic32/stm32 without accounting for that, and
-	 * was corrupting p_saddr/p_ssize with the trampoline's own address.
 	 *
-	 * Known gap from disabling this: p_ssize/p_saddr stay fixed at
-	 * whatever exec_setupstack() set (SSIZE, 2048 bytes) instead of
+	 * On GBA, tf_ip (=tf_sp) is now reliably the caller's real entry sp
+	 * for every syscall (simulate_swi_via_inline_data stashes it there
+	 * before switching to the kernel stack - see the frame-relocation
+	 * comment near the top of this file), not just for the boot-time
+	 * execve() dispatched from icode as it used to be. This check is
+	 * still left disabled rather than re-enabled outright: it was
+	 * originally written for pic32/stm32's exception-frame layout and
+	 * hasn't been re-verified against this port's p_daddr/p_dsize
+	 * bookkeeping, so flip it on deliberately (with testing) rather
+	 * than as a side effect of the tf_ip fix.
+	 *
+	 * Known gap from leaving this disabled: p_ssize/p_saddr stay fixed
+	 * at whatever exec_setupstack() set (SSIZE, 2048 bytes) instead of
 	 * tracking real growth, so vm_swap.c's swapout() would only save
 	 * that initial region - if a process's stack ever grows past SSIZE
 	 * and then gets swapped, the deeper part won't survive a swap back
-	 * in. Not yet a problem since swap isn't exercised on this port yet;
-	 * revisit if/when it is (would need CALL_SIMSYS to hand off the real
-	 * SP some other way, since r12 is otherwise spoken for here).
+	 * in. Not yet a problem since swap isn't exercised on this port yet.
 	 */
 
 	code = sys_num; /* Syscall number decoded from the inline .word by
@@ -468,41 +528,57 @@ syscall_handler(int sys_num, struct trapframe *frame)
 		 * Remaining args (5th, 6th, ...) are on the caller's real
 		 * stack, per AAPCS, right at the SP value the callee (the
 		 * SYS()-generated wrapper in SYS.h) saw at its own entry.
-		 * This used to read from tf_sp (=tf_ip, r12) + a fixed
-		 * offset - tf_sp is the wrong value on this port for any
-		 * ordinary (non-execve) syscall, same as every other tf_sp
-		 * bug fixed this session (CALL_SIMSYS uses r12 purely as
-		 * scratch for its own jump target, never a real SP).
 		 *
-		 * `frame` itself IS a real, live stack address here - it's
-		 * simulate_swi_via_inline_data()'s own sp right after its
-		 * "sub sp, sp, #64" trapframe reservation, i.e. exactly 64
-		 * bytes below whatever sp was when "bx r12" (CALL_SIMSYS)
-		 * jumped in. CALL_SIMSYS itself opens with "push {lr}"
-		 * (4 more bytes) before that jump, so frame + 64 + 4 = the
-		 * wrapper's own entry sp - exactly where AAPCS says its
-		 * caller (whatever called e.g. select(), not the kernel)
-		 * placed the 5th argument onward.
+		 * This used to be computed as "frame + 64 + 4": back when the
+		 * trapframe was built directly on top of the caller's own
+		 * stack (before the kernel-stack relocation added in this
+		 * same session - see the big comment near the top of this
+		 * file), `frame` sat exactly 64 bytes below whatever sp was
+		 * when CALL_SIMSYS's "bx r12" jumped in, and CALL_SIMSYS
+		 * itself opens with "push {lr}" (4 more bytes) before that -
+		 * so frame + 64 + 4 landed exactly on the wrapper's own entry
+		 * sp. Now that the trapframe lives on the kernel stack instead
+		 * (a fixed address, u_end - 64, completely unrelated to any
+		 * particular caller's stack position), that arithmetic reads
+		 * garbage - observed as sysctl()'s optional 5th/6th args
+		 * (e.g. getsecuritylevel()'s NULL/0) coming back as
+		 * near-random pointers, tripping baduaddr() into either
+		 * silently leaving u.u_arg[4]/[5] as 0 (lucky) or copying from
+		 * a bogus address that happened to look valid (EINVAL from
+		 * sysctl_int()'s copyin) - "init: cannot get kernel security
+		 * level: Invalid argument" on every boot.
+		 *
+		 * The caller's real entry sp is exactly what frame->tf_ip
+		 * holds now (see the frame-relocation comment above): CALL_SIMSYS's
+		 * own "push {lr}" still needs accounting for, so +4 here plays
+		 * the same role it always did.
 		 */
 		if (callp->sy_narg > 4) {
-			u_int addr = (u_int)frame + 64 + 4;
+			u_int addr = (u_int)frame->tf_ip + 4;
 			if (!baduaddr((caddr_t)addr))
 				u.u_arg[4] = *(u_int *)addr;
+			if (sys_num == 23)
+				printf("DBG: sysctl arg4 tf_ip=%x addr=%x bad=%d val=%x\n",
+				    (unsigned)frame->tf_ip, addr,
+				    baduaddr((caddr_t)addr), (unsigned)u.u_arg[4]);
 		}
 		if (callp->sy_narg > 5) {
-			u_int addr = (u_int)frame + 64 + 4 + 4;
+			u_int addr = (u_int)frame->tf_ip + 4 + 4;
 			if (!baduaddr((caddr_t)addr))
 				u.u_arg[5] = *(u_int *)addr;
+			if (sys_num == 23)
+				printf("DBG: sysctl arg5 addr=%x bad=%d val=%x\n",
+				    addr, baduaddr((caddr_t)addr), (unsigned)u.u_arg[5]);
 		}
 	}
 
 	u.u_rval = 0;
 
-	printf("DBG: before setjmp qsave, callp=%x sy_call=%x\n",
-	    (unsigned)callp, (unsigned)callp->sy_call);
+	//printf("DBG: before setjmp qsave, callp=%x sy_call=%x\n",
+	//    (unsigned)callp, (unsigned)callp->sy_call);
 
 	if (setjmp(&u.u_qsave) == 0) {
-		printf("DBG: setjmp qsave=0, calling sy_call\n");
+		//printf("DBG: setjmp qsave=0, calling sy_call\n");
 		(*callp->sy_call)();		/* Make syscall. */
 
 		/*

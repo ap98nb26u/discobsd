@@ -19,11 +19,14 @@ pass1()
     struct inodesc idesc;
     register ino_t inumber;
 
+    printf("DBG: pass1 entry imax=%u fsmin=%ld fsmax=%ld ROOTINO=%u\n",
+        imax, (long)fsmin, (long)fsmax, ROOTINO);
     /*
      * Set file system reserved blocks in used block map.
      */
     for (j = 0; j < fsmin; j++)
         setbmap((daddr_t)j);
+    printf("DBG: pass1 after setbmap loop, imax=%u\n", imax);
     /*
      * Find all allocated blocks.
      */
@@ -32,6 +35,9 @@ pass1()
     idesc.id_func = pass1check;
     n_files = n_blks = n_free = 0;
     for (inumber = ROOTINO; inumber < imax; inumber++) {
+        if (inumber == ROOTINO)
+            printf("DBG: pass1 first ginode call inumber=%u imax=%u\n",
+                inumber, imax);
         dp = ginode(inumber);
         if (!ALLOC(dp)) {
             if (bcmp((char *)dp->di_addr, (char *)zino.di_addr,

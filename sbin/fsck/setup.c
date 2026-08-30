@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <sys/param.h>
 #include <sys/file.h>
 #include <sys/inode.h>
@@ -58,7 +59,7 @@ setup(dev)
     if (nflag || (dfile.wfdes = open(dev, O_RDWR)) < 0) {
         dfile.wfdes = -1;
         if (preen)
-            pfatal("NO WRITE ACCESS\n");
+            pfatal("NO WRITE ACCESS errno=%d\n", errno);
         printf(" (NO WRITE)");
     }
     if (preen == 0)
@@ -102,11 +103,16 @@ setup(dev)
     muldup = enddup = duplist;
     zlnp = zlnlist;
 
+    printf("DBG: setup memsize=%ld bmapsz=%ld smapsz=%ld lncntsz=%ld\n",
+        (long)memsize, (long)bmapsz, (long)smapsz, (long)lncntsz);
+
     if ((off_t)memsize < bmapsz + smapsz + lncntsz) {
         bmapsz = roundup(bmapsz, DEV_BSIZE);
         smapsz = roundup(smapsz, DEV_BSIZE);
         lncntsz = roundup(lncntsz, DEV_BSIZE);
         nscrblk = (bmapsz + smapsz + lncntsz) >> DEV_BSHIFT;
+
+        printf("DBG: setup scratch path nscrblk=%ld\n", (long)nscrblk);
 
         /* Use /dev/temp0 as a scratch file. */
         strcpy(scrfile, "/dev/temp0");
@@ -114,8 +120,10 @@ setup(dev)
         if (! sfile.wfdes) {
             errexit("Unable to open temp device\n");
         }
+        printf("DBG: setup opened temp0 wfdes=%d\n", sfile.wfdes);
         allocd = nscrblk;
         ioctl(sfile.wfdes, TFALLOC, &allocd);
+        printf("DBG: setup TFALLOC done allocd=%ld\n", (long)allocd);
         if (allocd != nscrblk) {
             printf("Wanted %lu kbytes, got %lu\n", nscrblk, allocd);
             errexit("Unable to allocate temp space\n");
@@ -131,11 +139,14 @@ setup(dev)
             poolhead = bp;
         }
         bp = poolhead;
+        printf("DBG: setup scratch prefill loop start nscrblk=%ld\n",
+            (long)nscrblk);
         for(bcnt = 0; bcnt < nscrblk; bcnt++) {
             bp->b_bno = bcnt;
             dirty(bp);
             flush(&sfile,bp);
         }
+        printf("DBG: setup scratch prefill loop done\n");
         blockmap = freemap = statemap = (char *) NULL;
         lncntp = (short *) NULL;
         bmapblk = 0;
@@ -143,11 +154,13 @@ setup(dev)
         lncntblk = smapblk + smapsz / DEV_BSIZE;
         fmapblk = smapblk;
     } else {
+        printf("DBG: setup non-scratch path (membase big enough)\n");
         poolhead = NULL;
         blockmap = membase;
         statemap = &membase[bmapsz];
         freemap = statemap;
         lncntp = (short *)&statemap[smapsz];
     }
+    printf("DBG: setup end, returning 1\n");
     return(1);
 }
