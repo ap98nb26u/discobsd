@@ -318,14 +318,44 @@ sd_close_rw(void)
      * comment in ed.c) and just as capable of turning a bounded wait
      * into a many-hour real-hardware hang when the card genuinely
      * isn't responding. Cut sharply for the same reason.
+     *
+     * DBG: bumped from 50 - vm_swap.c's new swapin checksum-verify
+     * caught real GBAED hardware handing back the *previous*
+     * generation's data for a just-rewritten block (checksum matched
+     * an earlier write to the same blkno exactly, not garbage),
+     * meaning this "wait for card ready" loop was returning before
+     * the card had actually finished committing the write to flash -
+     * each ed_sd_dat_rd() covers only what the FPGA's own SPI-shift
+     * busy flag bounds (microseconds), not the card's real internal
+     * program-time busy state (DAT0 held low, can be many ms,
+     * especially after heavy sustained rewrite of the same blocks as
+     * this session's fork/exec-heavy respawn loop does). 50 iterations
+     * of that was nowhere near enough headroom.
      */
-    i = 50;
+    /*
+     * DBG: dialed back from 5000 - that fixed the checksum-mismatch
+     * corruption (confirmed: zero mismatches across two full test
+     * rounds after the bump), but real GBAED hardware then hung for
+     * several minutes partway through a later boot, before any
+     * newproc/swap activity had even logged - consistent with this
+     * same loop now burning its full worst case (5000 iterations *
+     * ed_sd_dat_rd()'s own up-to-50000-cycle inner wait, ~15s) instead
+     * of failing fast the way the original i=50 did (~150ms worst
+     * case). 800 keeps most of the added headroom (16x the original)
+     * while capping a genuine no-response case at ~2.4s instead of
+     * ~15s. The printf below exists so a real timeout here is no
+     * longer silent - if this fires, that's confirmation this exact
+     * wait is the hang, not a guess.
+     */
+    i = 800;
     while (--i) {
         if (ed_sd_dat_rd() == 0xff)
             break;
     }
-    if (i == 0)
+    if (i == 0) {
+        printf("DBG: sd_close_rw: card-ready wait timed out\n");
         return SD_ERR_CMD_TIMEOUT;
+    }
     return 0;
 }
 
@@ -441,14 +471,27 @@ sd_write_sectors(uint32_t sd_addr, const void *src, uint16_t slen)
          * ed_sd_wait_f0() had, see its comment in ed.c), capable of
          * turning a bounded wait into a many-hour real-hardware hang
          * when the card genuinely isn't responding. Cut sharply.
+         *
+         * DBG: same fix and same reason as sd_close_rw()'s identical
+         * wait loop below in this file - undersized (50) against
+         * genuine SD program-time busy, not just the FPGA's own
+         * SPI-shift busy flag. First tried 5000, which fixed the
+         * checksum-mismatch corruption but then caused a several-
+         * minute real-hardware hang on a later boot (this loop runs
+         * per block in a multi-block write, so its worst case
+         * multiplies by however many blocks are in flight); dialed
+         * back to 800 for the same reasoning as sd_close_rw().
          */
-        i = 50;
+        i = 800;
         while (--i) {
             if (ed_sd_dat_rd() == 0xff)
                 break;
         }
-        if (i == 0)
+        if (i == 0) {
+            printf("DBG: sd_write_sectors: per-block ready wait "
+                "timed out\n");
             return SD_ERR_CMD_TIMEOUT;
+        }
     }
 
     return sd_close_rw();
@@ -503,8 +546,15 @@ card_init(int unit)
         extern void gba_irq_block(void);
         volatile uint32_t settle;
 
+        /*
+         * DBG: bumped from 100000 - still seeing sd0 fail to be
+         * recognized on some cold boots (2 failed probe-and-reboot
+         * cycles observed before a 3rd attempt succeeded), suggesting
+         * the original margin isn't always enough. Cheap to make
+         * larger; only paid once at boot.
+         */
         gba_irq_block();
-        for (settle = 0; settle < 100000; settle++)
+        for (settle = 0; settle < 400000; settle++)
             ;
         gba_irq_allow();
     }
@@ -583,6 +633,21 @@ card_init(int unit)
     if (resp)
         return 0;
 
+    /*
+     * DBG: tried forcing SPD_LO here to test a clock-speed/signal-
+     * integrity theory for intermittent read/write corruption (see
+     * the swap-checksum-mismatch + fsck "BLK(S) MISSING" evidence) -
+     * made things strictly worse on real GBAED hardware: the partition
+     * table read in sd_setup() (right after card_init() returns)
+     * started failing every time ("no fs on dev", reproducing even
+     * after rewriting the SD image fresh), where it previously worked
+     * at high speed. Reverted back to HIGH; whatever the low-speed
+     * mode actually does on this FPGA, it isn't simply "the same
+     * protocol, slower" - something else in the driver's timing
+     * assumptions is calibrated for HIGH specifically. The settle-
+     * delay increase above (card_init()'s pre-command wait) is
+     * unrelated and stays.
+     */
     ed_sd_speed(ED_SD_SPD_HI);
     sd_disk_addr = ~0U;
 
@@ -883,10 +948,29 @@ bad:    bp->b_flags |= B_ERROR;
     //    unit, (bp->b_flags & B_READ) ? "READ" : "WRITE",
     //    offset, bp->b_bcount);
 
+    /*
+     * DBG: card_read()/card_write()'s return value (1=ok, 0=failed)
+     * used to be discarded here - a genuine SD failure (including the
+     * bounded card-ready-wait timeouts in sd.c/ed.c added this
+     * session) was silently treated as a completed, successful I/O:
+     * biodone(bp) ran regardless, with whatever partial/stale data
+     * was already in the destination buffer. vm_swp.c's swap() (the
+     * only caller that matters for the corruption chased this
+     * session) explicitly panics on B_ERROR - "panic: hard err: swap"
+     * never once fired despite confirmed real corruption, because
+     * this path never set it. Wiring it up turns a silent bad-data
+     * or opaque-hang failure into an actual diagnosable panic.
+     */
     if (bp->b_flags & B_READ) {
-        card_read(unit, offset, bp->b_addr, bp->b_bcount);
+        if (!card_read(unit, offset, bp->b_addr, bp->b_bcount)) {
+            bp->b_error = EIO;
+            bp->b_flags |= B_ERROR;
+        }
     } else {
-        card_write(unit, offset, bp->b_addr, bp->b_bcount);
+        if (!card_write(unit, offset, bp->b_addr, bp->b_bcount)) {
+            bp->b_error = EIO;
+            bp->b_flags |= B_ERROR;
+        }
     }
 
     biodone(bp);

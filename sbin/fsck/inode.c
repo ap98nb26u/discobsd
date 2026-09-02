@@ -120,8 +120,8 @@ ginode(inumber)
     register DINODE *dp;
 
     if (inumber < ROOTINO || inumber > imax) {
-        printf("DBG: ginode fail inumber=%u ROOTINO=%u imax=%u &imax=%p\n",
-            inumber, ROOTINO, imax, (void *)&imax);
+        //printf("DBG: ginode fail inumber=%u ROOTINO=%u imax=%u &imax=%p\n",
+        //    inumber, ROOTINO, imax, (void *)&imax);
         errexit("bad inode number %u to ginode\n", inumber);
     }
     iblk = itod(inumber);

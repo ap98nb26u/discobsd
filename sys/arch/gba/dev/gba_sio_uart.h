@@ -14,6 +14,7 @@
  */
 void            gsio_init(unsigned int baud);
 unsigned char   gsio_getc(void);
+int             gsio_getc_bounded(void);
 void            gsio_putc(unsigned char c);
 int             gsio_avail(void);
 

@@ -90,6 +90,49 @@ gsio_getc(void)
     return (unsigned char)REG_SIODATA8;
 }
 
+/*
+ * Bounded sibling of gsio_getc(), for callers that must not risk an
+ * unbounded block - specifically uart_poll_input() (mgba_uart.c),
+ * which calls this automatically from idle() based on gsio_avail()'s
+ * signal, not in response to a process explicitly choosing to block
+ * on read(). gsio_avail() is a cheap status-bit peek with its own
+ * documented small race window against a genuinely-arriving byte;
+ * more importantly, an emulator (mGBA) with nothing wired to the
+ * emulated link cable may not model the same idle-line register
+ * state real hardware does, so treating "avail" as a hard guarantee
+ * here and calling the original unbounded gsio_getc() would hang the
+ * *entire scheduler* forever the first time idle() ever runs (idle()
+ * is swtch()'s core wait loop - nothing else can ever run again).
+ * Deliberately much shorter than the ~50000-iteration scale used
+ * elsewhere in this codebase for SD/ED command/response round-trips
+ * (a genuinely slow operation) - gsio_avail() having just reported
+ * "ready" means a byte should already be sitting there or arriving
+ * within microseconds, not needing anywhere near that much patience.
+ * Called from idle(), which runs in a *tight loop* whenever nothing
+ * is runnable - a long bound here, hit repeatedly (e.g. real GBAED
+ * hardware, immediately after fsck's heavy SD-bus activity: reported
+ * hanging exactly there right when this feature first shipped, right
+ * where `sh` would otherwise idle briefly waiting on fsck's exit
+ * status), would burn massive cumulative time across many idle()
+ * calls even though no single call ever technically hangs forever.
+ * Returns -1 (never a valid unsigned char, since it's the widened
+ * int -1 = 0xFFFFFFFF) on timeout instead of REG_SIODATA8's contents.
+ */
+int
+gsio_getc_bounded(void)
+{
+    volatile unsigned long i;
+
+    REG_SIOCNT = REG_SIOCNT | 0x0020;
+    REG_RCNT = REG_RCNT & (0x0020 ^ 0xFFFF);
+
+    for (i = 0; i < 1000; i++) {
+        if ((REG_SIOCNT & 0x0020) == 0)
+            return (unsigned char)REG_SIODATA8;
+    }
+    return -1;
+}
+
 void
 gsio_putc(unsigned char c)
 {

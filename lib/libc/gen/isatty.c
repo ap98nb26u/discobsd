@@ -14,8 +14,8 @@ isatty(f)
 
 	rc = ioctl(f, TIOCGETP, &ttyb);
 	if (rc < 0) {
-		fprintf(stderr, "DBG: isatty(%d) TIOCGETP rc=%d errno=%d\n",
-		    f, rc, errno);
+		//fprintf(stderr, "DBG: isatty(%d) TIOCGETP rc=%d errno=%d\n",
+		//    f, rc, errno);
 		return(0);
 	}
 	return(1);

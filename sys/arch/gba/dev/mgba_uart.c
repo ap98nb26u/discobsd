@@ -16,6 +16,7 @@
 void uartinit(int);
 void uartputc(dev_t dev, char c);
 char uartgetc(dev_t dev);
+void uart_poll_input(void);
 extern struct tty uartttys[];
 
 void uartinit(int unit) {
@@ -58,35 +59,72 @@ uartprobe(struct conf_device *config) {
 }
 
 /* conf.o が期待するシンボル名に変更 */
-int uartopen(dev_t dev, int flag, int mode) { return 0; }
+int uartopen(dev_t dev, int flag, int mode)
+{
+    /*
+     * This is a hardwired point-to-point link-cable connection, not a
+     * modem line - there is no real carrier-detect signal, so (as is
+     * standard for a local/directly-connected tty) just declare
+     * carrier permanently present. Without this, ttyselect()'s FREAD
+     * case treats "carrier off" as an alternate always-ready
+     * condition, which - since nothing ever sets TS_CARR_ON otherwise
+     * on this port - would make select() report the console readable
+     * unconditionally regardless of whether anything was actually
+     * typed.
+     *
+     * Deliberately does NOT call the generic ttyopen() - that also
+     * establishes controlling-tty/process-group bookkeeping
+     * (u.u_ttyp, tp->t_pgrp), which getty's own pre-existing
+     * vhangup() call (its normal per-session setup, unrelated to this
+     * session's changes) then had something real to act on for the
+     * first time and sent SIGHUP into - confirmed on real GBAED
+     * hardware: login reached the "login:" prompt but a SIGHUP
+     * arrived and killed/reset whatever was reading it, right where
+     * ttyopen() was tried. This console's whole process chain
+     * (getty -> login -> shell, all one continuous boot lineage, not
+     * genuinely separate dial-in sessions) doesn't need real job
+     * control semantics for the echo fix this exists for, so skip
+     * the part that broke things and only take what's needed.
+     */
+    struct tty *tp = &uartttys[minor(dev)];
+
+    tp->t_state |= TS_CARR_ON;
+    return 0;
+}
 int uartclose(dev_t dev, int flag, int mode) { return 0; }
 int uartread(dev_t dev, struct uio *uio, int flag)
 {
     /*
-     * No tty line discipline yet (see uartwrite()'s comment below), so
-     * read one already-arrived byte per call directly off the wire via
-     * gsio_getc() - select()'s uartselect() is what actually confirms
-     * a byte is waiting before a caller reads, so this doesn't block
-     * indefinitely on an idle line.
+     * Used to read one already-arrived raw byte per call directly off
+     * the wire via gsio_getc(), completely bypassing the tty line
+     * discipline - so ttyinput() (echo, erase/kill, cooked-line
+     * assembly) never ran for anything a process actually read,
+     * regardless of the uart_poll_input() fix in idle() (that fed
+     * ttyinput() from the *idle* loop, but every byte a blocked
+     * reader consumed here first never reached it). Delegating to the
+     * generic ttread() instead makes this an ordinary tty device: it
+     * pulls from t_canq/t_rawq (already fed by uart_poll_input()) and
+     * sleeps on &tp->t_rawq via the standard TTIPRI sleep when empty,
+     * which ttyinput()'s ttwakeup() (called from idle()'s polling)
+     * wakes back up once more input arrives - see machdep.c's idle().
      */
-    char c;
-    int error;
+    struct tty *tp = &uartttys[minor(dev)];
 
-    if (uio->uio_resid <= 0)
-        return 0;
-    c = (char)uartgetc(dev);
-    error = uiomove(&c, 1, uio);
-    return error;
+    return ttread(tp, uio, flag);
 }
 int uartwrite(dev_t dev, struct uio *uio, int flag)
 {
     /*
-     * No tty line discipline is wired up yet (uartopen()/uartioctl()
-     * are still stubs), so this can't go through ttwrite()/ttstart()
-     * like the other ports do. Just push bytes straight out through
-     * uartputc() - the same raw path the kernel's own printf() uses -
-     * so userland write(2) to the console is actually visible instead
-     * of silently discarded (as it always was up to this point).
+     * Deliberately still bypasses ttwrite()/ttstart()/t_outq for
+     * *outgoing* data - conf.c wires this device's stop slot to
+     * nullstop (no real d_start callback exists), so routing normal
+     * write(2) traffic through the output queue would need one to be
+     * written just to drain it again. uart_poll_input() (see its own
+     * comment) already hand-drains t_outq for the one thing that
+     * actually queues into it - ttyinput()'s echo - so this simpler
+     * direct-to-wire path is kept for everything else: push bytes
+     * straight out through uartputc(), the same raw path the kernel's
+     * own printf() uses.
      */
     char buf[16];
     int n, i, error;
@@ -114,11 +152,8 @@ int uartioctl(dev_t dev, u_int cmd, caddr_t addr, int flag)
      * on real GBAED hardware) and every stty(1)/getty/login attempt
      * to configure tty modes (ECHO included) on this console, and
      * surfaced elsewhere as e.g. stty's "TIOCMGET: Unknown error: 0".
-     * uartread()/uartwrite() still bypass the tty line discipline
-     * entirely (no ttyinput()/ttstart() wiring - see their own
-     * comments), so this only fixes the *query/set flags* half of
-     * the tty API, not cooked-mode echo/line-editing - but that's
-     * exactly what isatty()/stty/tcgetattr-style callers need.
+     * (uartread() now goes through the real tty line discipline too -
+     * see its own comment and uart_poll_input() below.)
      */
     register struct tty *tp = &uartttys[minor(dev)];
     int error;
@@ -128,6 +163,70 @@ int uartioctl(dev_t dev, u_int cmd, caddr_t addr, int flag)
         error = ENOTTY;
     return (error);
 }
+
+/*
+ * Feed any bytes currently waiting on the wire through the real tty
+ * line discipline, so echo/erase/kill/cooked-line-assembly (ttyinput())
+ * actually run for console input - previously uartread() bypassed all
+ * of that (see its own comment) and just handed back raw bytes, so
+ * ttyinput() was never called at all: no ECHO despite the tty flags
+ * saying ECHO is on (confirmed via a since-removed diagnostic that
+ * never fired), and every user-visible symptom that goes with it
+ * (silent typing at the shell prompt, per user report on real GBAED
+ * hardware once fsck/login finally started working this session).
+ *
+ * No RX interrupt exists on this port (gsio_getc() is a plain
+ * busy-wait primitive - see gba_sio_uart.c), so there is nothing to
+ * feed ttyinput() asynchronously as bytes arrive. Called instead from
+ * idle() (arch/gba/gba/machdep.c), which - per the comment on
+ * gba_irq_allow() there - is exactly the one place in the scheduler
+ * loop guaranteed to run with interrupts enabled and no live scratch
+ * registers to protect, and gets called in a tight loop by swtch()
+ * whenever nothing is runnable (i.e. exactly the "some process is
+ * blocked in ttread()'s sleep() waiting for input" case this exists
+ * for). Draining t_outq by hand afterward stands in for a proper
+ * ttstart()/d_start callback (conf.c wires uartioctl's stop slot to
+ * nullstop, so nothing else ever drains ttyecho()'s queued bytes) -
+ * fine for this port's needs since uartputc() itself never blocks
+ * waiting on anything but the far end's own byte-at-a-time CTS/busy
+ * flags.
+ */
+void
+uart_poll_input(void)
+{
+    struct tty *tp = &uartttys[CONS_MINOR];
+    int c;
+    int n;
+
+    /*
+     * Bounded defensively (a human can't type anywhere near this many
+     * characters between two idle() calls, which fire in a tight loop
+     * whenever the system is idle) - this whole port's history this
+     * session has one hardware-noise scare too many to leave a raw
+     * hardware-status-driven while() loop unbounded here.
+     *
+     * Uses gsio_getc_bounded(), not gsio_getc(), on purpose: this is
+     * called automatically from idle() based on gsio_avail()'s signal
+     * alone, not because a process explicitly chose to block on
+     * read() - if gsio_avail() ever reports a byte ready that never
+     * actually completes (confirmed on real mGBA: boot hung solid
+     * right after the "swap size" banner, exactly where idle() first
+     * runs, with nothing typed yet - an emulator with no serial peer
+     * wired up plausibly doesn't model idle-line register state the
+     * same way real hardware does), gsio_getc()'s own unbounded wait
+     * would hang idle() - and with it swtch()'s entire wait loop,
+     * i.e. the whole scheduler - forever.
+     */
+    for (n = 0; n < 32 && gsio_avail(); n++) {
+        int rc = gsio_getc_bounded();
+        if (rc < 0)
+            break;
+        ttyinput(rc, tp);
+    }
+
+    for (n = 0; n < 256 && (c = getc(&tp->t_outq)) >= 0; n++)
+        uartputc(CONS_MINOR, (char)c);
+}
 int uartselect(dev_t dev, int rw)
 {
     /*
@@ -135,14 +234,22 @@ int uartselect(dev_t dev, int rw)
      * console blocked forever regardless of actual input (confirmed:
      * typing at the serial terminal had no effect). Writes are always
      * immediately possible (uartwrite() never blocks), so only the
-     * read direction needs a real check; FWRITE mirrors seltrue()'s
-     * always-ready behavior for the other direction.
+     * read direction needs a real check.
+     *
+     * Was later reading raw wire state via gsio_avail() directly -
+     * that stopped matching reality once uartread() started pulling
+     * from the tty's cooked queue (t_canq) instead of the wire: a
+     * single typed byte makes gsio_avail() true immediately, but in
+     * cooked mode ttread() won't actually have anything to return
+     * until a full line is buffered, so select() would wrongly report
+     * ready long before a read() would succeed. ttyselect() checks
+     * the queue ttread() itself pulls from (via ttnread()), which
+     * matches. FWRITE still mirrors seltrue()'s always-ready behavior.
      */
-    if (rw == FREAD) {
-        int avail = gsio_avail();
-        printf("DBG: uartselect FREAD avail=%d\n", avail);
-        return avail;
-    }
+    struct tty *tp = &uartttys[minor(dev)];
+
+    if (rw == FREAD)
+        return ttyselect(tp, rw);
     return 1;
 }
 
