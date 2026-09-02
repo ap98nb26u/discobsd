@@ -67,8 +67,8 @@ int	dbgfd = -1;	/* DBG: fd to /dev/console, opened in main(), used
 void
 dbg(const char *s)
 {
-	if (dbgfd >= 0)
-		write(dbgfd, s, strlen(s));
+	//if (dbgfd >= 0)
+	//	write(dbgfd, s, strlen(s));
 }
 
 void	reset();

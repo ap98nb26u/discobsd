@@ -116,6 +116,16 @@ int exec_aout_check(struct exec_params *epp)
         return error;
     }
 
+    /*
+     * DBG: used to checksum the just-read exec image here, to rule
+     * out intermittent SD-card read corruption on the exec path (the
+     * same failure class confirmed on the swap path this session -
+     * see vm_swap.c). Every checksum for a given inode matched across
+     * repeated execs, so this path checked out clean; instrumentation
+     * removed, kept only as a note in case exec-time corruption ever
+     * needs re-investigating.
+     */
+
     exec_clear(epp);
     exec_setupstack(epp->hdr.aout.a_entry, epp);
 

@@ -140,10 +140,10 @@ again:
      * here's where it will resume.
      */
     if (setjmp (&u.u_ssave)) {
-        printf("DBG: newproc resumed via longjmp (child, pid=%d)\n", u.u_procp->p_pid);
+        //printf("DBG: newproc resumed via longjmp (child, pid=%d)\n", u.u_procp->p_pid);
         return(1);
     }
-    printf("DBG: newproc setjmp=0 (parent path, pid=%d)\n", parent->p_pid);
+    //printf("DBG: newproc setjmp=0 (parent path, pid=%d)\n", parent->p_pid);
 
     child->p_dsize = parent->p_dsize;
     child->p_ssize = parent->p_ssize;
@@ -162,9 +162,9 @@ again:
     parent->p_stat = SIDL;
     child->p_addr = parent->p_addr;
     child->p_stat = SRUN;
-    printf("DBG: newproc before swapout\n");
+    //printf("DBG: newproc before swapout\n");
     swapout (child, X_DONTFREE, X_OLDSIZE, X_OLDSIZE);
-    printf("DBG: newproc after swapout\n");
+    //printf("DBG: newproc after swapout\n");
     child->p_flag |= SSWAP;
     parent->p_stat = SRUN;
     u.u_procp = parent;

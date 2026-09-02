@@ -42,7 +42,7 @@ dbg_hex(label, v)
 		*p++ = d < 10 ? '0' + d : 'a' + d - 10;
 	}
 	*p++ = '\n';
-	write(2, buf, p - buf);
+	/* write(2, buf, p - buf); */
 }
 
 char *
