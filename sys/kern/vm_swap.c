@@ -25,6 +25,31 @@ dbg_cksum(size_t addr, size_t len)
 }
 
 /*
+ * Real (not diagnostic) integrity check for the data segment's swap
+ * round trip. Confirmed on real GBAED hardware via dbg_cksum() above:
+ * an intermittent (roughly 1-in-10, in one measured run) mismatch
+ * between the checksum computed on swapout and the checksum of what
+ * comes back on the very next swapin for the *same* process/blkno/
+ * len - i.e. genuine data corruption somewhere in the SD/EverDrive
+ * round trip, not a logic bug (ruled out: swap space bookkeeping
+ * reuses blocks correctly, and the corruption rate didn't change
+ * across a settle-delay increase or a clock-speed swap, so it isn't
+ * simply an init-timing or signal-margin issue either - see the
+ * comments in gba/dev/sd.c's card_init()/sd_setup()). No CRC exists
+ * on the SD read path to detect this at the driver level (sd_crc16()
+ * in gba/dev/sd.c is write-only), so this is a software-level
+ * safety net: remember what swapout wrote, and if swapin reads back
+ * something else, retry the read a few times before giving up -
+ * cheap, since the failure is rare, and turns most occurrences into
+ * an invisible extra disk read instead of a wild-jump crash.
+ * Indexed by proc[] table slot (not pid, which isn't densely bounded)
+ * so it can't go out of bounds regardless of pid numbering/wraparound.
+ */
+static unsigned dcksum_tab[NPROC];
+
+#define SWAPIN_CKSUM_RETRIES 4
+
+/*
  * Swap a process in.
  * Allocate data and possible text separately.  It would be better
  * to do largest first.  Text, data, and stack are allocated in
@@ -40,10 +65,31 @@ swapin (p)
     size_t uaddr = (size_t) &u0;
 
     if (p->p_dsize) {
+        int slot = p - proc;
+        unsigned want = dcksum_tab[slot];
+        unsigned got;
+        int retry;
+
         swap (p->p_daddr, daddr, p->p_dsize, B_READ);
-        printf("DBG: swapin pid=%d data blkno=%u len=%u cksum=%x\n",
-            p->p_pid, (unsigned)p->p_daddr, (unsigned)p->p_dsize,
-            dbg_cksum(daddr, p->p_dsize));
+        got = dbg_cksum(daddr, p->p_dsize);
+        //printf("DBG: swapin pid=%d data blkno=%u len=%u cksum=%x\n",
+        //    p->p_pid, (unsigned)p->p_daddr, (unsigned)p->p_dsize, got);
+
+        for (retry = 0; got != want && retry < SWAPIN_CKSUM_RETRIES; retry++) {
+            printf("DBG: swapin cksum MISMATCH pid=%d blkno=%u "
+                "want=%x got=%x, retrying (%d)\n",
+                p->p_pid, (unsigned)p->p_daddr, want, got, retry + 1);
+            swap (p->p_daddr, daddr, p->p_dsize, B_READ);
+            got = dbg_cksum(daddr, p->p_dsize);
+        }
+        if (got != want)
+            printf("DBG: swapin cksum still bad after retries, pid=%d "
+                "blkno=%u want=%x got=%x - giving up\n",
+                p->p_pid, (unsigned)p->p_daddr, want, got);
+        else if (retry)
+            printf("DBG: swapin cksum recovered pid=%d after %d retr%s\n",
+                p->p_pid, retry, retry == 1 ? "y" : "ies");
+
         mfree (swapmap, btod (p->p_dsize), p->p_daddr);
     }
     if (p->p_ssize) {
@@ -87,22 +133,25 @@ swapout (p, freecore, odata, ostack)
         odata = p->p_dsize;
     if (ostack == (u_int) X_OLDSIZE)
         ostack = p->p_ssize;
-    printf("DBG: before malloc3\n");
+    //printf("DBG: before malloc3\n");
     if (malloc3 (swapmap, btod (p->p_dsize), btod (p->p_ssize),
         btod (USIZE), a) == NULL)
         panic ("out of swap space");
-    printf("DBG: after malloc3\n");
+    //printf("DBG: after malloc3\n");
     p->p_flag |= SLOCK;
     if (odata) {
-        printf("DBG: before swap a[0] odata=%u pid=%d blkno=%u cksum=%x\n",
-            odata, p->p_pid, (unsigned)a[0], dbg_cksum(p->p_daddr, odata));
+        unsigned cksum = dbg_cksum(p->p_daddr, odata);
+
+        //printf("DBG: before swap a[0] odata=%u pid=%d blkno=%u cksum=%x\n",
+        //    odata, p->p_pid, (unsigned)a[0], cksum);
+        dcksum_tab[p - proc] = cksum;
         swap (a[0], p->p_daddr, odata, B_WRITE);
-        printf("DBG: after swap a[0]\n");
+        //printf("DBG: after swap a[0]\n");
     }
     if (ostack) {
-        printf("DBG: before swap a[1] ostack=%u\n", ostack);
+        //printf("DBG: before swap a[1] ostack=%u\n", ostack);
         swap (a[1], p->p_saddr, ostack, B_WRITE);
-        printf("DBG: after swap a[1]\n");
+        //printf("DBG: after swap a[1]\n");
     }
     /*
      * Increment u_ru.ru_nswap for process being tossed out of core.
@@ -121,9 +170,9 @@ swapout (p, freecore, odata, ostack)
         u.u_ru.ru_nswap++;
         splx (s);
     }
-    printf("DBG: before swap a[2] (uarea)\n");
+    //printf("DBG: before swap a[2] (uarea)\n");
     swap (a[2], p->p_addr, USIZE, B_WRITE);
-    printf("DBG: after swap a[2]\n");
+    //printf("DBG: after swap a[2]\n");
     p->p_daddr = a[0];
     p->p_saddr = a[1];
     p->p_addr = a[2];

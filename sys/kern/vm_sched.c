@@ -43,9 +43,9 @@ sched()
         if (in_core)
             swapout (in_core, X_FREECORE, X_OLDSIZE, X_OLDSIZE);
         if (swapped_out) {
-            printf("DBG: sched swapin pid=%d\n", swapped_out->p_pid);
+            //printf("DBG: sched swapin pid=%d\n", swapped_out->p_pid);
             swapin (swapped_out);
-            printf("DBG: sched after swapin\n");
+            //printf("DBG: sched after swapin\n");
         }
         splhigh();
         in_core = 0;

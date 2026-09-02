@@ -39,7 +39,7 @@ void my_custom_swi_handler(uint32_t swi_number, uint32_t *regs) {
 
 static void debug_print_return_target(unsigned v)
 {
-    printf("DBG: syscall return, jumping to %x\n", v);
+    //printf("DBG: syscall return, jumping to %x\n", v);
 }
 
 static void debug_print_sp_lr(unsigned sp, unsigned lr)
@@ -557,18 +557,18 @@ syscall_handler(int sys_num, struct trapframe *frame)
 			u_int addr = (u_int)frame->tf_ip + 4;
 			if (!baduaddr((caddr_t)addr))
 				u.u_arg[4] = *(u_int *)addr;
-			if (sys_num == 23)
-				printf("DBG: sysctl arg4 tf_ip=%x addr=%x bad=%d val=%x\n",
-				    (unsigned)frame->tf_ip, addr,
-				    baduaddr((caddr_t)addr), (unsigned)u.u_arg[4]);
+			//if (sys_num == 23)
+			//	printf("DBG: sysctl arg4 tf_ip=%x addr=%x bad=%d val=%x\n",
+			//	    (unsigned)frame->tf_ip, addr,
+			//	    baduaddr((caddr_t)addr), (unsigned)u.u_arg[4]);
 		}
 		if (callp->sy_narg > 5) {
 			u_int addr = (u_int)frame->tf_ip + 4 + 4;
 			if (!baduaddr((caddr_t)addr))
 				u.u_arg[5] = *(u_int *)addr;
-			if (sys_num == 23)
-				printf("DBG: sysctl arg5 addr=%x bad=%d val=%x\n",
-				    addr, baduaddr((caddr_t)addr), (unsigned)u.u_arg[5]);
+			//if (sys_num == 23)
+			//	printf("DBG: sysctl arg5 addr=%x bad=%d val=%x\n",
+			//	    addr, baduaddr((caddr_t)addr), (unsigned)u.u_arg[5]);
 		}
 	}
 
@@ -625,6 +625,39 @@ out:
 	if (gba_exec_switched_stack)
 		frame->tf_pc |= 1;
 	frame->tf_psr |= 0x80;
+
+	/*
+	 * DBG: chasing a wild jump (PC lands in the SWAP staging region,
+	 * ORIGIN(SWAP)=0x02011800 in kern.ldscript, right past USERRAM's
+	 * end) that happens several syscalls after a successful execve(),
+	 * both on mGBA (during init's own startup) and on real GBAED
+	 * hardware (during the login shell's startup, further along).
+	 * Catch it *here* - the last point with a normal C stack frame and
+	 * full register/memory state before control returns to userland
+	 * via the naked trampoline's raw ldmia/bx lr - rather than after
+	 * the wild bx has already happened and clobbered everything.
+	 * Bounds are the user process's own declared text+data+bss+stack
+	 * window; a legitimate resume address/sp can never be outside it
+	 * on this MMU-less port.
+	 */
+	{
+		extern char __user_data_start[], __user_data_end[];
+		unsigned lo = (unsigned)__user_data_start;
+		unsigned hi = (unsigned)__user_data_end;
+		unsigned pc = frame->tf_pc & ~1;
+		unsigned rsp = frame->tf_ip;
+
+		if (pc < lo || pc >= hi || rsp < lo || rsp > hi) {
+			printf("DBG: BOUNDS pid=%d sysnum=%d pc=%x sp=%x "
+			    "r0=%x r1=%x r2=%x r3=%x lr=%x psr=%x\n",
+			    u.u_procp->p_pid, sys_num,
+			    (unsigned)frame->tf_pc, rsp,
+			    (unsigned)frame->tf_r0, (unsigned)frame->tf_r1,
+			    (unsigned)frame->tf_r2, (unsigned)frame->tf_r3,
+			    (unsigned)frame->tf_lr, (unsigned)frame->tf_psr);
+		}
+	}
+
 	userret(u.u_frame->tf_pc, syst);
 
 	//led_control(LED_KERNEL, 0);
