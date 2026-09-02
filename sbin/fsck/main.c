@@ -128,13 +128,13 @@ checkfilesys(filesys)
     register ino_t *zp;
 
     devnam = filesys;
-    printf("DBG: checkfilesys before setup(%s)\n", filesys);
+    //printf("DBG: checkfilesys before setup(%s)\n", filesys);
     if (setup(filesys) == 0) {
         if (preen)
             pfatal("CAN'T CHECK FILE SYSTEM.\n");
         return;
     }
-    printf("DBG: checkfilesys after setup, before pass1\n");
+    //printf("DBG: checkfilesys after setup, before pass1\n");
     /*
      * 1: scan inodes tallying blocks used
      */
@@ -145,7 +145,7 @@ checkfilesys(filesys)
         printf("** Phase 1 - Check Blocks and Sizes\n");
     }
     pass1();
-    printf("DBG: checkfilesys after pass1\n");
+    //printf("DBG: checkfilesys after pass1\n");
 
     /*
      * 1b: locate first references to duplicates, if any
@@ -163,7 +163,7 @@ checkfilesys(filesys)
     if (preen == 0)
         printf("** Phase 2 - Check Pathnames\n");
     pass2();
-    printf("DBG: checkfilesys after pass2\n");
+    //printf("DBG: checkfilesys after pass2\n");
 
     /*
      * 3: scan inodes looking for disconnected directories
@@ -171,7 +171,7 @@ checkfilesys(filesys)
     if (preen == 0)
         printf("** Phase 3 - Check Connectivity\n");
     pass3();
-    printf("DBG: checkfilesys after pass3\n");
+    //printf("DBG: checkfilesys after pass3\n");
 
     /*
      * 4: scan inodes looking for disconnected files; check reference counts
@@ -179,7 +179,7 @@ checkfilesys(filesys)
     if (preen == 0)
         printf("** Phase 4 - Check Reference Counts\n");
     pass4();
-    printf("DBG: checkfilesys after pass4\n");
+    //printf("DBG: checkfilesys after pass4\n");
 
     flush(&dfile, &fileblk);
 
@@ -189,7 +189,7 @@ checkfilesys(filesys)
     if (preen == 0)
         printf("** Phase 5 - Check Free List\n");
     pass5();
-    printf("DBG: checkfilesys after pass5\n");
+    //printf("DBG: checkfilesys after pass5\n");
 
     /*
      * print out summary statistics

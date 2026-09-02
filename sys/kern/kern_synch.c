@@ -199,9 +199,9 @@ tsleep (ident, priority, timo)
 //  ((struct user *)p->p_addr)->u_rsave.val[8],
 //  ((struct user *)p->p_addr)->u_rsave.val[9]);
 #endif
-    printf("DBG: tsleep pid=%d before swtch, chan=%x\n", p->p_pid, (unsigned)ident);
+    //printf("DBG: tsleep pid=%d before swtch, chan=%x\n", p->p_pid, (unsigned)ident);
     swtch();
-    printf("DBG: tsleep pid=%d after swtch (resumed)\n", p->p_pid);
+    //printf("DBG: tsleep pid=%d after swtch (resumed)\n", p->p_pid);
 resume:
     splx(s);
     p->p_flag &= ~P_SINTR;
@@ -520,10 +520,10 @@ loop:
      */
     n = p->p_flag & SSWAP;
     p->p_flag &= ~SSWAP;
-    printf("DBG: swtch longjmp to pid=%d addr=%x %s\n", p->p_pid,
-        p->p_addr, n ? "ssave" : "rsave");
+    //printf("DBG: swtch longjmp to pid=%d addr=%x %s\n", p->p_pid,
+    //    p->p_addr, n ? "ssave" : "rsave");
     longjmp (p->p_addr, n ? &u.u_ssave : &u.u_rsave);
-    printf("DBG: swtch UNREACHABLE after longjmp\n");
+    //printf("DBG: swtch UNREACHABLE after longjmp\n");
 }
 
 /*

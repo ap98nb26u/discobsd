@@ -64,8 +64,8 @@ _start (argc, argv, env)
 	char **argv;
 	char **env;
 {
-	printf("DBG: _start entered, argc=%d argv=%x env=%x\n",
-	    argc, (unsigned)argv, (unsigned)env);
+	//printf("DBG: _start entered, argc=%d argv=%x env=%x\n",
+	//    argc, (unsigned)argv, (unsigned)env);
 	environ = env;
 	if (argc > 0 && argv[0] != 0) {
 		const char *s;

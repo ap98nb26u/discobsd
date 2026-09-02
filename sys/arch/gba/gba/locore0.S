@@ -98,15 +98,8 @@ bss_loop:
     @ main() only ever returns here for the newly-forked process 1
     @ (process 0 loops forever in sched()). It has just bcopy'd icode
     @ to __user_data_start; jump there to start running it.
-    .extern printf
-    ldr r0, =dbg_jump_icode_msg
-    bl printf
     ldr r0, =__user_data_start
     bx r0
-
-dbg_jump_icode_msg:
-    .asciz "DBG: locore0 about to jump to icode\n"
-    .align 2
 
 .ltorg @ put out data fo reteral pool
 
@@ -164,6 +157,16 @@ gba_intr_handler:
  
     @ save registers (full)
     push {r0-r3, r4-r11, r12, lr}
+
+    @ DBG: stash lr_irq (still live in lr here, untouched by the push
+    @ above) into a C-visible global before it's out of reach - IRQ
+    @ mode's own lr is banked and unavailable once we switch to SYS
+    @ mode two instructions down. gba_do_schedule() (machdep.c) uses
+    @ this to bounds-check where the interrupted code actually was,
+    @ chasing a wild-jump crash that a syscall-return-only check never
+    @ catches - see the comment there.
+    ldr r0, =irq_last_lr
+    str lr, [r0]
 
     @ change to SYS mode
     mrs r0, cpsr

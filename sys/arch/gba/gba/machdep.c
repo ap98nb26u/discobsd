@@ -167,9 +167,36 @@ volatile uint32_t myticks = 1;
 volatile int vblank_flag;
 volatile int timer0_flag;
 
+/*
+ * DBG: lr_irq, stashed by gba_intr_handler (locore0.S) before it
+ * switches out of IRQ mode and that banked register becomes
+ * unreachable. Used below to see where the interrupted code actually
+ * was - chasing a wild-jump crash/reboot on real GBAED hardware that
+ * happens between syscalls (confirmed: the bounds check in
+ * syscall_handler(), gba/syscall.c, never fires before it), so a
+ * check only at syscall return can't catch it; this fires on every
+ * timer/vblank tick instead, while the corruption is presumably still
+ * fresh. -4 is the standard ARM IRQ return-address adjustment (lr_irq
+ * = address of the interrupted instruction + 4, both ARM and Thumb).
+ */
+volatile unsigned irq_last_lr;
+
+static void check_irq_pc(void)
+{
+    extern char __swap_start[], __swap_end[];
+    unsigned pc = irq_last_lr - 4;
+
+    if (pc >= (unsigned)__swap_start && pc < (unsigned)__swap_end) {
+        printf("DBG: IRQPC in SWAP! irq_last_lr=%x pc=%x\n",
+            irq_last_lr, pc);
+    }
+}
+
 IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
 {
     uint16_t flag = REG_IF;
+
+    check_irq_pc();
     if (flag & IRQ_TIMER0) { // TIMER0
         flag = IRQ_TIMER0;
         myticks++;
@@ -396,6 +423,27 @@ idle(void)
 	//__ISB();
 	//__WFI();
 
+	/*
+	 * No RX interrupt exists on this port's UART (see the big comment
+	 * on uart_poll_input() in arch/gba/dev/mgba_uart.c for the full
+	 * story) - poll for waiting input here instead, since this is the
+	 * one place in the scheduler loop guaranteed to run with
+	 * interrupts enabled and no live scratch registers to protect,
+	 * and it's called in a tight loop by swtch() precisely when
+	 * nothing is runnable (e.g. a process blocked in ttread()'s
+	 * sleep() waiting for console input).
+	 */
+	{
+		/*
+		 * Ruled out as the cause of an early-boot crash (identical
+		 * DBG trail and crash address with this disabled) - see the
+		 * comment on uart_poll_input() in mgba_uart.c for what this
+		 * does and why it's here.
+		 */
+		extern void uart_poll_input(void);
+		uart_poll_input();
+	}
+
 	/* Restore previous SPL. */
 	splx(x);
 #endif // 0
@@ -404,10 +452,23 @@ idle(void)
 void
 cpu_reboot(void)
 {
-	extern char _start;
-	typedef void (*reset_func)(void);
-	reset_func reboot = (reset_func)&_start;
-	reboot();
+	/*
+	 * Was a raw jump to _start - a "warm jump" that leaves IWRAM,
+	 * CPU mode/register state, and peripheral registers exactly as
+	 * the crashed/previous session left them, only reinitialized by
+	 * whatever this port's own boot code happens to touch. The
+	 * mojibake glyph seen at the very start of every reboot's console
+	 * output (before "DiscoBSD..." banner) is consistent with stale
+	 * leftover state feeding into the console driver before it
+	 * re-inits. The BIOS's own SoftReset (SWI 0x00) does a real reset:
+	 * clears the reserved IWRAM area, reinitializes the CPU-mode stack
+	 * pointers, and restarts execution the same way a fresh cold boot
+	 * would - much closer to what "reboot" should mean. (The
+	 * undocumented HardReset, SWI 0x26, was also suggested - skipped
+	 * for now since its behavior is known to vary across real GBA
+	 * hardware revisions; SoftReset is the documented, reliable one.)
+	 */
+	__asm__ volatile ("swi 0x00");
 }
 
 void
