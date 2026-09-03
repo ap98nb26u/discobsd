@@ -460,15 +460,31 @@ cpu_reboot(void)
 	 * mojibake glyph seen at the very start of every reboot's console
 	 * output (before "DiscoBSD..." banner) is consistent with stale
 	 * leftover state feeding into the console driver before it
-	 * re-inits. The BIOS's own SoftReset (SWI 0x00) does a real reset:
-	 * clears the reserved IWRAM area, reinitializes the CPU-mode stack
-	 * pointers, and restarts execution the same way a fresh cold boot
-	 * would - much closer to what "reboot" should mean. (The
-	 * undocumented HardReset, SWI 0x26, was also suggested - skipped
-	 * for now since its behavior is known to vary across real GBA
-	 * hardware revisions; SoftReset is the documented, reliable one.)
+	 * re-inits.
+	 *
+	 * Tried the BIOS's documented SoftReset (SWI 0x00) first: it
+	 * clears the reserved IWRAM area and CPU-mode stack pointers, but
+	 * -not- I/O register space (0x04000000+) - confirmed still leaving
+	 * an occasional early hang after a panic-triggered reboot,
+	 * consistent with some I/O register (REG_IME's stale value was
+	 * one candidate; explicitly zeroing it at the top of locore0.S's
+	 * reset: didn't fully fix it either, so something else in that
+	 * space is apparently also still stale) surviving into the next
+	 * boot in a state this port's init code doesn't expect. Now using
+	 * the undocumented HardReset (SWI 0x26) instead - per GBATEK
+	 * (problemkaputt.de/gbatek-bios-reset-functions.htm), it performs
+	 * a much more thorough reset closer to actual power-cycling.
+	 * Undocumented and known to vary across real hardware revisions,
+	 * but SoftReset's narrower reset demonstrably isn't sufficient
+	 * here, so trading that documented-but-insufficient guarantee for
+	 * this broader one. r0 selects the post-reset boot target; 0 is
+	 * the conventional "same as normal cold boot" value.
 	 */
-	__asm__ volatile ("swi 0x00");
+	__asm__ volatile (
+	    "mov r0, #0\n\t"
+	    "swi 0x26"
+	    ::: "r0"
+	);
 }
 
 void
@@ -517,8 +533,16 @@ boot(dev_t dev, int howto)
 		}
 		/* Restart from dev, howto. */
 
-		/* Reset microcontroller. */
-		//NVIC_SystemReset();
+		/*
+		 * Reset microcontroller. Was left as a commented-out
+		 * NVIC_SystemReset() (an STM32 call, meaningless on GBA)
+		 * with no GBA-appropriate replacement, so a real reboot(8)
+		 * request (RB_HALT not set) fell all the way through to
+		 * the halt-and-wait-for-a-keypress path below exactly like
+		 * halt(8) does - reboot(8) never actually rebooted
+		 * unattended, silently waiting for a keypress instead.
+		 */
+		cpu_reboot();
 		/* NOTREACHED */
 	}
 	printf("halted\n");
@@ -655,13 +679,31 @@ baduaddr(caddr_t addr)
 
 /*
  * Return 0 if a kernel address is valid.
- * There are two memory regions allowed for kernel: RAM and flash.
+ * There are three memory regions allowed for kernel: EWRAM (U0AREA/
+ * UAREA only - see __kernel_data_start/end in kern.ldscript), IWRAM,
+ * and flash/ROM.
+ *
+ * __kernel_data_start/end only ever covered that narrow EWRAM slice,
+ * not IWRAM - where this port's actual kernel .data/.bss (every
+ * ordinary kernel global, including proc[]/nproc that ps(1) reads via
+ * /dev/kmem) lives (see kern.ldscript's IWRAM block and the .data/.bss
+ * VMAs in the linked image). Confirmed via ps failing "/dev/kmem: Bad
+ * address" on every attempt: mmrw() (dev/mem.c) rejects any address
+ * that's *both* badkaddr() and baduaddr(), and an IWRAM address is
+ * neither in this narrow EWRAM range nor in USERRAM, so every kernel
+ * global outside that one small EWRAM slice was unreadable through
+ * /dev/kmem.
  */
 int
 badkaddr(caddr_t addr)
 {
+	extern char __iwram_start[], __iwram_end[];
+
 	if (addr >= (caddr_t)__kernel_data_start &&
 	    addr < (caddr_t)__kernel_data_end)
+		return 0;
+	if (addr >= (caddr_t)__iwram_start &&
+	    addr < (caddr_t)__iwram_end)
 		return 0;
 	if (addr >= (caddr_t)__kernel_flash_start &&
 	    addr < (caddr_t)__kernel_flash_end)
