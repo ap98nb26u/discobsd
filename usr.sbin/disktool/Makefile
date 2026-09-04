@@ -19,3 +19,6 @@ clean:
 
 install:        all
 		${INSTALL} disktool ${DESTDIR}/usr/sbin/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+disktool: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

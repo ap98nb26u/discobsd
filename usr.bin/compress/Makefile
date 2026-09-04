@@ -32,3 +32,6 @@ install: compress
 clean:
 	rm -f compress core errs compress.o *.elf *.dis
 #	rm -f compress USERMEM core errs
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+compress: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

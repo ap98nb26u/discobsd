@@ -42,3 +42,6 @@ stak.o: stak.c defs.h mac.h mode.h name.h stak.h brkincr.h ctype.h
 string.o: string.c defs.h mac.h mode.h name.h stak.h brkincr.h ctype.h
 word.o: word.c defs.h mac.h mode.h name.h stak.h brkincr.h ctype.h sym.h
 xec.o: xec.c defs.h mac.h mode.h name.h stak.h brkincr.h ctype.h sym.h
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+sh: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

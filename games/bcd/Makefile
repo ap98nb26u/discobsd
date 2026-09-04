@@ -29,3 +29,6 @@ install:	all
 		${INSTALL} ${PROG} ${DESTDIR}${BINDIR}/${PROG}
 		${INSTALL} -m 444 ${MAN} ${DESTDIR}${MANDIR}/${MAN}
 		ln -f ${DESTDIR}${MANDIR}/${MAN} ${DESTDIR}${MANDIR}/ppt.0
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+${PROG}: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

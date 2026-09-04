@@ -26,3 +26,6 @@ gram.c:         gram.y
 		${YACC} ${YFLAGS} gram.y
 		fgrep -v "static char yaccpar_sccsid" y.tab.c >gram.c
 		rm -f y.tab.c
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+xmake: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

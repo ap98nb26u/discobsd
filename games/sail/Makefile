@@ -32,3 +32,6 @@ clean:
 install:        all
 		${INSTALL} sail ${DESTDIR}/usr/games/
 		cp ${MAN} ${DESTDIR}/usr/share/man/cat6/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+sail: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

@@ -52,3 +52,6 @@ sh.proc.o: sh.h sh.local.h sh.dir.h sh.proc.h sh.char.h
 sh.sem.o: sh.h sh.local.h sh.proc.h sh.char.h
 sh.set.o: sh.h sh.local.h sh.char.h
 sh.time.o: sh.h sh.local.h sh.char.h
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+csh: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

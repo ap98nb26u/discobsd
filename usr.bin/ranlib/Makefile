@@ -32,3 +32,6 @@ install:
 		cp ranlib.5.0 ${DESTDIR}/usr/share/man/cat5/ranlib.0
 		cp ranlib.0 ${DESTDIR}/usr/share/man/cat1/ranlib.0
 		${INSTALL} ranlib ${DESTDIR}/usr/bin/ranlib
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+ranlib: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

@@ -30,3 +30,6 @@ install:	all lib.b
 		${INSTALL} -c -m 444 lib.b ${DESTDIR}/usr/share/misc
 		${INSTALL} ${PROG} ${DESTDIR}${BINDIR}/${PROG}
 		cp ${MAN} ${DESTDIR}/usr/share/man/cat1/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+${PROG}: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

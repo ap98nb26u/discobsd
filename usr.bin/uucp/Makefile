@@ -136,3 +136,6 @@ clean:
 
 depend:
 	mkdep ${CFLAGS} *.c
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+uuencode uudecode uucp uux uuxqt uulog uuclean uuname uupoll uusnap uusend uuq uucico: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

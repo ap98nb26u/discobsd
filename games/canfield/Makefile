@@ -40,3 +40,6 @@ install:	all
 		ln -f ${DESTDIR}${MANDIR}/${MAN} ${DESTDIR}${MANDIR}/cfscores.0
 		cat < /dev/null > ${DESTDIR}/usr/games/lib/cfscores
 		chmod 666 ${DESTDIR}/usr/games/lib/cfscores
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+${PROG} cfscores: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

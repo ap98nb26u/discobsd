@@ -47,3 +47,6 @@ pfdicdat.h pforth.dic:
 
 clean:
 		rm -f *.o ${MAN} ../id ../groups ../whoami *.elf *.dis tags *~
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+../pforth: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

@@ -32,3 +32,6 @@ install:        all
 		@rm -f ${DESTDIR}/bin/[
 		ln ${DESTDIR}/bin/test ${DESTDIR}/bin/[
 		cp ${MAN} ${DESTDIR}/usr/share/man/cat1/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+test: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

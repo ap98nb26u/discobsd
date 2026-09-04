@@ -26,3 +26,6 @@ clean:
 install:        all
 		${INSTALL} portio ${DESTDIR}/usr/bin/
 		${INSTALL} lol ${DESTDIR}/usr/bin/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+portio lol: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

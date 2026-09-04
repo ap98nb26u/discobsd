@@ -25,3 +25,6 @@ install:        all
 main.o: gettytab.h
 init.o: gettytab.h
 subr.o: gettytab.h
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+getty: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

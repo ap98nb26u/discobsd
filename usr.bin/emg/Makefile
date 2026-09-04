@@ -39,3 +39,6 @@ install: all
 
 clean:
 	rm -f *.o *~ *.core *.bak *.dis emg ${MAN}
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+emg: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

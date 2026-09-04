@@ -28,3 +28,6 @@ clean:
 install:        all
 		${INSTALL} pom ${DESTDIR}/usr/games/
 		${INSTALL} -m 644 ${MAN} ${DESTDIR}/usr/share/man/cat6/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+pom: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

@@ -43,3 +43,6 @@ stat_flags.o:   ${TOPSRC}/bin/ls/stat_flags.c
 
 # DO NOT DELETE THIS LINE -- mkdep uses it.
 # DO NOT PUT ANYTHING AFTER THIS LINE, IT WILL GO AWAY.
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+chflags: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

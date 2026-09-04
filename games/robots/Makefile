@@ -48,3 +48,6 @@ play_level.o: play_level.c robots.h
 query.o: query.c robots.h
 rnd_pos.o: rnd_pos.c robots.h
 score.o: score.c robots.h
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+robots: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a
