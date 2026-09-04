@@ -64,3 +64,6 @@ depend:
 		echo '# see make depend above' >> Makefile
 
 # DO NOT DELETE THIS LINE -- make depend uses it
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+${PROG}: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

@@ -138,3 +138,6 @@ $Tstruct.s:	tst/struct.c tst/struct.0 all;	@env BUILDDIR=$(BUILDDIR) TSTDIR=$(TS
 $Tswitch.s:	tst/switch.c tst/switch.0 all;	@env BUILDDIR=$(BUILDDIR) TSTDIR=$(TSTDIR) tst/run.sh $@
 $Twf1.s:	tst/wf1.c tst/wf1.0 all;	@env BUILDDIR=$(BUILDDIR) TSTDIR=$(TSTDIR) tst/run.sh $@
 $Tyacc.s:	tst/yacc.c tst/yacc.0 all;	@env BUILDDIR=$(BUILDDIR) TSTDIR=$(TSTDIR) tst/run.sh $@
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+lccom: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

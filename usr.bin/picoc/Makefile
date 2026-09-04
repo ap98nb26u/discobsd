@@ -58,3 +58,6 @@ errno.o: cstdlib/errno.c interpreter.h platform.h
 ctype.o: cstdlib/ctype.c interpreter.h platform.h
 stdbool.o: cstdlib/stdbool.c interpreter.h platform.h
 unistd.o: cstdlib/unistd.c interpreter.h platform.h
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+$(TARGET): $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

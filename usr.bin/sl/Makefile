@@ -25,3 +25,6 @@ clean:
 
 install:        all
 		${INSTALL} sl ${DESTDIR}/usr/bin/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+sl: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

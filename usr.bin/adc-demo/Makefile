@@ -24,3 +24,6 @@ clean:
 
 install:        all
 		${INSTALL} adc-demo ${DESTDIR}/usr/bin/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+adc-demo: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

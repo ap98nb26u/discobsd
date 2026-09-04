@@ -27,3 +27,6 @@ clean:
 install:        all
 		${INSTALL} basic ${DESTDIR}/usr/bin/
 		${INSTALL} renumber ${DESTDIR}/usr/bin/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+basic renumber: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

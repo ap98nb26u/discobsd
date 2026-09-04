@@ -27,3 +27,6 @@ install:        all
 pdc.o:          pdc.y
 		$(YACC) $(YFLAGS) pdc.y
 		$(CC) $(DEFS) $(CPPFLAGS) $(CFLAGS) -c -o pdc.o y.tab.c
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+pdc: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

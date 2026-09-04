@@ -53,3 +53,6 @@ install:        warp $(PRIVATE)
 		cp $(PRIVATE) $(PRIVLIB)
 		cp /dev/null $(PRIVLIB)/save.blurfl
 		[ -f $(PRIVLIB)/warp.news ] || cp warp.news $(PRIVLIB)
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+warp: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a
