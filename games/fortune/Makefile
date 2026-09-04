@@ -42,3 +42,6 @@ install:        all
 		cp fortunes.dat $(DESTDIR)/usr/games/lib/
 
 #$(OBJS):        fortune.h
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+fortune: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

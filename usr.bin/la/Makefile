@@ -28,3 +28,6 @@ clean:
 install:        all
 		${INSTALL} la ${DESTDIR}/usr/bin/
 		cp ${MAN} ${DESTDIR}/usr/share/man/cat1/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+la: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

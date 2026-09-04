@@ -22,3 +22,6 @@ install:        all
 
 lint:
 		lint -havx -I../ar ${SRCS}
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+nm: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

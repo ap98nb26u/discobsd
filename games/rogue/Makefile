@@ -60,3 +60,6 @@ install:        all
 		cp ${MAN} ${DESTDIR}/usr/share/man/cat6/
 
 #$(OBJS):        rogue.h
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+rogue: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

@@ -47,3 +47,6 @@ clean:
 
 install:        all
 		${INSTALL} ${EXAMPLES} ${DESTDIR}/usr/bin/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+web-client web-server telnet ntpdate chat-server: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

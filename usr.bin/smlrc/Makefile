@@ -29,3 +29,6 @@ clean:
 ###
 smlrc.o: smlrc.c fp.c cgmips.c
 		${CC} ${CFLAGS} -mips16 smlrc.c -c -o $@
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+smlrc: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

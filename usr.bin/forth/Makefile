@@ -27,3 +27,6 @@ install:        all
 ###
 forth.o: forth.c io.h forth.h
 func.o: func.c io.h forth.h
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+forth: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

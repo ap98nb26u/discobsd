@@ -39,3 +39,6 @@ install:        all
 		cp ${MAN} ${DESTDIR}/usr/share/man/cat6/
 
 #$(OBJS):        trek.h
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+trek: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

@@ -328,3 +328,6 @@ install:
 	cp Run ${DESTDIR}/usr/share/unixbench
 
 ## END ##
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+$(PROGDIR)/arithoh $(PROGDIR)/register $(PROGDIR)/short $(PROGDIR)/int $(PROGDIR)/long $(PROGDIR)/float $(PROGDIR)/double $(PROGDIR)/whetstone-double $(PROGDIR)/hanoi $(PROGDIR)/poll $(PROGDIR)/poll2 $(PROGDIR)/select $(PROGDIR)/fstime $(PROGDIR)/fsbuffer $(PROGDIR)/fsdisk $(PROGDIR)/syscall $(PROGDIR)/context1 $(PROGDIR)/pipe $(PROGDIR)/spawn $(PROGDIR)/execl $(PROGDIR)/dhry2 $(PROGDIR)/dhry2reg dhry2reg $(PROGDIR)/looper: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a
