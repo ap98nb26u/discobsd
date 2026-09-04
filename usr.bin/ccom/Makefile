@@ -102,3 +102,6 @@ scan.c: 	scan.l
 optim2.o reader.o optim.o : external.h
 
 pftn.o cgram.h: cgram.c
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+ccom: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

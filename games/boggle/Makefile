@@ -37,3 +37,6 @@ install:
 		${INSTALL} boggle ${DESTDIR}/usr/games/
 		${INSTALL} -m 644 bogdict ${DESTDIR}/usr/games/lib/bogdict
 		cp ${MAN} ${DESTDIR}/usr/share/man/cat6/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+boggle: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

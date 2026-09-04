@@ -36,3 +36,6 @@ clean:
 install:        all
 		${INSTALL} lcc ${DESTDIR}/usr/bin/
 		cp lcc.0 ${DESTDIR}/usr/share/man/cat1/
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+lcc bprint ops: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

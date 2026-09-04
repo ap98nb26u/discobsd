@@ -41,3 +41,6 @@ install:        all
 		${INSTALL} -m 644 ${MAN} ${DESTDIR}/usr/share/man/cat6/
 		ln -f ${DESTDIR}/usr/share/man/cat6/${MAN} ${DESTDIR}/usr/share/man/cat6/snscore.0
 		${INSTALL} -c -m 644 /dev/null ${DESTDIR}/usr/games/lib/snakerawscores
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+snake snscore: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

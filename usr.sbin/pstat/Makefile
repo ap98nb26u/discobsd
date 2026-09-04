@@ -38,3 +38,6 @@ tags:           ${SRCS}
 
 # DO NOT DELETE THIS LINE -- mkdep uses it.
 # DO NOT PUT ANYTHING AFTER THIS LINE, IT WILL GO AWAY.
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+pstat: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

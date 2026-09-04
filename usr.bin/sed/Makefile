@@ -20,3 +20,6 @@ install:        all
 
 sed0.o: sed0.c sed.h
 sed1.o: sed1.c sed.h
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+sed: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

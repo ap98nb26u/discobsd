@@ -64,3 +64,6 @@ test:
 		cmp tests/run12 tests/res12
 		./cpp < tests/test13 > tests/run13
 		cmp tests/run13 tests/res13
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+cpp: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

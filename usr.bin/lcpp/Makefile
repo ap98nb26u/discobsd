@@ -44,3 +44,6 @@ test:
 		-diff ../cpp/tests/res9 tests/run9
 		./lcpp < ../cpp/tests/test10 > tests/run10
 		-diff ../cpp/tests/res10 tests/run10
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+lcpp: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

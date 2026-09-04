@@ -41,3 +41,6 @@ proctab.c:	proc.c token.h awk.h
 
 clean:
 		-rm -f *.o *.tmp awk.lx.c *.out *.elf *.dis y.tab.* awk.h proc proctab.c token.h awk
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+awk: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

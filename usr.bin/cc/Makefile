@@ -26,3 +26,6 @@ install:        all
 		${INSTALL} cc ${DESTDIR}/usr/bin/
 		${INSTALL} cc ${DESTDIR}/usr/bin/scc
 		${INSTALL} cc ${DESTDIR}/usr/bin/lcc
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+cc: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

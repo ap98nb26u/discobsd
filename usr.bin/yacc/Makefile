@@ -32,3 +32,6 @@ y1.o: y1.c dextern
 y2.o: y2.c dextern
 y3.o: y3.c dextern
 y4.o: y4.c dextern
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+yacc: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

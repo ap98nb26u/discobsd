@@ -22,3 +22,6 @@ install:        all
 		${INSTALL} adb ${DESTDIR}/usr/bin/
 
 $(OBJS): defs.h
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+adb: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

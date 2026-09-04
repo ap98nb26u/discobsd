@@ -32,3 +32,6 @@ expected:       scm $(TESTS)
 		for i in $(TESTS); do \
                         base=`basename $$i .scm`;\
                         ./scm -v $$i > tests/$$base.expected; done
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+scm: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

@@ -52,3 +52,6 @@ install:        all
 		@rm -f $(DESTDIR)/usr/share/man/cat1/rb.0 $(DESTDIR)/usr/share/man/cat1/rx.0
 		ln $(DESTDIR)/usr/share/man/cat1/rz.0 $(DESTDIR)/usr/share/man/cat1/rb.0
 		ln $(DESTDIR)/usr/share/man/cat1/rz.0 $(DESTDIR)/usr/share/man/cat1/rx.0
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+rz sz: $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a

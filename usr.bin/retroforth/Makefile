@@ -27,3 +27,6 @@ image:          $(BIN)
 		cat image/meta.rx image/kernel.rx > core.rx
 		./$(BIN) --shrink --image retroImage --with core.rx
 		rm core.rx
+
+# --- auto-added: force relink when crt0.o/libc.a change ---
+$(BIN): $(TOPSRC)/lib/crt0.o $(TOPSRC)/lib/libc.a
