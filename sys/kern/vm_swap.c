@@ -47,6 +47,20 @@ dbg_cksum(size_t addr, size_t len)
  */
 static unsigned dcksum_tab[NPROC];
 
+/*
+ * Same idea as dcksum_tab above, but for the stack region (p_saddr/
+ * p_ssize) - added 2026-09-05 while chasing a real-hardware-only
+ * text-segment corruption in /bin/sh (fault()'s own code found wrong
+ * at the moment sendsig() jumped into it, right after a genuine
+ * stack-growth SIGSEGV - see project_gba_sh_fault_sigreturn_hang.md).
+ * The data-region check above never reported a mismatch in that same
+ * session, which only proves the *data* region's swap round trip was
+ * self-consistent - it says nothing about the stack region, which has
+ * never been checked this way. This brackets whether the stack half
+ * of the swap round trip is where a corruption is being introduced.
+ */
+static unsigned scksum_tab[NPROC];
+
 #define SWAPIN_CKSUM_RETRIES 4
 
 /*
@@ -93,7 +107,29 @@ swapin (p)
         mfree (swapmap, btod (p->p_dsize), p->p_daddr);
     }
     if (p->p_ssize) {
+        int slot = p - proc;
+        unsigned want = scksum_tab[slot];
+        unsigned got;
+        int retry;
+
         swap (p->p_saddr, saddr, p->p_ssize, B_READ);
+        got = dbg_cksum(saddr, p->p_ssize);
+
+        for (retry = 0; got != want && retry < SWAPIN_CKSUM_RETRIES; retry++) {
+            printf("DBG: swapin STACK cksum MISMATCH pid=%d blkno=%u "
+                "want=%x got=%x, retrying (%d)\n",
+                p->p_pid, (unsigned)p->p_saddr, want, got, retry + 1);
+            swap (p->p_saddr, saddr, p->p_ssize, B_READ);
+            got = dbg_cksum(saddr, p->p_ssize);
+        }
+        if (got != want)
+            printf("DBG: swapin STACK cksum still bad after retries, pid=%d "
+                "blkno=%u want=%x got=%x - giving up\n",
+                p->p_pid, (unsigned)p->p_saddr, want, got);
+        else if (retry)
+            printf("DBG: swapin STACK cksum recovered pid=%d after %d retr%s\n",
+                p->p_pid, retry, retry == 1 ? "y" : "ies");
+
         mfree (swapmap, btod (p->p_ssize), p->p_saddr);
     }
     swap (p->p_addr, uaddr, USIZE, B_READ);
@@ -149,6 +185,9 @@ swapout (p, freecore, odata, ostack)
         //printf("DBG: after swap a[0]\n");
     }
     if (ostack) {
+        unsigned cksum = dbg_cksum(p->p_saddr, ostack);
+
+        scksum_tab[p - proc] = cksum;
         //printf("DBG: before swap a[1] ostack=%u\n", ostack);
         swap (a[1], p->p_saddr, ostack, B_WRITE);
         //printf("DBG: after swap a[1]\n");
