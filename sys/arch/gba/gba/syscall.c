@@ -37,23 +37,6 @@ void my_custom_swi_handler(uint32_t swi_number, uint32_t *regs) {
     }
 }
 
-static void debug_print_return_target(unsigned v)
-{
-    //printf("DBG: syscall return, jumping to %x\n", v);
-}
-
-static void debug_print_sp_lr(unsigned sp, unsigned lr)
-{
-    printf("DBG: about to bx, sp=%x lr=%x\n", sp, lr);
-}
-
-/*
- * Scratch cell for stashing the jump target across the debug call
- * below, in memory rather than a register - AAPCS says r4-r11 must
- * survive a well-formed call, but this sidesteps having to trust that
- * across every function in the printf/uartputc chain.
- */
-static volatile unsigned debug_target_scratch;
 
 /*
  * Holds tf_psr (the CPSR syscall_handler computed, with PSR_C set/cleared
@@ -255,8 +238,6 @@ void simulate_swi_via_inline_data(void) {
         // 末尾で frame->tf_pc |= 1 によりThumbビットも設定済み)。tf_lrから読むと
         // execveが成功してもicode自身に戻ってしまい、新しいプロセスへ絶対に
         // 遷移できない。
-        "ldr r0, [sp, #56]\n\t"       // デバッグ用: sp/r0-r12はまだ壊さずtf_pcを覗く
-        "bl debug_print_return_target\n\t"
 
         // tf_psr(呼び出し元へ返すべきCPSR、syscall_handler側でPSR_Cを成功/失敗に
         // 応じて設定・クリア済み)をここで退避する。r0はこの直後のldmiaでどうせ
@@ -586,8 +567,12 @@ syscall_handler(int sys_num, struct trapframe *frame)
 		 * execveから戻る際、新しいプログラム(init)のLRが
 		 * カーネル内の古いアドレスを指していると、最初の
 		 * 関数から戻るときに暴走するため初期化する。
+		 *
+		 * code==11はSYS_execv(icodeが起動時に使う手書きのSWI)のみで、
+		 * /sbin/initが実際の子プロセスを起動する経路であるSYS_execve
+		 * (code==59)がこれまで抜けていた。
 		 */
-		if (code == 11 && u.u_error == 0) {
+		if ((code == 11 || code == 59) && u.u_error == 0) {
 			u.u_frame->tf_lr = 0;
 			gba_exec_switched_stack = 1;
 		}
