@@ -109,6 +109,45 @@ static uint8_t sd_resp_buff[18];
 static uint8_t sd_card_flags;          /* SD_TYPE_HC | SD_TYPE_V2 */
 static uint32_t sd_disk_addr;          /* currently open 512-byte sector, or ~0 */
 
+/*
+ * Set the moment a CMD18/CMD25 is *issued*, cleared only once a CMD12
+ * has actually been sent to close it (2026-09-06).
+ *
+ * sd_disk_addr alone could not distinguish "no transfer is open, so
+ * there is nothing to close" from "a transfer was started but we don't
+ * know where it stands", and both looked like ~0U. When sd_open_read()
+ * failed *after* putting CMD18 on the wire - a bad or timed-out R1
+ * response doesn't mean the card ignored the command - the card was
+ * left streaming while sd_disk_addr said ~0U. sd_close_rw() then saw
+ * the sentinel, skipped CMD12 entirely, and the next sd_open_read()
+ * issued a fresh CMD18 into a card that was still feeding the previous
+ * stream, so reads came back from a completely different disk position:
+ * observed on real GBAED hardware as an exec loading some *other*
+ * program's image (a shell command that unexpectedly started tclsh).
+ */
+static uint8_t sd_stream_dirty;
+
+/*
+ * Set by boot() (machdep.c) around its final sync() before a reboot/
+ * halt, so sd_close_rw()'s card-ready wait below can afford to wait
+ * much longer than it safely can during ordinary runtime. That wait's
+ * retry bound (currently 800 iterations, ~2.4s worst case) is a
+ * deliberately tight compromise - see the long comment in
+ * sd_close_rw() - between two failure modes that were both observed
+ * on real hardware: too short and a genuinely still-busy card (SD
+ * program time after a write can run into the hundreds of ms,
+ * observed worse after sustained heavy rewrite of the same blocks,
+ * e.g. a fork/exec-heavy workload right before shutdown) gets treated
+ * as "ready" too early, returning stale data on the very next read -
+ * too long and a truly unresponsive/disconnected card hangs the
+ * kernel for many seconds to minutes. At ordinary runtime a hang is
+ * the worse outcome (the system becomes completely unusable); during
+ * the final pre-reboot flush a longer wait is nearly free (nothing
+ * else is happening) while returning too early risks exactly the
+ * on-disk corruption this flag exists to avoid.
+ */
+int sd_shutdown_flush;
+
 static const uint16_t sd_crc16_table[] = {
     0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50A5, 0x60C6, 0x70E7,
     0x8108, 0x9129, 0xA14A, 0xB16B, 0xC18C, 0xD1AD, 0xE1CE, 0xF1EF,
@@ -296,9 +335,10 @@ sd_close_rw(void)
     uint8_t resp;
     uint16_t i;
 
-    if (sd_disk_addr == ~0U)
+    if (sd_disk_addr == ~0U && ! sd_stream_dirty)
         return 0;
     sd_disk_addr = ~0U;
+    sd_stream_dirty = 0;
 
     resp = sd_cmd(SD_CMD12, 0);
     if (resp)
@@ -347,13 +387,19 @@ sd_close_rw(void)
      * longer silent - if this fires, that's confirmation this exact
      * wait is the hang, not a guess.
      */
-    i = 800;
+    /*
+     * During the final pre-reboot/halt flush (sd_shutdown_flush set by
+     * boot(), machdep.c) wait far longer than is safe during ordinary
+     * runtime - see the comment on sd_shutdown_flush's declaration
+     * above for why this asymmetry is the right tradeoff.
+     */
+    i = sd_shutdown_flush ? 8000 : 800;
     while (--i) {
         if (ed_sd_dat_rd() == 0xff)
             break;
     }
     if (i == 0) {
-        printf("DBG: sd_close_rw: card-ready wait timed out\n");
+        printf("sd: close: card-ready wait timed out\n");
         return SD_ERR_CMD_TIMEOUT;
     }
     return 0;
@@ -367,6 +413,13 @@ sd_open_read(uint32_t saddr)
     if ((sd_card_flags & SD_TYPE_HC) == 0)
         saddr *= 512;
 
+    /*
+     * Mark before issuing, not after: if the response is bad or times
+     * out the card may still have accepted CMD18 and started
+     * streaming, and that is exactly the case sd_close_rw() must not
+     * skip its CMD12 for. See sd_stream_dirty's declaration.
+     */
+    sd_stream_dirty = 1;
     resp = sd_cmd(SD_CMD18, saddr);
     if (resp)
         return resp;
@@ -381,20 +434,49 @@ static uint8_t
 sd_read_sectors(uint32_t sd_addr, void *dst, uint16_t slen)
 {
     uint8_t resp;
+    uint8_t reopened = 0;
 
     if (sd_addr != sd_disk_addr) {
         resp = sd_close_rw();
-        if (resp)
+        if (resp) {
+            printf("sd: rd sec=%u n=%d: close failed %d\n",
+                sd_addr, slen, resp);
             return resp;
+        }
         resp = sd_open_read(sd_addr);
-        if (resp)
+        if (resp) {
+            printf("sd: rd sec=%u n=%d: CMD18 failed %d\n",
+                sd_addr, slen, resp);
             return resp;
+        }
         sd_disk_addr = sd_addr;
+        reopened = 1;
     }
 
     resp = ed_sd_dma_rd(dst, slen);
-    if (resp)
+    if (resp) {
+        /*
+         * Tear the streaming read down before reporting failure
+         * (2026-09-06). The fast path above deliberately keeps a
+         * multi-block read (SD_CMD18) open across calls and skips the
+         * close/reopen whenever the caller asks for exactly the next
+         * sequential sector - but a failed DMA leaves that stream
+         * desynchronized while sd_disk_addr still names the sector we
+         * were trying to read. A caller that retries the same read
+         * therefore matched the fast path, skipped the close/reopen,
+         * and re-entered the *same broken stream* - so the retry could
+         * never recover, failing identically every time. Observed
+         * exactly that on real GBAED hardware once exec_aout.c started
+         * retrying failed image reads: four attempts, four identical
+         * EIOs, then "exec: image read failed (5)". sd_close_rw()
+         * issues CMD12 and restores the ~0U "nothing open" sentinel,
+         * so the next attempt does a full, clean reopen.
+         */
+        printf("sd: rd sec=%u n=%d: dma failed %d (%s stream)\n",
+            sd_addr, slen, resp, reopened ? "fresh" : "continued");
+        (void)sd_close_rw();
         return SD_ERR_CMD_TIMEOUT;
+    }
 
     sd_disk_addr += slen;
     return 0;
@@ -421,6 +503,8 @@ sd_write_sectors(uint32_t sd_addr, const void *src, uint16_t slen)
     if ((sd_card_flags & SD_TYPE_HC) == 0)
         saddr *= 512;
 
+    /* Mark before issuing - same reasoning as sd_open_read()'s CMD18. */
+    sd_stream_dirty = 1;
     resp = sd_cmd(SD_CMD25, saddr);
     if (resp)
         return resp;
@@ -448,8 +532,13 @@ sd_write_sectors(uint32_t sd_addr, const void *src, uint16_t slen)
         i = 50;
         while ((ed_sd_dat_rd() & 1) != 0 && --i != 0)
             ;
-        if (i == 0)
+        if (i == 0) {
+            /* Same reasoning as sd_read_sectors()'s failure path -
+             * don't leave a half-finished multi-block stream open
+             * with sd_disk_addr still naming a sector inside it. */
+            (void)sd_close_rw();
             return SD_ERR_CMD_TIMEOUT;
+        }
 
         resp = 0;
         for (i = 0; i < 3; i++) {
@@ -458,8 +547,10 @@ sd_write_sectors(uint32_t sd_addr, const void *src, uint16_t slen)
             resp |= u & 1;
         }
         resp &= 7;
-        if (resp != 0x02)
+        if (resp != 0x02) {
+            (void)sd_close_rw();
             return (resp == 5) ? SD_ERR_CRC_ERROR : SD_ERR_CMD_TIMEOUT;
+        }
 
         ed_sd_mode(ED_SD_MODE1);
         ed_sd_dat_rd();
@@ -481,15 +572,30 @@ sd_write_sectors(uint32_t sd_addr, const void *src, uint16_t slen)
          * per block in a multi-block write, so its worst case
          * multiplies by however many blocks are in flight); dialed
          * back to 800 for the same reasoning as sd_close_rw().
+         *
+         * DBG: this is a SEPARATE wait from sd_close_rw()'s own -
+         * it gates every individual block of a multi-block write
+         * (SD_CMD25), while sd_close_rw()'s only gates the transfer's
+         * final CMD12 close. Missed applying sd_shutdown_flush here
+         * in the first pass at this fix (see sd_shutdown_flush's
+         * declaration comment above) - a multi-block write closing
+         * out fine at sd_close_rw() doesn't mean every block *within*
+         * it actually had enough real time to finish programming
+         * before the next block's data started clocking in over the
+         * same DAT line, and this per-block wait is exactly what
+         * would need to be longer for that to matter during the
+         * final pre-reboot flush too.
          */
-        i = 800;
+        i = sd_shutdown_flush ? 8000 : 800;
         while (--i) {
             if (ed_sd_dat_rd() == 0xff)
                 break;
         }
         if (i == 0) {
-            printf("DBG: sd_write_sectors: per-block ready wait "
-                "timed out\n");
+            printf("sd: write: per-block ready wait timed out\n");
+            /* Close the half-written multi-block stream, as the two
+             * error returns above now do. */
+            (void)sd_close_rw();
             return SD_ERR_CMD_TIMEOUT;
         }
     }
@@ -649,7 +755,10 @@ card_init(int unit)
      * unrelated and stays.
      */
     ed_sd_speed(ED_SD_SPD_HI);
+    /* Card was just fully re-initialized: no transfer can still be
+     * open, so drop the "might be streaming" mark too. */
     sd_disk_addr = ~0U;
+    sd_stream_dirty = 0;
 
     if (sd_card_flags & SD_TYPE_HC)
         sddrives[unit].card_type = TYPE_SDHC;
@@ -704,9 +813,30 @@ card_read(int unit, unsigned int offset, char *data, unsigned int bcount)
 
     sd_addr = (uint32_t)offset << 1;
     slen = (bcount + 511) / 512;
-    if (sd_read_sectors(sd_addr, data, slen))
-        return 0;
-    return 1;
+    if (sd_read_sectors(sd_addr, data, slen) == 0)
+        return 1;
+
+    /*
+     * The read failed and sd_read_sectors() already tore its stream
+     * down (CMD12) - but on real GBAED hardware a close+reopen
+     * (CMD12+CMD18) has been observed NOT to clear the failure: four
+     * successive exec-image-read retries all failed identically at the
+     * same "fresh stream" CMD18 with the same code, i.e. the FPGA SD
+     * controller / card is in a state a fresh CMD18 alone can't
+     * recover from (see project_gba_sh_fault_sigreturn_hang.md and
+     * project_gba_sd_driver_plan.md). Fully re-initialize the card
+     * here as a heavier recovery, then try the read once more before
+     * reporting failure up to whatever retry loop the caller has
+     * (exec_aout.c / vm_swp.c). This is expensive (card_init() busy-
+     * waits a settle delay with interrupts blocked) but only runs on
+     * an actual failure, which should be rare.
+     */
+    printf("sd: read failed, reinitializing card and retrying\n");
+    (void)card_init(unit);
+    if (sd_read_sectors(sd_addr, data, slen) == 0)
+        return 1;
+
+    return 0;
 }
 
 static int

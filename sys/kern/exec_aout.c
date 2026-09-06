@@ -16,11 +16,20 @@
 #include <sys/uio.h>
 #include <machine/debug.h>
 
+/*
+ * How many times to re-try a failed read of the a.out image before
+ * giving up and killing the process - see the comment at the read
+ * itself below. Matches the retry counts used for the same class of
+ * intermittent SD failure in vm_swap.c / vm_swp.c.
+ */
+#define EXEC_READ_RETRIES 4
+
 int exec_aout_check(struct exec_params *epp)
 {
 //unsigned char *ptr = (unsigned char *)&epp->hdr.aout;
 //for (int i=0;i<32;i++) printf("%02x ", ptr[i]);
     int error;
+    int i;
 
     DEBUG("\texec_aout_check(): start\n");
 
@@ -100,31 +109,57 @@ int exec_aout_check(struct exec_params *epp)
      */
     exec_estab(epp);
 
-    /* read in text and data */
-    DEBUG("\texec_aout_check(): reading a.out image\n");
-    error = rdwri (UIO_READ, epp->ip,
-               (caddr_t)epp->data.vaddr, epp->hdr.aout.a_data,
-               sizeof(struct exec) + epp->hdr.aout.a_text, IO_UNIT, 0);
-    if (error)
+    /*
+     * Read in text and data.
+     *
+     * Retry an intermittently failing read before giving up (2026-09-06).
+     * This is the root cause of the long-chased real-hardware-only
+     * "/bin/sh hangs jumping into its own fault()" bug - see
+     * project_gba_sh_fault_sigreturn_hang.md. The SD/EverDrive read
+     * path fails occasionally (the same failure class that made
+     * vm_swp.c's swap() panic "hard err: swap" once sd.c started
+     * reporting card_read()/card_write() failures properly), and when
+     * it failed *here*, exec_estab() had already torn down the old
+     * image, so the process was left running on a half-destroyed,
+     * partially-overwritten memory image - which is exactly why the
+     * bytes at /bin/sh's fault() address were found to be garbage at
+     * the moment sendsig() tried to jump there, even though the
+     * on-disk binary and every swap round trip verified clean.
+     */
+    for (i = 0; ; i++) {
+        error = rdwri (UIO_READ, epp->ip,
+                   (caddr_t)epp->data.vaddr, epp->hdr.aout.a_data,
+                   sizeof(struct exec) + epp->hdr.aout.a_text, IO_UNIT, 0);
+        if (! error)
+            break;
         DEBUG("\texec_aout_check(): error: read image returned: %d\n", error);
+        if (i >= EXEC_READ_RETRIES)
+            break;
+        printf("exec: image read error %d for pid %d, retrying (%d)\n",
+            error, u.u_procp->p_pid, i + 1);
+    }
     if (error) {
         /*
-         * Error - all is lost, when the old image is possible corrupt
-         * and we could not load a new.
+         * Error - all is lost: exec_estab() above already committed to
+         * the new image, so the old one is gone and the new one is at
+         * best partially read. There is nothing left to return to.
+         *
+         * This used to raise SIGSEGV, which is *catchable* - and
+         * /bin/sh catches it (bin/sh/fault.c, its classic stack-growth
+         * handler). So a failed exec sent a caught signal to a process
+         * whose text had just been overwritten by the partial load,
+         * making sendsig() faithfully compute a jump into a handler
+         * address that no longer held any handler - a wild jump into
+         * garbage, hanging the machine with no further output. That is
+         * the crash this whole investigation chased. SIGKILL cannot be
+         * caught, blocked or ignored, so the doomed process dies
+         * cleanly instead of jumping into its own wreckage.
          */
-        psignal (u.u_procp, SIGSEGV);
+        printf("exec: image read failed (%d) for pid %d, killing it\n",
+            error, u.u_procp->p_pid);
+        psignal (u.u_procp, SIGKILL);
         return error;
     }
-
-    /*
-     * DBG: used to checksum the just-read exec image here, to rule
-     * out intermittent SD-card read corruption on the exec path (the
-     * same failure class confirmed on the swap path this session -
-     * see vm_swap.c). Every checksum for a given inode matched across
-     * repeated execs, so this path checked out clean; instrumentation
-     * removed, kept only as a note in case exec-time corruption ever
-     * needs re-investigating.
-     */
 
     exec_clear(epp);
     exec_setupstack(epp->hdr.aout.a_entry, epp);
