@@ -15,6 +15,24 @@
 /*
  * swap I/O
  */
+
+/*
+ * Retry a failed swap I/O a few times before giving up. Added
+ * 2026-09-05 after sd.c's card_read()/card_write() failure path got
+ * wired up to set B_ERROR (see the comment at sd.c's sdstrategy())
+ * and this panic actually fired for the first time on real GBAED
+ * hardware - a genuine, if infrequent (previously measured ~1-in-10
+ * in a related check - see vm_swap.c's dcksum_tab comment), SD/
+ * EverDrive I/O failure. Panicking the whole system on the first such
+ * hiccup is worse than retrying: swap I/O is exactly the path
+ * suspected of causing an as-yet-unexplained real-hardware text
+ * corruption in /bin/sh (see project_gba_sh_fault_sigreturn_hang.md
+ * memory) - if a retry here usually succeeds, that's useful evidence
+ * (transient hardware flakiness) as well as making the system far
+ * more usable in the meantime.
+ */
+#define SWAP_IO_RETRIES 4
+
 void
 swap (blkno, coreaddr, count, rdflg)
     size_t blkno, coreaddr;
@@ -23,6 +41,7 @@ swap (blkno, coreaddr, count, rdflg)
 {
     register struct buf *bp;
     int s;
+    int retry;
 
 //printf ("swap (%u, %08x, %d, %s)\n", blkno, coreaddr, count, rdflg ? "R" : "W");
 #ifdef UCB_METER
@@ -35,18 +54,24 @@ swap (blkno, coreaddr, count, rdflg)
     bp = geteblk();         /* allocate a buffer header */
 
     while (count) {
-        bp->b_flags = B_BUSY | B_PHYS | B_INVAL | rdflg;
-        bp->b_dev = swapdev;
-        bp->b_bcount = count;
-        bp->b_blkno = blkno;
-        bp->b_addr = (caddr_t) coreaddr;
-        (*bdevsw[major(swapdev)].d_strategy) (bp);
-        s = splbio();
-        while ((bp->b_flags & B_DONE) == 0)
-            sleep ((caddr_t)bp, PSWP);
-        splx (s);
-        if ((bp->b_flags & B_ERROR) || bp->b_resid)
-            panic ("hard err: swap");
+        for (retry = 0; ; retry++) {
+            bp->b_flags = B_BUSY | B_PHYS | B_INVAL | rdflg;
+            bp->b_dev = swapdev;
+            bp->b_bcount = count;
+            bp->b_blkno = blkno;
+            bp->b_addr = (caddr_t) coreaddr;
+            (*bdevsw[major(swapdev)].d_strategy) (bp);
+            s = splbio();
+            while ((bp->b_flags & B_DONE) == 0)
+                sleep ((caddr_t)bp, PSWP);
+            splx (s);
+            if (!((bp->b_flags & B_ERROR) || bp->b_resid))
+                break;
+            if (retry >= SWAP_IO_RETRIES)
+                panic ("hard err: swap");
+            printf("swap: I/O error blkno=%u count=%d %s, retrying (%d)\n",
+                (unsigned)blkno, count, rdflg ? "READ" : "WRITE", retry + 1);
+        }
         count -= count;
         coreaddr += count;
         blkno += btod (count);

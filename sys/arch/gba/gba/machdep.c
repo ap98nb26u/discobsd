@@ -507,6 +507,24 @@ boot(dev_t dev, int howto)
 		waittime = 0;
 		printf("syncing disks... ");
 		(void)splnet();
+		/*
+		 * Let the SD driver (sd.c) wait far longer than it safely
+		 * can during ordinary runtime for each write's card-ready
+		 * check to actually clear, rather than the tight bound
+		 * needed there to avoid hanging on a genuinely unresponsive
+		 * card mid-session - see the comment on sd_shutdown_flush's
+		 * declaration in sd.c. Real-hardware corruption ("CANNOT
+		 * READ: BLK n" / "UNEXPECTED INCONSISTENCY" on the very next
+		 * boot after a clean-looking "syncing disks... done") was
+		 * observed following heavy sustained write activity right
+		 * before a sync;sync;reboot - consistent with the SD card's
+		 * real internal write-completion time occasionally
+		 * outlasting that tight runtime bound.
+		 */
+#ifdef SD_ENABLED
+		extern int sd_shutdown_flush;
+		sd_shutdown_flush = 1;
+#endif
 		sync();
 		for (iter = 0; iter < 20; iter++) {
 			nbusy = 0;
@@ -518,6 +536,9 @@ boot(dev_t dev, int howto)
 			printf("%d ", nbusy);
 			mdelay(40L * iter);
 		}
+#ifdef SD_ENABLED
+		sd_shutdown_flush = 0;
+#endif
 		printf("done\n");
 	}
 	(void)splhigh();

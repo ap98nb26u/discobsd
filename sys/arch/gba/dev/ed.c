@@ -266,13 +266,23 @@ ed_sd_wait_f0(void)
             if ((resp & ED_STAT_SD_BUSY) == 0)
                 break;
         }
+        /*
+         * Distinct return codes (2026-09-06) so the read path can
+         * report *why* a fresh CMD18 stream failed to deliver data -
+         * the two conditions need different recovery:
+         *   1 = ED_STAT_SD_BUSY never cleared (controller wedged busy)
+         *   2 = ED_STAT_SDC_TOUT kept asserting for the whole outer
+         *       loop (the card itself is signalling a read/command
+         *       timeout - e.g. it never accepted the CMD18, whose R1
+         *       response sd_cmd() deliberately does not check).
+         */
         if (busywait == 50000)
             return 1;
         if ((resp & ED_STAT_SDC_TOUT) == 0)
             return 0;
         mode = ED_SD_MODE4 | ED_SD_WAIT_F0;
     }
-    return 1;
+    return 2;
 }
 
 uint8_t
@@ -345,15 +355,24 @@ ed_sd_dma_rd(void *dst, int slen)
         return ed_sd_dma_to_rom(dst, slen);
 
     while (slen) {
-        if (ed_sd_wait_f0() != 0)
-            return 1;
+        /*
+         * Distinct return codes so the caller can report *which*
+         * stage failed (2026-09-06):
+         *   1 = ED_STAT_SD_BUSY stuck (controller wedged),
+         *   2 = card SDC_TOUT (card timed out / never accepted CMD18),
+         *   3 = the DMA transfer itself timed out.
+         * These mean very different things for recovery.
+         */
+        uint8_t wf = ed_sd_wait_f0();
+        if (wf != 0)
+            return wf;             /* 1 = busy stuck, 2 = card timeout */
 
         DMA_SRC = (uint32_t)(ED_REG_BASE + ED_REG_SD_DAT * 2);
         DMA_DST = (uint32_t)dst;
         DMA_LEN = 256;
         DMA_CTR = 0x8000;
         if (ed_dma_wait())
-            return 1;
+            return 3;
 
         slen--;
         dst = (char *)dst + 512;
