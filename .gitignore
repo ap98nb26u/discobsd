@@ -4,6 +4,9 @@
 *.obj
 *.elf
 
+# Header-dependency files emitted by -MD -MP (see share/mk/sys.mk)
+*.d
+
 # Libraries
 *.lib
 *.a
