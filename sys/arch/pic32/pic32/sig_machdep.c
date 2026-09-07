@@ -44,10 +44,6 @@ sendsig (p, sig, mask)
     register struct sigframe *sfp;
     int oonstack;
 
-#ifdef DIAGNOSTIC
-    printf("(%u)sendsig %d, mask=%#x, handler=%#x, tramp=%#x\n",
-        u.u_procp->p_pid, sig, mask, p, u.u_sigtramp);
-#endif
     oonstack = u.u_sigstk.ss_flags & SA_ONSTACK;
 
     /*
@@ -124,11 +120,6 @@ sendsig (p, sig, mask)
     regs->tf_ra = (int) u.u_sigtramp;       /* $ra - sigtramp */
     regs->tf_sp = (int) sfp;
     regs->tf_pc = (int) p;
-#ifdef DIAGNOSTIC
-    printf("    ...call handler %p (sig=%d, code=%#x, context=%p)\n",
-        p, sig, u.u_code, &sfp->sf_sc);
-    printf("    ...stack=%p, return to %p\n", sfp, u.u_sigtramp);
-#endif
 }
 
 /*
