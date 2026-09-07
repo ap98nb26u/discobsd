@@ -149,6 +149,8 @@ int chrtoblk (dev_t dev);           /* convert from character to block device nu
 int isdisk (dev_t dev, int type);   /* determine if a device is a disk */
 int iskmemdev (dev_t dev);          /* identify /dev/mem and /dev/kmem */
 void boot (dev_t dev, int howto);
+void inittodr (time_t base);        /* MD: seed the clock from an RTC, else base */
+extern int rtc_offset;              /* minutes west of UTC the RTC is set to */
 
 /*
  * Copy data from kernel space fromaddr to user space address toaddr.
