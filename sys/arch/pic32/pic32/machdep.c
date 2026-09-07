@@ -24,6 +24,7 @@
 #include <sys/systm.h>
 #include <sys/config.h>
 #include <sys/tty.h>
+#include <sys/kernel.h>
 
 #include <pic32/dev/uart.h>
 #include <pic32/dev/usb_uart.h>
@@ -556,6 +557,19 @@ idle()
 
     /* Restore previous SPL. */
     splx(x);
+}
+
+/*
+ * No real-time clock on this port: seed the system clock from the
+ * supplied base time (the root filesystem's last-write timestamp).
+ * Present so the machine-independent boot path (init_main.c) has an
+ * inittodr() to call on every architecture.
+ */
+void
+inittodr(base)
+    time_t base;
+{
+	time.tv_sec = base;
 }
 
 void

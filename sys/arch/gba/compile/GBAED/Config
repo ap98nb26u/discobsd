@@ -23,6 +23,28 @@ options         "HALTREBOOT"                # If halted, press key to reboot
 #options        "GLOBAL_DEBUG"              # Enable debugging
 options         "DIAGNOSTIC"                # Enable diagnostics
 
+# Real-time clock / timezone.
+#
+# This project is developed in Japan, so this build defaults to JST.
+# Two INDEPENDENT settings are involved:
+#
+#   RTC_OFFSET - minutes WEST of UTC that the EverDrive's RTC hardware
+#                is actually set to. This board's RTC keeps local JST
+#                wall-clock time, which is 9 hours EAST of UTC, i.e.
+#                -540 minutes west. inittodr() uses this to convert the
+#                RTC reading to the UTC the kernel clock runs on. If YOUR
+#                RTC keeps UTC (the traditional UNIX convention), set 0;
+#                if it keeps some other local time, set that zone's
+#                minutes-west. Also reachable at runtime as the
+#                kern.rtc_offset sysctl.
+#
+#   TIMEZONE   - minutes west of UTC for the DEFAULT display timezone
+#                (what date(1) shows when $TZ is unset). -540 = JST.
+#                Purely cosmetic; does not affect the stored UTC clock.
+options         "RTC_OFFSET=-540"           # EverDrive RTC keeps JST local time
+options         "TIMEZONE=-540"             # default display zone: JST
+options         "DST=0"                     # JST has no daylight saving
+
 # sd0a is the 1st MBR partition, which on real hardware is the
 # EverDrive's own FAT32 boot/menu partition, not DiscoBSD's -- see
 # sd.c's sd_setup(). DiscoBSD's own partitions come after it:
@@ -47,3 +69,6 @@ controller      ed0                         # EverDrive cartridge registers
 # not a real SDIO peripheral -- GBA has none.
 device          sd0     at ed0
 options         "NSD=1"                     # One SD slot on the EverDrive.
+
+# Real-time clock, reached through the EverDrive's GPIO RTC routing.
+device          rtc0    at ed0

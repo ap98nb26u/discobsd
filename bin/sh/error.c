@@ -7,34 +7,6 @@
 
 /* ========     error handling  ======== */
 
-/*
- * DBG: dump s1's raw bytes as hex, so a "notid" failure shows exactly
- * what byte(s) sh actually saw instead of a possibly-unprintable/
- * mojibake character - added while chasing a "$?  is not an
- * identifier" boot failure right after fsck on real GBAED hardware,
- * to find out whether the byte in place of the expected '?' is
- * genuine binary garbage (pointing at a read/DMA corruption bug) or
- * something else. Remove once that's root-caused.
- */
-static void
-dbg_hexdump(char *s)
-{
-	static char hexdig[] = "0123456789abcdef";
-	char hexbuf[3];
-
-	prs("[DBG bytes:");
-	hexbuf[2] = '\0';
-	while (*s)
-	{
-		unsigned char c = (unsigned char)*s++;
-		hexbuf[0] = hexdig[(c >> 4) & 0xf];
-		hexbuf[1] = hexdig[c & 0xf];
-		prs(" ");
-		prs(hexbuf);
-	}
-	prs("]");
-}
-
 failed(s1, s2)
 char    *s1, *s2;
 {
@@ -44,8 +16,6 @@ char    *s1, *s2;
 	{
 		prs(colon);
 		prs(s2);
-		if (s2 == notid)
-			dbg_hexdump(s1);
 	}
 	newline();
 	exitsh(ERROR);
