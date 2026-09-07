@@ -13,6 +13,7 @@ typedef unsigned short uint16_t;
 
 #define REG_DISPCNT	(*(volatile uint16_t *)(REG_BASE+0x0000))
 #define REG_DISPSTAT	(*(volatile uint16_t *)(REG_BASE+0x0004))
+#define REG_VCOUNT	(*(volatile uint16_t *)(REG_BASE+0x0006))	/* 0..227 scanline */
 
 #define REG_BGCNT	(*(volatile uint16_t *)(REG_BASE+0x0008))
 #define REG_BG0CNT	REG_BGCNT[0]
@@ -24,6 +25,19 @@ typedef unsigned short uint16_t;
 
 #define REG_TM0CNT_L	(*(volatile uint16_t *)(REG_BASE+0x0100))
 #define REG_TM0CNT_H	(*(volatile uint16_t *)(REG_BASE+0x0102))
+
+/* Keypad input (active low: a 0 bit = pressed). See swkbd.c. */
+#define REG_KEYINPUT	(*(volatile uint16_t *)(REG_BASE+0x0130))
+#define KEY_A		0x0001
+#define KEY_B		0x0002
+#define KEY_SELECT	0x0004
+#define KEY_START	0x0008
+#define KEY_RIGHT	0x0010
+#define KEY_LEFT	0x0020
+#define KEY_UP		0x0040
+#define KEY_DOWN	0x0080
+#define KEY_R		0x0100
+#define KEY_L		0x0200
 
 #define REG_IE		(*(volatile uint16_t *)(REG_BASE+0x0200))
 #define REG_IF		(*(volatile uint16_t *)(REG_BASE+0x0202))
