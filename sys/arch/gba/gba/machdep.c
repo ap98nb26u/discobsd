@@ -355,6 +355,13 @@ extern void syscall_gateway(int sys_num);
 int (*md_rtc_gettime)(time_t *) = 0;
 
 /*
+ * Set by the RTC driver's probe alongside md_rtc_gettime, for writing
+ * the clock back. NULL when there is no RTC (resettodr() then does
+ * nothing).
+ */
+int (*md_rtc_settime)(time_t) = 0;
+
+/*
  * Initialize the system clock from the real-time clock, if any,
  * falling back to the supplied base time (the root filesystem's
  * last-write timestamp) when there is no RTC or its reading looks
@@ -390,6 +397,21 @@ inittodr(time_t base)
 		printf("inittodr: RTC time unreasonable, using fs time\n");
 	}
 	time.tv_sec = base;
+}
+
+/*
+ * Write the current system clock back to the real-time clock, if any.
+ * Called from setthetime() (kern_time.c) whenever userland sets the
+ * time (e.g. date(1)), so the setting survives a reboot. The kernel
+ * clock is UTC; undo the rtc_offset applied in inittodr() so the RTC
+ * keeps the same local wall-clock time it is read as. No-op when there
+ * is no RTC.
+ */
+void
+resettodr(void)
+{
+	if (md_rtc_settime != 0)
+		(void)(*md_rtc_settime)(time.tv_sec - (time_t)rtc_offset * 60);
 }
 
 void

@@ -55,12 +55,12 @@ setthetime (tv)
     time = *tv;
     lbolt = time.tv_usec / usechz;
     splx(s);
-#ifdef  notyet
     /*
-     * if you have a time of day board, use it here
+     * Push the new time down to the real-time clock, if the machine has
+     * one, so it survives a reboot. resettodr() is machine-dependent
+     * (each arch's machdep.c) and a no-op where there is no RTC.
      */
     resettodr();
-#endif
 }
 
 /*
