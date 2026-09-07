@@ -93,6 +93,23 @@
 #define SD_ERR_CRC_ERROR    2
 
 /*
+ * Settle delay (raw CPU busy-wait iterations) sd_open_read() waits
+ * after a fresh CMD18 - ONLY on card_read()'s post-failure retry (see
+ * sd_open_settle), never on the fast seek path. ~16.78MHz core; ~18ms
+ * here, which is fine because it runs only on the ~1-2 stalled opens
+ * per boot, not the thousands of good seeks fsck does. Tune if the
+ * SDC_TOUT retry stops recovering; the heavy card_init() path remains
+ * as the final fallback.
+ */
+#define SD_CMD18_SETTLE     60000
+
+/*
+ * How many settle-retries card_read() attempts (each a fresh CMD18 +
+ * SD_CMD18_SETTLE) before falling back to the heavy card_init() reinit.
+ */
+#define SD_OPEN_SETTLE_RETRIES  3
+
+/*
  * This bounds retry loops that call ed_sd_cmd_rd()/ed_sd_cmd_wr()
  * (ed.c) each iteration - those already retry internally with their
  * own bound, so any large count here multiplies the two bounds
@@ -126,6 +143,14 @@ static uint32_t sd_disk_addr;          /* currently open 512-byte sector, or ~0 
  * program's image (a shell command that unexpectedly started tclsh).
  */
 static uint8_t sd_stream_dirty;
+
+/*
+ * When set, sd_open_read() waits SD_CMD18_SETTLE after issuing CMD18
+ * before returning, to let a card that stalled its data stream prepare
+ * a fresh one. card_read() turns this on only for its post-failure
+ * retry, so the fast seek path never pays it. See sd_open_read().
+ */
+static uint8_t sd_open_settle;
 
 /*
  * Set by boot() (machdep.c) around its final sync() before a reboot/
@@ -423,6 +448,32 @@ sd_open_read(uint32_t saddr)
     resp = sd_cmd(SD_CMD18, saddr);
     if (resp)
         return resp;
+
+    /*
+     * Settle delay after a fresh CMD18, before the caller's first
+     * ed_sd_dma_rd() - but ONLY when sd_open_settle is set. On real
+     * GBAED hardware this SDHC card intermittently ACKs CMD18 (sd_cmd
+     * returned 0 above) yet then stalls the data stream so the first
+     * data-ready wait times out (ed_sd_wait_f0() -> SDC_TOUT, i.e.
+     * "dma failed 2 (fresh stream)"). A brief delay after CMD18 lets
+     * the card prepare the multi-block stream and avoids that.
+     *
+     * It is gated on sd_open_settle rather than done on every open
+     * because paying it on EVERY seek is ruinous: fsck alone reopens
+     * the stream thousands of times, and an unconditional ~18ms settle
+     * there stretched a boot to several minutes (measured). Only ~1-2
+     * opens per boot actually stall, so card_read() turns this on only
+     * for its retry after a failed read - the common seek stays fast,
+     * and the rare stall is recovered cheaply here instead of by the
+     * heavy card_init() path. Plain CPU busy-wait (no usable timebase
+     * on this port); interrupts left enabled - this runs during normal
+     * block I/O and must not stall the scheduler.
+     */
+    if (sd_open_settle) {
+        volatile uint32_t settle;
+        for (settle = 0; settle < SD_CMD18_SETTLE; settle++)
+            ;
+    }
     return 0;
 }
 
@@ -434,7 +485,6 @@ static uint8_t
 sd_read_sectors(uint32_t sd_addr, void *dst, uint16_t slen)
 {
     uint8_t resp;
-    uint8_t reopened = 0;
 
     if (sd_addr != sd_disk_addr) {
         resp = sd_close_rw();
@@ -450,7 +500,6 @@ sd_read_sectors(uint32_t sd_addr, void *dst, uint16_t slen)
             return resp;
         }
         sd_disk_addr = sd_addr;
-        reopened = 1;
     }
 
     resp = ed_sd_dma_rd(dst, slen);
@@ -471,9 +520,15 @@ sd_read_sectors(uint32_t sd_addr, void *dst, uint16_t slen)
          * EIOs, then "exec: image read failed (5)". sd_close_rw()
          * issues CMD12 and restores the ~0U "nothing open" sentinel,
          * so the next attempt does a full, clean reopen.
+         *
+         * Return silently: on this SDHC card a fresh-stream DMA
+         * timeout (SDC_TOUT) is an expected, transient stall that
+         * card_read()'s settle-retry recovers without a word. Printing
+         * here fired once per boot even though nothing was actually
+         * wrong by the time recovery finished - card_read() now owns
+         * all read diagnostics and speaks up only when the cheap
+         * recovery fails and it must fall back to a full reinit.
          */
-        printf("sd: rd sec=%u n=%d: dma failed %d (%s stream)\n",
-            sd_addr, slen, resp, reopened ? "fresh" : "continued");
         (void)sd_close_rw();
         return SD_ERR_CMD_TIMEOUT;
     }
@@ -817,25 +872,44 @@ card_read(int unit, unsigned int offset, char *data, unsigned int bcount)
         return 1;
 
     /*
-     * The read failed and sd_read_sectors() already tore its stream
-     * down (CMD12) - but on real GBAED hardware a close+reopen
-     * (CMD12+CMD18) has been observed NOT to clear the failure: four
-     * successive exec-image-read retries all failed identically at the
-     * same "fresh stream" CMD18 with the same code, i.e. the FPGA SD
-     * controller / card is in a state a fresh CMD18 alone can't
-     * recover from (see project_gba_sh_fault_sigreturn_hang.md and
-     * project_gba_sd_driver_plan.md). Fully re-initialize the card
-     * here as a heavier recovery, then try the read once more before
-     * reporting failure up to whatever retry loop the caller has
-     * (exec_aout.c / vm_swp.c). This is expensive (card_init() busy-
-     * waits a settle delay with interrupts blocked) but only runs on
-     * an actual failure, which should be rare.
+     * The fast read failed (sd_read_sectors() already tore its stream
+     * down with CMD12). The common cause on real GBAED hardware is this
+     * SDHC card ACKing a fresh CMD18 but then stalling the data stream
+     * (SDC_TOUT). A close+reopen ALONE does not clear that - four
+     * successive plain reopens were once seen fail identically - but a
+     * reopen with a short settle after CMD18 does (see sd_open_read()).
+     * So first retry cheaply with sd_open_settle on: each retry reopens
+     * (sd_read_sectors() reopens because sd_close_rw() reset the
+     * sentinel) and waits after CMD18. This recovers the stall silently
+     * and without the per-seek cost of settling every open.
      */
-    printf("sd: read failed, reinitializing card and retrying\n");
+    sd_open_settle = 1;
+    {
+        int tries;
+        for (tries = 0; tries < SD_OPEN_SETTLE_RETRIES; tries++) {
+            if (sd_read_sectors(sd_addr, data, slen) == 0) {
+                sd_open_settle = 0;
+                return 1;
+            }
+        }
+    }
+    sd_open_settle = 0;
+
+    /*
+     * Settle-retries exhausted: the controller/card is in a state a
+     * fresh CMD18 can't clear at all (see project_gba_sh_fault_sigreturn_hang.md
+     * and project_gba_sd_driver_plan.md). Fall back to the heavy
+     * recovery - a full card_init() reinit - then one more try before
+     * reporting failure up to the caller's own retry loop (exec_aout.c/
+     * vm_swp.c). Expensive (card_init() busy-waits with interrupts
+     * blocked) but should now be genuinely rare.
+     */
+    printf("sd: sec=%u stalled, reinitializing card and retrying\n", sd_addr);
     (void)card_init(unit);
     if (sd_read_sectors(sd_addr, data, slen) == 0)
         return 1;
 
+    printf("sd: sec=%u read failed after reinit\n", sd_addr);
     return 0;
 }
 
