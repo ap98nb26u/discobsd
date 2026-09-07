@@ -511,6 +511,22 @@ idle(void)
 		 * comment on uart_poll_input() in mgba_uart.c for what this
 		 * does and why it's here.
 		 */
+		/*
+		 * On-screen software keyboard: turn GBA button presses
+		 * into console input for a UART-less machine. Polled
+		 * BEFORE uart_poll_input() on purpose - swkbd injects via
+		 * ttyinput(), whose echo lands in the tty output queue,
+		 * and uart_poll_input() below drains that queue. Draining
+		 * it in the same idle() pass flushes the echoed newline of
+		 * an Enter keypress before swtch() runs the just-woken
+		 * shell (whose command output goes straight out through
+		 * uartputc()); polled the other way round, the newline
+		 * echo arrived a pass too late and printed after the
+		 * command's output ("date" and its result ran together).
+		 */
+		extern void swkbd_poll(void);
+		swkbd_poll();
+
 		extern void uart_poll_input(void);
 		uart_poll_input();
 	}
