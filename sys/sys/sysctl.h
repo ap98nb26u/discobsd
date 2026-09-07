@@ -137,7 +137,8 @@ struct ctlname {
 #define	KERN_ACCTTHRESH		24	/* int: accounting daemon threshold */
 #define	KERN_OSVERSION		25	/* string: kernel build version */
 #define	KERN_ROMROOT		26	/* int: root fs is on read-only ROM */
-#define	KERN_MAXID		27	/* number of valid kern ids */
+#define	KERN_RTC_OFFSET		27	/* int: RTC offset in minutes west of UTC */
+#define	KERN_MAXID		28	/* number of valid kern ids */
 
 #ifndef	KERNEL
 #define	CTL_KERN_NAMES { \
@@ -168,6 +169,7 @@ struct ctlname {
 	{ "acctthresh", CTLTYPE_INT }, \
 	{ "osversion", CTLTYPE_STRING }, \
 	{ "romroot", CTLTYPE_INT }, \
+	{ "rtc_offset", CTLTYPE_INT }, \
 }
 #endif
 

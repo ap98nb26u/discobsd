@@ -9,6 +9,21 @@
 #include <sys/kernel.h>
 #include <sys/systm.h>
 
+/*
+ * Minutes west of UTC that the real-time clock is set to. 0 (the
+ * default) means the RTC keeps UTC, the traditional UNIX convention;
+ * a machine whose RTC keeps local wall-clock time instead sets this
+ * to its zone's offset (e.g. -540 for JST, 9 hours east of UTC).
+ * inittodr()/resettodr() (machine-dependent) use it to convert
+ * between the RTC and the kernel's UTC clock; also exposed as the
+ * kern.rtc_offset sysctl. A build can change the power-on default
+ * with "options RTC_OFFSET=<minutes>" (see each machine's Config).
+ */
+#ifndef RTC_OFFSET
+#define RTC_OFFSET 0
+#endif
+int rtc_offset = RTC_OFFSET;
+
 static void
 setthetime (tv)
     register struct timeval *tv;
@@ -65,8 +80,15 @@ gettimeofday()
     int s;
     register u_int  ms;
 
-if (1) return;
-else {
+    /*
+     * This used to be short-circuited with "if (1) return;", leaving the
+     * caller's timeval/timezone untouched - so every gettimeofday() read
+     * back uninitialized stack garbage. date(1) then showed a nonsense
+     * year (1906) and a huge bogus zone ("GMT-560433") because libc's
+     * tzset()/tzsetkernel() (lib/libc/gen/ctime.c) derives the local
+     * offset from the tz this call returns. settimeofday() below was
+     * never stubbed and works, so copyout here is fine too - enabled.
+     */
     if (uap->tp) {
         /*
          * We don't resolve the milliseconds on every clock tick; it's
@@ -85,7 +107,6 @@ else {
     if (uap->tzp)
         u.u_error = copyout ((caddr_t) &tz, (caddr_t) uap->tzp,
             sizeof (tz));
-}
 }
 
 void

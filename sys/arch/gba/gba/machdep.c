@@ -8,6 +8,7 @@
 
 #include <sys/param.h>
 #include <sys/conf.h>
+#include <sys/kernel.h>
 #include <sys/dir.h>
 #include <sys/inode.h>
 #include <sys/user.h>
@@ -343,6 +344,54 @@ extern void syscall_gateway(int sys_num);
  * Configure all controllers and devices as specified
  * in the kernel configuration file.
  */
+
+/*
+ * Set by the RTC driver's probe (gba/dev/rtc.c) when a real-time clock
+ * is found. Left NULL on builds/hardware without one (e.g. the mGBA
+ * config, which does not compile rtc.c) so inittodr() below can fall
+ * back cleanly. A function pointer rather than a direct call avoids an
+ * unresolved reference to the RTC driver when it isn't configured in.
+ */
+int (*md_rtc_gettime)(time_t *) = 0;
+
+/*
+ * Initialize the system clock from the real-time clock, if any,
+ * falling back to the supplied base time (the root filesystem's
+ * last-write timestamp) when there is no RTC or its reading looks
+ * implausible. Called once from init_main.c after the root filesystem
+ * is mounted.
+ */
+void
+inittodr(time_t base)
+{
+	time_t rt;
+
+	if (md_rtc_gettime != 0 && (*md_rtc_gettime)(&rt) == 0) {
+		/*
+		 * The RTC read is decoded as if it were UTC; if the clock
+		 * actually keeps local time, rtc_offset (kern.rtc_offset,
+		 * minutes west of UTC) shifts it back to true UTC - e.g.
+		 * -540 for a JST clock. rtc_offset is 0 by default (RTC =
+		 * UTC), so this is a no-op unless configured.
+		 */
+		rt += (time_t)rtc_offset * 60;
+
+		/*
+		 * Trust the clock unless it is wildly before the filesystem's
+		 * last-write time (more than a year), which means it is unset
+		 * or wrong - then fall back to the filesystem timestamp. A
+		 * clock a little behind the fs (e.g. the image was written on
+		 * a PC moments ago) is still fine to use.
+		 */
+		if (rt >= base - 365L * 24 * 60 * 60) {
+			time.tv_sec = rt;
+			return;
+		}
+		printf("inittodr: RTC time unreasonable, using fs time\n");
+	}
+	time.tv_sec = base;
+}
+
 void
 config(void)
 {

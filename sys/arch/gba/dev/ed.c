@@ -387,6 +387,9 @@ ed_probe(struct conf_ctlr *ctlr)
     ed_cart_cfg = ED_CFG_REGS_ON | ED_CFG_NROM_RAM | ED_CFG_ROM_WE_ON;
     ed_reg_wr(ED_REG_CFG, ed_cart_cfg);
 
+    printf("ed%d: EverDrive GBA (FPGA v%u)\n",
+        ctlr->ctlr_unit, ed_get_fpga_ver());
+
     return (1);
 }
 
