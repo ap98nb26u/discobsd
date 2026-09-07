@@ -89,7 +89,18 @@ LDWARN!=if [ x"${MACHINE_ARCH}" = x"arm" ] ; then \
 		echo "-Wl,--no-warn-rwx-segments" ; \
 	fi
 
-CFLAGS=	${COPTS}
+# -MD -MP make every compile emit a ".d" of the headers it pulled in;
+# the "-include" at the bottom of this file re-reads them so a changed
+# header rebuilds the affected object. Without this, userland compiled
+# via make's built-in .c.o rule with no dependency tracking at all (the
+# kernel build already does -MP -MD), so an object only rebuilt when its
+# own .c changed - a changed header, or a toolchain/interworking-veneer
+# flag bump, silently left stale .o's, and lib/libc/Makefile then
+# re-archived libc.a from them (that is how a veneer-broken libc member
+# survived until a full clean rebuild - see the sysctl wild-jump saga).
+# -MD (not -MMD) tracks system headers too; harmless in link-only
+# commands, which compile nothing and so emit no .d.
+CFLAGS=	${COPTS} -MD -MP
 
 AFLAGS=	${ASFLAGS}
 
@@ -141,3 +152,17 @@ AOUT_NM=	${TOOLBINDIR}/nm
 AOUT_RANLIB=	${TOOLBINDIR}/ranlib
 AOUT_SIZE=	${TOOLBINDIR}/size
 AOUT_STRIP=	${TOOLBINDIR}/strip
+
+# Pull in the per-object header dependencies emitted by -MD -MP (above)
+# for whatever directory the including Makefile lives in. $(wildcard)
+# yields nothing on a first build, so -include stays quiet then.
+#
+# sys.mk is included at the TOP of each Makefile, so the "foo.o: ..."
+# rules these .d files carry would otherwise become the first target
+# make sees and hijack the default goal (observed: `make` started
+# building abort.o instead of the library). Save the default goal
+# around the include and restore it - the real first target of the
+# including Makefile (defined after this) then wins as before.
+__SAVED_DEFAULT_GOAL := $(.DEFAULT_GOAL)
+-include $(wildcard *.d)
+.DEFAULT_GOAL := $(__SAVED_DEFAULT_GOAL)
