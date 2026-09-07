@@ -28,8 +28,14 @@
 #define RTC_RW		(*(volatile uint16_t *)0x080000C6)
 #define RTC_ENABLE	(*(volatile uint16_t *)0x080000C8)
 
-/* S-3511 command byte: register number in bits, plus read/write flag. */
-#define RTC_CMD_READ(x)	(((x) << 1) | 0x61)
+/*
+ * S-3511 command byte: fixed 0110 prefix, register number in the middle
+ * bits, and the low bit is the read/write flag (1 = read, 0 = write).
+ * RTC_CMD_READ(2) = 0x65 is what rtc_get() uses; the write form just
+ * clears that low bit.
+ */
+#define RTC_CMD_READ(x)		(((x) << 1) | 0x61)
+#define RTC_CMD_WRITE(x)	(((x) << 1) | 0x60)
 
 /* Datetime block register indices (register 2 read returns 7 bytes). */
 #define _YEAR	0
@@ -41,6 +47,7 @@
 #define _SEC	6
 
 #define UNBCD(x)	(((x) & 0xF) + (((x) >> 4) * 10))
+#define BCD(x)		((((x) / 10) << 4) | ((x) % 10))
 
 /*
  * Registered with machdep.c's inittodr() when the RTC is found, so
@@ -49,6 +56,9 @@
  * which does not compile this file at all).
  */
 extern int (*md_rtc_gettime)(time_t *);
+
+/* Registered likewise for resettodr() to write the clock back. */
+extern int (*md_rtc_settime)(time_t);
 
 /* Shift one command byte out to the RTC (S-3511 bit-bang). */
 static void
@@ -86,6 +96,26 @@ rtc_read_byte(void)
 }
 
 /*
+ * Write one byte out to the RTC (S-3511 bit-bang), LSB first to mirror
+ * rtc_read_byte()'s bit order. The data line (SIO, bit 1) must already
+ * be an output (RTC_RW = 7); the card samples it on each SCK rising
+ * edge (bit 0 low -> high). Bit 2 (CS) stays asserted throughout.
+ */
+static void
+rtc_write_byte(int v)
+{
+    int j, l;
+    uint16_t b;
+
+    for (l = 0; l < 8; l++) {
+        b = (uint16_t)(((v >> l) & 1) << 1);	/* data bit -> SIO */
+        for (j = 0; j < 5; j++)
+            RTC_DATA = b | 4;			/* SCK low, CS high */
+        RTC_DATA = b | 5;			/* SCK high: card latches */
+    }
+}
+
+/*
  * Read the 7-byte datetime block into data[]:
  *   [0]=year [1]=month [2]=day [3]=weekday [4]=hour [5]=min [6]=sec,
  * each BCD-encoded. Wrapped in ed_rtc_on()/ed_rtc_off() so the
@@ -110,6 +140,32 @@ rtc_get(uint8_t *data)
     RTC_RW = 5;
     for (i = 4; i < 7; i++)
         data[i] = (uint8_t)rtc_read_byte();
+
+    ed_rtc_off();
+}
+
+/*
+ * Write the 7-byte datetime block from data[] (same layout/encoding as
+ * rtc_get()) back into the RTC. Mirrors rtc_get() but issues the write
+ * command and keeps SIO an output (RTC_RW = 7) so rtc_write_byte() can
+ * clock the bytes out, then deasserts CS to commit.
+ */
+static void
+rtc_set(const uint8_t *data)
+{
+    int i;
+
+    ed_rtc_on();
+
+    RTC_ENABLE = 1;		/* enable GPIO read/write */
+    RTC_DATA = 1;
+    RTC_RW = 7;			/* SIO output for command and data */
+    RTC_DATA = 1;
+    RTC_DATA = 5;		/* assert CS */
+    rtc_cmd(RTC_CMD_WRITE(2));
+    for (i = 0; i < 7; i++)
+        rtc_write_byte(data[i]);
+    RTC_DATA = 1;		/* deassert CS (bit 2 low) to commit */
 
     ed_rtc_off();
 }
@@ -187,6 +243,80 @@ rtc_gettime(time_t *tp)
 }
 
 /*
+ * Break seconds-since-epoch back into calendar fields - the inverse of
+ * ymdhms_to_secs() - plus the day of week (0 = Sunday; 1970-01-01 was a
+ * Thursday). Input is the local wall-clock time the RTC should store
+ * (resettodr() has already applied rtc_offset).
+ */
+static void
+secs_to_ymdhms(time_t secs, int *year, int *mon, int *day,
+    int *hour, int *min, int *sec, int *wday)
+{
+    static const int mdays[12] =
+        { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    long days = (long)(secs / 86400);
+    long rem = (long)(secs % 86400);
+    int y, m, dim;
+
+    *hour = (int)(rem / 3600);
+    *min = (int)((rem % 3600) / 60);
+    *sec = (int)(rem % 60);
+    *wday = (int)((days + 4) % 7);	/* 1970-01-01 = Thursday */
+
+    for (y = 1970;; y++) {
+        int dy = is_leap(y) ? 366 : 365;
+        if (days < dy)
+            break;
+        days -= dy;
+    }
+    *year = y;
+
+    for (m = 1;; m++) {
+        dim = mdays[m - 1];
+        if (m == 2 && is_leap(y))
+            dim++;
+        if (days < dim)
+            break;
+        days -= dim;
+    }
+    *mon = m;
+    *day = (int)days + 1;
+}
+
+/*
+ * Write *secs* (local wall-clock seconds; resettodr() has undone the
+ * rtc_offset) into the RTC as a BCD datetime block. The chip is left in
+ * whatever 12/24h mode it was already in - rtc_gettime() reads hours as
+ * 24h (masking 0x3F), and this writes plain BCD 24h hours to match, so
+ * do not change the mode register here. Returns 0 on success, nonzero
+ * if the time is outside the S-3511's 2000-2099 two-digit-year range.
+ */
+int
+rtc_settime(time_t secs)
+{
+    uint8_t d[7];
+    int year, mon, day, hour, min, sec, wday;
+
+    if (secs < 0)
+        return 1;
+
+    secs_to_ymdhms(secs, &year, &mon, &day, &hour, &min, &sec, &wday);
+    if (year < 2000 || year > 2099)
+        return 1;
+
+    d[_YEAR]  = BCD(year - 2000);
+    d[_MONTH] = BCD(mon);
+    d[_DAY]   = BCD(day);
+    d[_WKD]   = BCD(wday);
+    d[_HOUR]  = BCD(hour);
+    d[_MIN]   = BCD(min);
+    d[_SEC]   = BCD(sec);
+
+    rtc_set(d);
+    return 0;
+}
+
+/*
  * Probe: announce the RTC as a child of its controller (ed0) and hook
  * it into the boot-time clock read.
  */
@@ -208,6 +338,7 @@ rtc_probe(struct conf_device *config)
     }
 
     md_rtc_gettime = rtc_gettime;
+    md_rtc_settime = rtc_settime;
     return 1;
 }
 

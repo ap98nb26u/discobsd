@@ -609,6 +609,15 @@ inittodr(time_t base)
 	time.tv_sec = base;
 }
 
+/*
+ * No real-time clock to write back to: present only so the MI
+ * settheday()/settimeofday() path has a resettodr() on every arch.
+ */
+void
+resettodr(void)
+{
+}
+
 void
 boot(dev_t dev, int howto)
 {
