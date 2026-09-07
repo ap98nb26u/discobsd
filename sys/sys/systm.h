@@ -150,6 +150,7 @@ int isdisk (dev_t dev, int type);   /* determine if a device is a disk */
 int iskmemdev (dev_t dev);          /* identify /dev/mem and /dev/kmem */
 void boot (dev_t dev, int howto);
 void inittodr (time_t base);        /* MD: seed the clock from an RTC, else base */
+void resettodr (void);              /* MD: write the clock back to an RTC, if any */
 extern int rtc_offset;              /* minutes west of UTC the RTC is set to */
 
 /*
