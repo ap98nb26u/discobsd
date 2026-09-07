@@ -128,7 +128,12 @@ main(void)
 		panic("No root filesystem found!");
 	mount[0].m_inodp = (struct inode *)1;	/* XXX */
 	mount_updname(fs, "/", "root", 1, 4);
-	time.tv_sec = fs->fs_time;
+	/*
+	 * Seed the clock from the real-time clock if the machine has one,
+	 * otherwise from the root filesystem's last-write time. inittodr()
+	 * is machine-dependent (see each arch's machdep.c).
+	 */
+	inittodr(fs->fs_time);
 	boottime = time;
 
 	/* Find a swap file. */
@@ -147,21 +152,14 @@ main(void)
 	printf("swap size = %u kbytes\n", nswap * DEV_BSIZE / 1024);
 
 	/* Kick off timeout driven events by calling first time. */
-	//printf("DBG: before schedcpu\n");
 	schedcpu(0);
-	//printf("DBG: after schedcpu\n");
 
 	/* Set up the root file system. */
-	//printf("DBG: before iget rootdir\n");
 	rootdir = iget(rootdev, &mount[0].m_filsys, (ino_t)ROOTINO);
-	//printf("DBG: after iget rootdir\n");
 	iunlock(rootdir);
-	//printf("DBG: before iget u_cdir\n");
 	u.u_cdir = iget(rootdev, &mount[0].m_filsys, (ino_t)ROOTINO);
-	//printf("DBG: after iget u_cdir\n");
 	iunlock(u.u_cdir);
 	u.u_rdir = NULL;
-	//printf("DBG: before newproc\n");
 
 #ifdef GBA
 //	u.u_procp->p_addr = (size_t)&u;

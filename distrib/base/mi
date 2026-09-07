@@ -16,7 +16,14 @@ dir /etc
 dir /sbin
 dir /tmp
 dir /usr
+dir /usr/bin
+dir /usr/sbin
+dir /usr/libexec
 dir /home
+dir /var
+dir /var/lock
+dir /var/log
+dir /var/run
 
 #
 # Block devices.
@@ -424,6 +431,17 @@ mode 0444
 file /etc/ttys
 
 #
+# Files: /var/log -- created empty, but must pre-exist so date(1) and
+# login can open them O_APPEND (they do not O_CREAT).
+#
+mode 0644
+file /var/log/wtmp
+mode 0644
+file /var/log/messages
+mode 0600
+file /var/log/aculog
+
+#
 # Files: /bin
 #
 default
@@ -643,6 +661,7 @@ mode 04750
 file /usr/sbin/talloc
 file /sbin/umount
 file /usr/sbin/update
+file /usr/libexec/getty
 file /usr/libexec/updatedb
 file /usr/sbin/vipw
 

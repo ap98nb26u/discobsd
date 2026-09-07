@@ -259,6 +259,16 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		 * itself and can neither become dirty nor be repaired.
 		 */
 		return (sysctl_rdint(oldp, oldlenp, newp, major(rootdev) == 3));
+	case KERN_RTC_OFFSET:
+		/*
+		 * Minutes west of UTC that the real-time clock is set to.
+		 * 0 means the RTC keeps UTC (traditional UNIX); a machine
+		 * whose RTC keeps local time sets this to its zone's offset
+		 * (e.g. -540 for JST, which is 9 hours *east* of UTC). Used
+		 * by inittodr()/resettodr() to convert between the RTC and
+		 * the kernel's UTC clock. See rtc_offset in kern_time.c.
+		 */
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &rtc_offset));
 	default:
 		return (EOPNOTSUPP);
 	}
