@@ -85,15 +85,16 @@ reset:
     bne 1b
 
     @ register user intr handler
-    @ c_gba_intr_handler is a plain compiled C function - the BIOS
-    @ trampoline (add lr,pc,#0 / ldr pc,[r0,#-4]) does not save any
-    @ registers before jumping here, so calling a normal C function
-    @ directly clobbers r0-r3/r12 of whatever code was interrupted
-    @ (harmless while the kernel carefully keeps IME=0 through its own
-    @ register-juggling, but corrupts any real userland code the
-    @ instant IME=1). gba_intr_handler below saves/restores r0-r12,lr
-    @ around the same work (via gba_do_schedule) and is safe to call
-    @ from arbitrary interrupted context.
+    @ The BIOS trampoline (add lr,pc,#0 / ldr pc,[r0,#-4]) does not save
+    @ any registers before jumping to the handler installed here, so a
+    @ plain compiled C function used directly would clobber r0-r3/r12 of
+    @ whatever code was interrupted (harmless while the kernel carefully
+    @ keeps IME=0 through its own register-juggling, but corrupts any
+    @ real userland code the instant IME=1). gba_intr_handler below is
+    @ an asm wrapper that saves/restores r0-r12,lr around the actual work
+    @ (in gba_do_schedule) and is safe to call from arbitrary interrupted
+    @ context - which is why the handler is this wrapper, not a bare C
+    @ function.
     ldr r0, =0x03007FFC
     ldr r1, =gba_intr_handler
     str r1, [r0]

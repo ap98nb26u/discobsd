@@ -223,28 +223,6 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
     REG_IF = flag;
 }
 
-//ARM_CODE void gba_vblank_handler(void)
-//{
-//    sys_write("V");
-//}
-
-IWRAM_CODE ARM_CODE void c_gba_intr_handler(void)
-{
-    REG_IME = 0;
-    uint16_t flag = REG_IF;
-
-    if (flag & IRQ_VBLANK) { // VBLANK
-        vblank_flag = 1;
-    }
-    if (flag & IRQ_TIMER0) { // TIMER0
-        myticks++;
-        timer0_flag = 1;
-        need_resched = 1;
-    }
-    REG_IF = flag;
-    REG_IME = 1;
-}
-
 void irq_enable(void)
 {
 	REG_IME = 0;
