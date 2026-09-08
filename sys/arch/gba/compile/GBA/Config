@@ -39,6 +39,17 @@ options         "UART_BAUD=115200"          # default speed
 options         "CONS_MAJOR=UART_MAJOR"     # UART device
 options         "CONS_MINOR=0"              # uart1 is /dev/tty0
 
+# Standalone-demo build: the console is the LCD text screen driven by
+# the on-screen software keyboard, with NO serial cable attached. The
+# SIO/UART link-cable console (gsio_*) hardware-flow-controls on CTS
+# and a per-byte send-complete flag that never complete with nothing
+# wired to the cable -- costing ~0.5s per character on real hardware
+# and still mirroring output to a serial peer when one IS attached.
+# Compile the serial path out entirely for this config so the LCD
+# console runs at full speed cable-free; the GBAED config keeps serial
+# for interactive debugging over a cable.
+options         "NO_SERIAL_CONSOLE"         # LCD-only console, no gsio
+
 # SDIO port
 #controller      sdio0                       # SDIO port
 #options         "SDIO_XFER_CLK_DIV=2"       # APB2 84MHz / (DIV + 2) < 25MHz

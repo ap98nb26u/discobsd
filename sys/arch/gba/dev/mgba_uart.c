@@ -32,7 +32,9 @@ void uartinit(int unit) {
      */
     if (unit == CONS_MINOR) {
         gtxt_init(0xFFFF, 0x0000); // white on black
+#ifndef NO_SERIAL_CONSOLE
         gsio_init(UART_BAUD);
+#endif
     }
 }
     
@@ -217,12 +219,14 @@ uart_poll_input(void)
      * would hang idle() - and with it swtch()'s entire wait loop,
      * i.e. the whole scheduler - forever.
      */
+#ifndef NO_SERIAL_CONSOLE
     for (n = 0; n < 32 && gsio_avail(); n++) {
         int rc = gsio_getc_bounded();
         if (rc < 0)
             break;
         ttyinput(rc, tp);
     }
+#endif
 
     for (n = 0; n < 256 && (c = getc(&tp->t_outq)) >= 0; n++)
         uartputc(CONS_MINOR, (char)c);
@@ -255,12 +259,18 @@ int uartselect(dev_t dev, int rw)
 
 /* r_read / r_write に相当する関数名 (conf.cの定義に合わせる) */
 char uartgetc(dev_t dev) {
+#ifndef NO_SERIAL_CONSOLE
     return (char)gsio_getc();
+#else
+    return (char)0;
+#endif
 }
 
 void uartputc(dev_t dev, char c) {
     gtxt_putc(c);
+#ifndef NO_SERIAL_CONSOLE
     gsio_putc((unsigned char)c);
+#endif
 
     MGBA_REG_DEBUG_ENABLE = 0xC0DE; // mGBA Enable
 #if 1 // buffering
