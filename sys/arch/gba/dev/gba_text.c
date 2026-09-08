@@ -182,11 +182,20 @@ gtxt_cursor(int on)
     unsigned short color;
     int row, col, cx;
 
+    /*
+     * While a glyph typed in the last column waits for its deferred
+     * wrap, gtxt_curx == GTXT_COLS and there is no free cell to mark.
+     * Drawing the block over that glyph and later erasing it to the
+     * background wiped the character (it vanished as the line scrolled).
+     * Show no cursor until the next character resolves the wrap.
+     */
+    cx = gtxt_curx < GTXT_COLS ? gtxt_curx : GTXT_COLS - 1;
+    if (gtxt_curx >= GTXT_COLS)
+        on = 0;
     if (on == gtxt_cursor_on)
         return;
     gtxt_cursor_on = on;
 
-    cx = gtxt_curx < GTXT_COLS ? gtxt_curx : GTXT_COLS - 1;	/* deferred wrap */
     color = on ? gtxt_fg : gtxt_bg;
     p = VRAM + gtxt_cury * GTXT_CHAR_H * GTXT_SCREEN_W + cx * GTXT_CHAR_W;
     for (row = 0; row < GTXT_CHAR_H; row++) {
