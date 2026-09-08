@@ -14,7 +14,10 @@
  *   D-pad       move the cursor over the keys
  *   A           send the highlighted key
  *   B           send Enter (a shortcut for the En key)
- *   L / R       toggle shift (upper case / the alternate symbols)
+ *   L           toggle shift (upper case / the alternate symbols); sticky
+ *   R           toggle control; one-shot - the next key sends its ^char
+ *               (e.g. c -> ^C, d -> ^D). The Sh and Ct keys on the
+ *               bottom row do the same and light up while active.
  *
  * swkbd_poll() is called from idle() (machdep.c), the same place the
  * serial console is polled, so both input paths coexist.
@@ -42,10 +45,16 @@ extern struct tty uartttys[];
  * is sent. For a special key `label` is a 2-char string drawn in the
  * key's two cells and `n` (== `s`) is the control character sent.
  */
+/* kind values: an ordinary character, or a sticky modifier toggle. */
+#define K_CHAR	0
+#define K_SHIFT	1
+#define K_CTRL	2
+
 struct swkey {
 	char		n;	/* character sent / drawn, unshifted */
 	char		s;	/* character sent / drawn, shifted */
 	const char     *label;	/* 2 chars for a special key, else 0 */
+	unsigned char	kind;	/* K_CHAR / K_SHIFT / K_CTRL (0 by default) */
 };
 
 /* Every key is drawn KEY_CELLS text cells wide, so key i sits at
@@ -85,6 +94,7 @@ static const struct swkey row3[] = {
 static const struct swkey row4[] = {
 	{'\t','\t',"Tb"},{' ',' ',"Sp"},{'\b','\b',"Bs"},
 	{'\r','\r',"En"},{0x1b,0x1b,"Es"},
+	{0,0,"Sh",K_SHIFT},{0,0,"Ct",K_CTRL},
 };
 
 static const struct swkey *const rows[] = { row0, row1, row2, row3, row4 };
@@ -99,7 +109,8 @@ static const unsigned char rowlen[] = {
 #define KB_BG		0x0000		/* black */
 
 static int	swkbd_shown;
-static int	swkbd_shift;
+static int	swkbd_shift;		/* sticky: upper case / alternate symbol */
+static int	swkbd_ctrl;		/* one-shot: next key sends its ^char */
 static int	swkbd_cx;		/* cursor column (key index in row) */
 static int	swkbd_cy;		/* cursor row */
 static uint16_t	swkbd_prev;		/* previously-pressed key bitmask */
@@ -111,9 +122,16 @@ swkbd_drawkey(int row, int col, int hilite)
 	const struct swkey *k = &rows[row][col];
 	int scol = col * KEY_CELLS;
 	int srow = (gtxt_rows() - NROWS) + row;
-	unsigned short fg = hilite ? KB_BG : KB_FG;
-	unsigned short bg = hilite ? KB_FG : KB_BG;
+	unsigned short fg, bg;
 	char c0, c1;
+
+	/* A modifier key stays lit while its mode is active, so its state
+	 * is visible even when the cursor is elsewhere. */
+	if ((k->kind == K_SHIFT && swkbd_shift) ||
+	    (k->kind == K_CTRL && swkbd_ctrl))
+		hilite = 1;
+	fg = hilite ? KB_BG : KB_FG;
+	bg = hilite ? KB_FG : KB_BG;
 
 	if (k->label) {
 		c0 = k->label[0];
@@ -167,8 +185,26 @@ static void
 swkbd_press(void)
 {
 	const struct swkey *k = &rows[swkbd_cy][swkbd_cx];
+	char c;
 
-	swkbd_send(swkbd_shift ? k->s : k->n);
+	if (k->kind == K_SHIFT) {
+		swkbd_shift = !swkbd_shift;
+		swkbd_draw();
+		return;
+	}
+	if (k->kind == K_CTRL) {
+		swkbd_ctrl = !swkbd_ctrl;
+		swkbd_draw();
+		return;
+	}
+
+	c = swkbd_shift ? k->s : k->n;
+	if (swkbd_ctrl) {
+		c = (char)(c & 0x1f);	/* e.g. c->^C (0x03), d->^D (0x04) */
+		swkbd_ctrl = 0;		/* one-shot: applies to this key only */
+		swkbd_draw();
+	}
+	swkbd_send(c);
 }
 
 static void
@@ -261,9 +297,13 @@ swkbd_poll(void)
 	if (!swkbd_shown)
 		return;
 
-	if (fresh & (KEY_L | KEY_R)) {
+	if (fresh & KEY_L) {			/* L shoulder: shift */
 		swkbd_shift = !swkbd_shift;
 		swkbd_draw();			/* relabel every key */
+	}
+	if (fresh & KEY_R) {			/* R shoulder: control */
+		swkbd_ctrl = !swkbd_ctrl;
+		swkbd_draw();
 	}
 	if (act & KEY_UP)
 		swkbd_move(0, -1);
