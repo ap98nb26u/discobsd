@@ -75,7 +75,7 @@ else
     mount -a
 fi
 
-hostname "name.my.domain"
+hostname "discobsd"
 
 rm -f /etc/nologin
 
