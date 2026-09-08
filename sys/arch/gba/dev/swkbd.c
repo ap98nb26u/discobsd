@@ -76,11 +76,14 @@ static const struct swkey row3[] = {
  * discipline treats them identically to serial input: Enter is CR (the
  * tty maps CR->NL via ICRNL and echoes the newline; sending a bare LF
  * runs the command but skips that echo, so output ran onto the command
- * line), and Backspace is DEL (0x7f), this tty's erase character
- * ("erase ^?"), not a literal backspace.
+ * line). Backspace is ^H (0x08), NOT DEL: the tty always treats ^H as
+ * an erase (tty.c: CCEQ(CTRL('h'), c)), whatever t_erase is set to, so
+ * it erases at the login prompt as well as the shell; DEL only erased
+ * once .profile's "stty dec" had set erase=^?, and before that printed
+ * as a literal 0x7f glyph on the LCD.
  */
 static const struct swkey row4[] = {
-	{'\t','\t',"Tb"},{' ',' ',"Sp"},{0x7f,0x7f,"Bs"},
+	{'\t','\t',"Tb"},{' ',' ',"Sp"},{'\b','\b',"Bs"},
 	{'\r','\r',"En"},{0x1b,0x1b,"Es"},
 };
 
