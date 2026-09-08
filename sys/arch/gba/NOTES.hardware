@@ -56,9 +56,10 @@ IME discipline (the load-bearing invariant of this port):
   - locore0.S forces IME=0 at the very top of reset: SoftReset does not
     clear I/O space, so IME could survive a reboot as 1.  locore0.S:40
 
-Note: c_gba_intr_handler() (machdep.c:231) is a plain-C handler with no
-register save/restore; it is NOT the installed handler -- only the asm
-wrapper gba_intr_handler is wired to 0x03007FFC.
+Note: the installed handler is the asm wrapper gba_intr_handler (wired
+to 0x03007FFC); a bare compiled-C handler is deliberately NOT used, as
+the BIOS trampoline saves no registers before the jump -- see the
+locore0.S comment at the vector install for why.
 
 
 2. DMA
