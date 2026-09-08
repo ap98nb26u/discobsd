@@ -529,6 +529,22 @@ idle(void)
 
 		extern void uart_poll_input(void);
 		uart_poll_input();
+
+		/*
+		 * Blink the console's block cursor while idle - i.e. only
+		 * when nothing is runnable, which at the shell means we are
+		 * waiting for the user to type. A big solid square, 0.5s on
+		 * / 0.5s off. Paced off lbolt (the hardclock tick within the
+		 * current second, 0..hz-1) - NOT time.tv_usec, which this
+		 * port's hardclock never advances (it only bumps tv_sec when
+		 * lbolt wraps), so a tv_usec test never blinked. gtxt_cursor()
+		 * is idempotent, so this is a bare comparison every pass and
+		 * only touches VRAM on the twice-a-second flip; any console
+		 * output erases the cursor first (gtxt_putc), so it never
+		 * blocks or smears output.
+		 */
+		extern void gtxt_cursor(int on);
+		gtxt_cursor(lbolt < hz / 2);
 	}
 
 	/* Restore previous SPL. */
