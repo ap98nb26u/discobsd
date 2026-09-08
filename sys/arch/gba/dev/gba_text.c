@@ -228,6 +228,17 @@ gtxt_putc(char c)
      */
     gtxt_cursor(0);
 
+    if (c == '\a' || c == 0x7f) {
+        /*
+         * BEL is audible-only on a real terminal, and DEL is a
+         * non-printing rubout - draw neither. The cooked tty rings the
+         * bell (CTRL-G) for each keystroke once the input line hits
+         * TTYHOG (255 bytes); without this those printed as glyphs and
+         * marched the cursor off the screen. (DEL should not normally
+         * reach here now that Backspace sends ^H, but guard anyway.)
+         */
+        return;
+    }
     if (c == '\r') {
         gtxt_curx = 0;
         return;
