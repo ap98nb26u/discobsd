@@ -26,6 +26,16 @@
 
 #define SIO_CTS         0x0004
 #define SIO_SEND_DATA   0x0010 /* 0=send register empty, 1=still full/busy */
+
+/*
+ * Bounds for gsio_putc()'s waits. CTS is a busy-wait only hit at the
+ * very start if there IS a peer; if there is none (cable-less GBA), one
+ * timeout of this length is paid once and serial is then dropped, so it
+ * can be generous. The send-complete wait always finishes on its own
+ * (internal-clock UART) in ~1500 cycles; bound it only against a wedge.
+ */
+#define GSIO_CTS_LIMIT   1000000
+#define GSIO_SEND_LIMIT  100000
 #define SIO_LENGTH_8    0x0080
 #define SIO_SEND_ENABLE 0x0400
 #define SIO_RECV_ENABLE 0x0800
@@ -136,16 +146,34 @@ gsio_getc_bounded(void)
 void
 gsio_putc(unsigned char c)
 {
-    /* Wait for the far end's CTS signal. */
-    while (REG_RCNT & 0x0010)
-        ;
+    static int gsio_dead;	/* no serial peer: send nothing, LCD only */
+    unsigned int i;
+
     /*
-     * Wait for the previous byte to finish transmitting. The
-     * reference library never checked this (SIO_SEND_DATA was
-     * defined but unused), which corrupts back-to-back writes with
-     * no intervening delay -- e.g. "\r\n" landing as two 0x00 bytes.
+     * A cable-less GBA has nothing to raise CTS, so the original
+     * unbounded "wait for CTS" hung the very first boot printf and the
+     * machine never started without a serial cable attached. Bound the
+     * wait; if CTS never comes, mark the port dead and skip serial for
+     * the rest of the run - the LCD text console keeps working, so a
+     * bare GBA boots fine. With a cable, CTS is asserted at once and
+     * this costs nothing.
      */
-    while (REG_SIOCNT & SIO_SEND_DATA)
-        ;
+    if (gsio_dead)
+        return;
+    for (i = 0; REG_RCNT & 0x0010; i++)
+        if (i > GSIO_CTS_LIMIT) {
+            gsio_dead = 1;
+            return;
+        }
+
+    /*
+     * Wait for the previous byte to finish transmitting. The reference
+     * library never checked this (SIO_SEND_DATA was defined but unused),
+     * which corrupts back-to-back writes with no intervening delay --
+     * e.g. "\r\n" landing as two 0x00 bytes. Bounded against a wedge.
+     */
+    for (i = 0; REG_SIOCNT & SIO_SEND_DATA; i++)
+        if (i > GSIO_SEND_LIMIT)
+            break;
     REG_SIODATA8 = c;
 }
