@@ -194,14 +194,26 @@ swkbd_move(int dx, int dy)
 }
 
 /*
- * Poll the keypad once. Called in a tight loop from idle(); acts only on
- * fresh presses (edge-triggered), so a held button fires once.
+ * Auto-repeat (frames, at the ~60Hz sample rate below): hold a movement
+ * key or A for SWKBD_REPEAT_DELAY (~1s) and it then fires every
+ * SWKBD_REPEAT_RATE frames (~0.25s). SELECT, shift and Enter never
+ * repeat.
+ */
+#define SWKBD_REPEAT_DELAY	60
+#define SWKBD_REPEAT_RATE	15
+#define SWKBD_REPEAT_KEYS	(KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT | KEY_A)
+
+/*
+ * Poll the keypad once. Called in a tight loop from idle(); acts on
+ * fresh presses (edge-triggered) plus auto-repeats of a held key.
  */
 void
 swkbd_poll(void)
 {
 	static uint16_t last_vc;
-	uint16_t vc, raw, down, fresh;
+	static uint16_t held_prev;	/* repeatable keys held last frame */
+	static int hold_ctr;
+	uint16_t vc, raw, down, fresh, rep, act;
 
 	/*
 	 * idle() calls this thousands of times a second - far faster than
@@ -222,8 +234,25 @@ swkbd_poll(void)
 	raw = REG_KEYINPUT;			/* 0 bit = pressed */
 	down = (uint16_t)(~raw & 0x03FF);
 	fresh = (uint16_t)(down & ~swkbd_prev);
-
 	swkbd_prev = down;
+
+	/*
+	 * Auto-repeat: while exactly the same repeatable key(s) stay held,
+	 * count frames; past the initial delay, fire once every RATE frames.
+	 */
+	rep = 0;
+	{
+		uint16_t r = (uint16_t)(down & SWKBD_REPEAT_KEYS);
+		if (r != 0 && r == held_prev) {
+			hold_ctr++;
+			if (hold_ctr >= SWKBD_REPEAT_DELAY &&
+			    (hold_ctr - SWKBD_REPEAT_DELAY) % SWKBD_REPEAT_RATE == 0)
+				rep = r;
+		} else
+			hold_ctr = 0;
+		held_prev = r;
+	}
+	act = (uint16_t)(fresh | rep);		/* fresh presses + repeats */
 
 	if (fresh & KEY_SELECT) {
 		swkbd_show(!swkbd_shown);
@@ -236,15 +265,15 @@ swkbd_poll(void)
 		swkbd_shift = !swkbd_shift;
 		swkbd_draw();			/* relabel every key */
 	}
-	if (fresh & KEY_UP)
+	if (act & KEY_UP)
 		swkbd_move(0, -1);
-	if (fresh & KEY_DOWN)
+	if (act & KEY_DOWN)
 		swkbd_move(0, 1);
-	if (fresh & KEY_LEFT)
+	if (act & KEY_LEFT)
 		swkbd_move(-1, 0);
-	if (fresh & KEY_RIGHT)
+	if (act & KEY_RIGHT)
 		swkbd_move(1, 0);
-	if (fresh & KEY_A)
+	if (act & KEY_A)
 		swkbd_press();
 	if (fresh & KEY_B)
 		swkbd_send('\r');		/* Enter (see row4 comment) */
