@@ -17,6 +17,7 @@ void gtxt_draw_cell(char c, int col, int row, unsigned short fg,
 void gtxt_reserve_bottom(int pixels);
 int gtxt_cols(void);
 int gtxt_rows(void);
+void gtxt_cursor(int on);
 
 #endif /* KERNEL */
 
