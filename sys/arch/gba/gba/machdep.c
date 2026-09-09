@@ -165,7 +165,6 @@ volatile int need_resched;
 
 volatile uint16_t frame_count = 0;
 volatile uint32_t myticks = 1;
-volatile int vblank_flag;
 volatile int timer0_flag;
 
 /*
@@ -216,10 +215,6 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
          */
         hardclock((caddr_t)0, 0);
     }
-    if (flag & IRQ_VBLANK) { // VBLANK
-        flag = IRQ_VBLANK;
-        vblank_flag = 1;
-    }
     REG_IF = flag;
 }
 
@@ -236,10 +231,15 @@ void irq_enable(void)
 	// 0x0080: 開始
 	REG_TM0CNT_H = 0x00C3;
 
-	// display
-	REG_DISPSTAT |= (1 << 3); // enable VBLANK IRQ
-
-	REG_IE = (1 << 3) | (1 << 0);
+	/*
+	 * Only Timer0 (IRQ_TIMER0 = bit3) drives anything - it runs
+	 * hardclock(). VBLANK (bit0) was previously enabled too (DISPSTAT
+	 * bit3 + REG_IE bit0) but its handler only ever set vblank_flag,
+	 * which nothing read; on-screen input and the cursor blink are
+	 * polled via REG_VCOUNT/lbolt, not the VBLANK IRQ. Leaving it out
+	 * so the only interrupt that fires is the one that has real work.
+	 */
+	REG_IE = IRQ_TIMER0;
 
 	REG_IME = 1;
 }

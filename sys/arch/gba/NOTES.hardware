@@ -9,16 +9,21 @@ the authoritative code; this file is a map, not a spec.
 1. INTERRUPTS
 -------------
 
-Enabled hardware interrupt sources (REG_IE = (1<<3)|(1<<0)):
+Enabled hardware interrupt sources (REG_IE = IRQ_TIMER0):
 
-    bit0  Timer0 overflow   system clock -> hardclock()
+    bit3  Timer0 overflow   system clock -> hardclock()   (IRQ_TIMER0)
                             clock.c:cpu_initclocks(), machdep.c:irq_enable()
-    bit3  VBLANK            sets vblank_flag only
-                            machdep.c:irq_enable() (DISPSTAT bit3)
 
-No other sources are used. Keypad, SIO (serial), DMA-completion,
-HBlank and VCount interrupts are all UNUSED -- input and video timing
-are polled (swkbd.c reads REG_KEYINPUT and REG_VCOUNT directly).
+Timer0 is the ONLY enabled source. VBLANK (bit0, IRQ_VBLANK) was
+formerly enabled too (DISPSTAT bit3 + REG_IE bit0) but its handler only
+set vblank_flag, which nothing read, so it was removed -- on-screen
+input and the cursor blink are polled via REG_VCOUNT/lbolt, not a VBLANK
+IRQ. Keypad, SIO (serial), DMA-completion, HBlank and VCount interrupts
+are all UNUSED -- input and video timing are polled (swkbd.c reads
+REG_KEYINPUT and REG_VCOUNT directly).
+
+(GBA REG_IE bit numbering: bit0=VBLANK, bit1=HBlank, bit2=VCount,
+bit3=Timer0, bit12=Keypad -- see gba.h IRQ_* defines.)
 
 Control registers:
     REG_IME       0x4000208   master enable
@@ -40,8 +45,8 @@ Dispatch path:
        gba_do_schedule(); IME=1; bx lr (returns via BIOS).
        locore0.S:190-256
     3. gba_do_schedule() (C, Thumb, IWRAM): read REG_IF; TIMER0 ->
-       myticks++/need_resched/hardclock(); VBLANK -> vblank_flag;
-       write REG_IF to ACK.  machdep.c:196-224
+       myticks++/need_resched/hardclock(); write REG_IF to ACK.
+       machdep.c:gba_do_schedule()
 
 IME discipline (the load-bearing invariant of this port):
   - The syscall trampoline holds IME=0 for the ENTIRE syscall_handler
@@ -137,8 +142,6 @@ vector at 0x03007FFC, and "bx lr" returns through the BIOS).
 
 FOLLOW-UP OPPORTUNITIES (not yet done)
 --------------------------------------
-  * VBLANK IRQ is enabled but only sets a flag; input/video are polled
-    via REG_VCOUNT. Either use the IRQ or drop its enable.
   * idle() busy-waits; BIOS Halt (swi 0x02) would cut power/heat on
     real hardware (relates to roadmap #6 screen blanking). Needs a
     wake source -- likely keypad IRQ.
