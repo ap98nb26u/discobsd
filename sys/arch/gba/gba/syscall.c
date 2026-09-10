@@ -281,28 +281,27 @@ void simulate_swi_via_inline_data(void) {
         "ldr r5, [r5]\n\t"
         "msr cpsr_f, r5\n\t"
 
-        "ldmia sp!, {r0-r12}\n\t"     // R0〜R12を復元 (52バイト、sp+52=tf_lr位置)
-        "add sp, sp, #4\n\t"          // tf_lrをスキップ (sp+56=tf_pc位置)
-        "ldmia sp!, {lr}\n\t"         // tf_pc(更新されている場合あり)をlrへ復元
-        "add sp, sp, #4\n\t"          // tf_psr分を破棄(値は上でメモリへ退避済み)
-
-        // tf_ip(=r12)は通常、上の1.5節で書き込んだ「呼び出し元の本来の
-        // sp」を保持している。execve()成功時に限り、exec_setupstack()
-        // (exec_subr.c)がこの同じスロット(tf_sp、frame.hでtf_ipの別名)
-        // を新しいプロセスの実際のユーザースタックポインタで上書きする。
-        // どちらの場合もこのスロットには「復帰後に使うべきsp」がそのまま
-        // 入っているので、ここでは無条件にそれへ切り替えるだけでよい
-        // (以前はgba_exec_switched_stackで分岐し、execve以外の場合は
-        // 別のグローバル変数saved_user_spから読み直していたが、その
-        // グローバルはfork()の子プロセスがlongjmp経由でずっと後に復帰
-        // したときに無関係な値へ上書きされてしまっていた - ファイル
-        // 冒頭のコメント参照)。
-        "mov sp, r12\n\t"
-
-        // ここから下、bx lrまでの間はr0-r12を一切触らない - 上でldmiaした
-        // 値がそのまま呼び出し元(または新プロセスのエントリポイント)へ渡る。
-        "bx lr\n\t"                   // 呼び出し元へ復帰（モードは変えていないので
-                                       // movs不要。interworkingのためbxを使用）
+        // ユーザーランドへ復帰する。ここではspはまだフレーム先頭を指す
+        // (tf_r0=0 .. tf_ip=48, tf_lr=52, tf_pc=56, tf_psr=60)。
+        //
+        // tf_lrは「破棄」してはならず、ユーザーのlrへ復元する。通常の
+        // システムコールではARMラッパー(SYS.h)が復帰後に自前で pop {lr}
+        // するため、以前ここでtf_lrを捨ててlr=tf_pcのまま返しても実害が
+        // なかった。しかしsendsig()(sig_machdep.c)は tf_lr = u.u_sigtramp
+        // を明示的に設定し、シグナルハンドラが sigtramp -> sigreturn へ
+        // 戻るようにしている。tf_lrを捨てるとハンドラは「lr=自分自身の
+        // アドレス」で開始してしまい sigtramp へ戻れず、捕捉シグナル
+        // (SIGINT/^C・SIGALRM 等)の復帰が一度も成立せずゴミへ暴走して
+        // いた。tf_lrをlrへ復元し、tf_pcへのinterworking分岐は呼び出し
+        // 規約上破壊可能なr12を分岐先に使って行う(ユーザーの本来のspは
+        // tf_ip=48にあり、上の1.5節で既にユーザーr12を上書き済みなので
+        // r12は自由に使える)。ldmiaは書き戻しなしにして、最後にtf_ipから
+        // spを直接ロードする。
+        "ldr r12, [sp, #56]\n\t"      // r12 = tf_pc(分岐先)
+        "ldr lr,  [sp, #52]\n\t"      // lr  = tf_lr(ユーザーlr。シグナル時はsigtramp)
+        "ldmia sp, {r0-r11}\n\t"      // r0-r11 = tf_r0..tf_r11(書き戻しなし)
+        "ldr sp,  [sp, #48]\n\t"      // sp  = tf_ip = 復帰先スタックポインタ
+        "bx r12\n\t"                  // 復帰。tf_pcのbit0でARM/Thumb切替(Thumbハンドラ対応)
     );
 }
 
