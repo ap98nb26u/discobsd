@@ -110,6 +110,17 @@
 #define SD_OPEN_SETTLE_RETRIES  3
 
 /*
+ * How many times card_write() re-issues a whole failed multi-block
+ * write before giving up (mirrors card_read()'s recovery). Real
+ * hardware shows the dominant write failure is a per-block ready wait
+ * timing out on a responsive-but-slow card under sustained swap-stream
+ * writes; a retry re-sends CMD25 after the card has had more real time
+ * to finish programming, which reliably clears it (the swap layer's own
+ * retry already recovered these before this existed).
+ */
+#define SD_WRITE_RETRIES        5
+
+/*
  * This bounds retry loops that call ed_sd_cmd_rd()/ed_sd_cmd_wr()
  * (ed.c) each iteration - those already retry internally with their
  * own bound, so any large count here multiplies the two bounds
@@ -611,47 +622,58 @@ sd_write_sectors(uint32_t sd_addr, const void *src, uint16_t slen)
         ed_sd_dat_rd();
 
         /*
-         * ed_sd_dat_rd() already retries internally with its own
-         * bound - looping this many more times around it multiplies
-         * the two bounds together (the same "outer x inner" mistake
-         * ed_sd_wait_f0() had, see its comment in ed.c), capable of
-         * turning a bounded wait into a many-hour real-hardware hang
-         * when the card genuinely isn't responding. Cut sharply.
+         * Wait for the card to release BUSY after programming this
+         * block (its data-response byte reads back 0xff). Two very
+         * different failure modes are told apart by ed_sd_dat_rd_wedged
+         * (set by ed_sd_dat_rd(), see ed.c):
          *
-         * DBG: same fix and same reason as sd_close_rw()'s identical
-         * wait loop below in this file - undersized (50) against
-         * genuine SD program-time busy, not just the FPGA's own
-         * SPI-shift busy flag. First tried 5000, which fixed the
-         * checksum-mismatch corruption but then caused a several-
-         * minute real-hardware hang on a later boot (this loop runs
-         * per block in a multi-block write, so its worst case
-         * multiplies by however many blocks are in flight); dialed
-         * back to 800 for the same reasoning as sd_close_rw().
+         *  - Card responsive but still programming: each ed_sd_dat_rd()
+         *    returns promptly (inner BUSY wait clears, wedged==0) with a
+         *    non-0xff byte; the card simply needs more polls. Real-
+         *    hardware telemetry across three SD cards found this wait
+         *    needing up to ~730 iterations under sustained swap-stream
+         *    writes, worst right after a cold boot, and EVERY timeout
+         *    observed was a responsive card, never a wedge. The polls
+         *    are cheap, so give the responsive case a generous budget.
          *
-         * DBG: this is a SEPARATE wait from sd_close_rw()'s own -
-         * it gates every individual block of a multi-block write
-         * (SD_CMD25), while sd_close_rw()'s only gates the transfer's
-         * final CMD12 close. Missed applying sd_shutdown_flush here
-         * in the first pass at this fix (see sd_shutdown_flush's
-         * declaration comment above) - a multi-block write closing
-         * out fine at sd_close_rw() doesn't mean every block *within*
-         * it actually had enough real time to finish programming
-         * before the next block's data started clocking in over the
-         * same DAT line, and this per-block wait is exactly what
-         * would need to be longer for that to matter during the
-         * final pre-reboot flush too.
+         *  - Card/FPGA wedged: ed_sd_dat_rd()'s own inner BUSY wait runs
+         *    to its 50000-iteration cap every call (wedged==1). A large
+         *    OUTER bound would then multiply into a multi-*hour* hang
+         *    (the "outer x inner" mistake ed_sd_wait_f0() had, see ed.c).
+         *    Bail the instant a poll reports a wedge, whatever budget is
+         *    left.
+         *
+         * The old single small bound (800) conflated the two: too tight
+         * for the responsive-slow case (spurious timeouts that flooded
+         * the console and forced upper-layer retries under swap load,
+         * observed across three cards), yet it was also the only thing
+         * keeping the wedge case from hanging. Splitting them lets the
+         * runtime budget grow safely. This is a SEPARATE wait from
+         * sd_close_rw()'s own: it gates every individual block of a
+         * multi-block write (SD_CMD25), while sd_close_rw()'s gates only
+         * the transfer's final CMD12 close. sd_shutdown_flush widens
+         * both during the final pre-reboot flush, where a longer wait is
+         * nearly free.
          */
-        i = sd_shutdown_flush ? 8000 : 800;
-        while (--i) {
-            if (ed_sd_dat_rd() == 0xff)
-                break;
-        }
-        if (i == 0) {
-            printf("sd: write: per-block ready wait timed out\n");
-            /* Close the half-written multi-block stream, as the two
-             * error returns above now do. */
-            (void)sd_close_rw();
-            return SD_ERR_CMD_TIMEOUT;
+        {
+            uint16_t bound = sd_shutdown_flush ? 30000 : 8000;
+            uint8_t ready = 0;
+
+            for (i = bound; --i; ) {
+                if (ed_sd_dat_rd() == 0xff) {
+                    ready = 1;
+                    break;
+                }
+                if (ed_sd_dat_rd_wedged)        /* wedge: fail fast */
+                    break;
+            }
+            if (! ready) {
+                /* Close the half-written multi-block stream, as the two
+                 * error returns above now do. card_write() retries the
+                 * whole write. */
+                (void)sd_close_rw();
+                return SD_ERR_CMD_TIMEOUT;
+            }
         }
     }
 
@@ -918,15 +940,31 @@ card_write(int unit, unsigned offset, char *data, unsigned bcount)
 {
     uint32_t sd_addr;
     uint16_t slen;
+    int tries;
 
     if (unit != 0)
         return 0;
 
     sd_addr = (uint32_t)offset << 1;
     slen = (bcount + 511) / 512;
-    if (sd_write_sectors(sd_addr, data, slen))
-        return 0;
-    return 1;
+
+    /*
+     * Retry a failed write in full, mirroring card_read()'s recovery
+     * loop. The dominant real-hardware write failure is a per-block
+     * ready wait timing out mid-stream on a responsive-but-slow card
+     * under sustained swap-stream writes (see sd_write_sectors()); each
+     * retry re-issues CMD25 from the start after the card has had more
+     * real time to finish programming, which is exactly why the swap
+     * layer's own outer retry already recovered these. Doing it here too
+     * means ordinary filesystem writes - which have no such retry above
+     * them - get the same recovery, and the transient no longer surfaces
+     * as an EIO or floods the console.
+     */
+    for (tries = 0; tries < SD_WRITE_RETRIES; tries++) {
+        if (sd_write_sectors(sd_addr, data, slen) == 0)
+            return 1;
+    }
+    return 0;
 }
 
 static void

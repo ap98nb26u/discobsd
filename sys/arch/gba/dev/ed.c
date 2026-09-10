@@ -202,6 +202,18 @@ ed_sd_dat_wr(uint8_t data)
     }
 }
 
+/*
+ * Set by ed_sd_dat_rd() on every call: nonzero if that call's inner
+ * ED_STAT_SD_BUSY wait ran all the way to its 50000-iteration cap
+ * without the FPGA/card ever releasing BUSY (a "wedge"), zero if BUSY
+ * cleared normally. sd_write_sectors()'s per-block ready wait reads it
+ * to tell a wedged card (bail at once, so a large outer bound can't
+ * multiply the inner cap into a multi-hour hang) from one that is
+ * merely slow to finish programming (keep polling) - see the comment
+ * there.
+ */
+int ed_sd_dat_rd_wedged;
+
 uint8_t
 ed_sd_dat_rd(void)
 {
@@ -212,6 +224,7 @@ ed_sd_dat_rd(void)
         if ((ed_reg_rd(ED_REG_STATUS) & ED_STAT_SD_BUSY) == 0)
             break;
     }
+    ed_sd_dat_rd_wedged = (i == 50000);
     return dat;
 }
 
