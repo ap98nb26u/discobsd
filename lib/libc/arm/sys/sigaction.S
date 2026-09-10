@@ -91,7 +91,44 @@ END(sigaction)
  * Note that the stack offset SIG_SC will NOT have to be recomputed if the
  * sigcontext structure changes.
  */
+#ifndef MACHINE_GBA
+
 ENTRY(sigtramp)
 	svc	SYS_sigreturn		/* Attempt the sigreturn. */
 	svc	SYS_exit		/* Die if the sigreturn fails ... */
 END(sigtramp)
+
+#else /* GBA */
+
+/*
+ * GBA has no SVC exception - syscalls go through the simulated-SWI
+ * vector (see SYS.h's CALL_SIMSYS). The common sigtramp above used a
+ * raw `svc`, which on GBA traps to the BIOS SWI handler, NOT the
+ * kernel, so a caught signal's return ran off into garbage: no GBA
+ * program could ever catch a signal (SIGINT/^C crashed, SIGALRM hung
+ * update/cron). Route sigtramp's syscalls through the vector too.
+ *
+ * Unlike CALL_SIMSYS, do NOT `push {lr}` first. The kernel's sigreturn
+ * reads its sigcontext at a fixed offset from the user stack pointer
+ * captured at the call - sig_machdep.c uses tf_sp + 16, and tf_sp
+ * aliases tf_ip (frame.h), which the sim mechanism fills with the sp
+ * live at `bx r12` (syscall.c). sendsig() placed the sigcontext at
+ * exactly sp + 16, so any push here would shift sp and make sigreturn
+ * restore garbage. sigtramp never needs its own lr back: on success
+ * sigreturn resumes the pre-signal context directly (never returning
+ * here); only on failure do we fall through to _exit.
+ */
+ENTRY(sigtramp)
+	ldr	r12, =SYSCALL_VECTOR_ADDR	/* sigreturn (no sp change) */
+	ldr	r12, [r12]
+	mov	lr, pc
+	bx	r12
+	.word	SYS_sigreturn
+	ldr	r12, =SYSCALL_VECTOR_ADDR	/* only reached if it failed */
+	ldr	r12, [r12]
+	mov	lr, pc
+	bx	r12
+	.word	SYS_exit
+END(sigtramp)
+
+#endif

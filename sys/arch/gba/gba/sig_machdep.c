@@ -121,10 +121,6 @@ sigreturn(void)
 	struct sigcontext *scp =
 	    (struct sigcontext *)(regs->tf_sp + 16);
 
-#ifdef DIAGNOSTIC
-	printf("(%u)sigreturn stack=%#x, context=%p\n",
-	    u.u_procp->p_pid, regs->tf_sp, scp);
-#endif
 	if (baduaddr((caddr_t)scp) ||
 	    baduaddr((caddr_t)scp + sizeof(*scp))) {
 		u.u_error = EFAULT;
@@ -154,7 +150,4 @@ sigreturn(void)
 	regs->tf_r9  = scp->sc_r9;
 	regs->tf_r10 = scp->sc_r10;
 	regs->tf_r11 = scp->sc_r11;
-#ifdef DIAGNOSTIC
-	printf("    ...to %#x, stack %#x\n", regs->tf_pc, regs->tf_sp);
-#endif
 }
