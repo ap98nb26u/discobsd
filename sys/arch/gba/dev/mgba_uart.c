@@ -1,6 +1,7 @@
 #include <sys/param.h>
 #include <sys/conf.h>
 #include <sys/user.h>
+#include <sys/proc.h>
 #include <sys/ioctl.h>
 #include <sys/tty.h>
 #include <sys/systm.h>
@@ -75,22 +76,43 @@ int uartopen(dev_t dev, int flag, int mode)
      * typed.
      *
      * Deliberately does NOT call the generic ttyopen() - that also
-     * establishes controlling-tty/process-group bookkeeping
-     * (u.u_ttyp, tp->t_pgrp), which getty's own pre-existing
-     * vhangup() call (its normal per-session setup, unrelated to this
-     * session's changes) then had something real to act on for the
-     * first time and sent SIGHUP into - confirmed on real GBAED
-     * hardware: login reached the "login:" prompt but a SIGHUP
-     * arrived and killed/reset whatever was reading it, right where
-     * ttyopen() was tried. This console's whole process chain
-     * (getty -> login -> shell, all one continuous boot lineage, not
-     * genuinely separate dial-in sessions) doesn't need real job
-     * control semantics for the echo fix this exists for, so skip
-     * the part that broke things and only take what's needed.
+     * establishes the controlling-tty association (u.u_ttyp/u.u_ttyd),
+     * which getty's own pre-existing vhangup() call (its normal
+     * per-session setup, unrelated to this session's changes) then had
+     * something real to act on for the first time and sent SIGHUP into -
+     * confirmed on real GBAED hardware: login reached the "login:"
+     * prompt but a SIGHUP arrived and killed/reset whatever was reading
+     * it, right where ttyopen() was tried. vhangup() is a no-op while
+     * u.u_ttyp == NULL (sys_inode.c), so leaving u.u_ttyp unset keeps it
+     * harmless. This console's whole process chain (getty -> login ->
+     * shell, all one continuous boot lineage, not genuinely separate
+     * dial-in sessions) doesn't need real controlling-tty semantics.
+     *
+     * But it DOES need the other half ttyopen() would set: the tty's
+     * foreground process group, tp->t_pgrp. ttyinput()'s ^C/^\ handling
+     * signals it via gsignal(t_pgrp, SIGINT), and gsignal() is a no-op
+     * while t_pgrp == 0 (kern_sig.c) - so without this, ^C did nothing
+     * at all, even at an idle prompt. Set t_pgrp (and put the opener in
+     * that group) here, WITHOUT touching u.u_ttyp, so ^C works while
+     * vhangup() stays a no-op.
+     *
+     * Skip init (pid 1): it holds /dev/console open for its own logging,
+     * and putting init into the signalled group would let a stray ^C
+     * deliver SIGINT to init (panic risk). init keeps p_pgrp == 0; the
+     * getty->login->shell lineage forks from init afterwards and claims
+     * its own group here when it opens the console, and the shell's
+     * child commands inherit it (fork copies p_pgrp) - so ^C reaches the
+     * running command and the shell, but never init.
      */
     struct tty *tp = &uartttys[minor(dev)];
+    struct proc *pp = u.u_procp;
 
     tp->t_state |= TS_CARR_ON;
+
+    if (pp->p_pid != 1 && pp->p_pgrp == 0) {
+        tp->t_pgrp = pp->p_pid;
+        pp->p_pgrp = pp->p_pid;
+    }
     return 0;
 }
 int uartclose(dev_t dev, int flag, int mode) { return 0; }
