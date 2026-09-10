@@ -35,6 +35,7 @@ uint8_t     ed_sd_cmd_rd(void);
 uint8_t     ed_sd_cmd_val(void);
 void        ed_sd_dat_wr(uint8_t data);
 uint8_t     ed_sd_dat_rd(void);
+extern int  ed_sd_dat_rd_wedged;        /* last ed_sd_dat_rd() hit inner cap */
 uint8_t     ed_sd_dma_rd(void *dst, int slen);
 uint8_t     ed_sd_dma_wr(const void *src);
 void        ed_sd_read_crc_ram(void *dst);
