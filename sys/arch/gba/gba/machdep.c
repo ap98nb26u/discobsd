@@ -192,6 +192,64 @@ static void check_irq_pc(void)
     }
 }
 
+/*
+ * Console input polling, shared by idle() and the Timer0 interrupt.
+ *
+ * Historically the console (software keyboard + UART) was sampled ONLY
+ * from idle() - fine while a process is blocked waiting for input, but a
+ * CPU-bound or output-scrolling command keeps the scheduler out of
+ * idle(), so nothing sampled input and ^C could not interrupt it. Also
+ * calling this from the 100Hz Timer0 interrupt (gba_do_schedule below)
+ * keeps input - including the software keyboard's own draw/state machine
+ * - serviced while a command runs, so the keyboard stays usable during
+ * scrolling output and a ^C lands as a posted SIGINT the command takes
+ * at its next syscall return (userret); output-heavy commands syscall
+ * constantly, so it is prompt. (A pure compute loop that never syscalls
+ * still won't see it until it does - the interrupt return path does not
+ * run userret - but that is rare and out of scope here.)
+ *
+ * console_poll_busy guards re-entrancy: idle() runs this with interrupts
+ * enabled, so a Timer0 tick can land in the middle of it and re-enter -
+ * the flag makes the interrupt's call a no-op then, so ttyinput()/swkbd
+ * state is never driven by two nested callers. A syscall itself runs
+ * with IME=0, so the interrupt can never preempt one mid-tty-operation;
+ * the only overlap to defend against is idle vs. interrupt.
+ */
+volatile int console_poll_busy;
+volatile int console_poll_ready;	/* set once idle() has run; see below */
+
+void
+console_input_poll(void)
+{
+    extern void swkbd_poll(void);
+    extern void uart_poll_input(void);
+
+    /*
+     * Only poll from the interrupt once the normal scheduler loop is
+     * live. console_poll_ready is set the first time idle() runs, which
+     * cannot happen until proc0/proc1 exist and the boot has reached the
+     * point of blocking a process - i.e. exactly the state idle()'s own
+     * polling already assumes. Before that, a Timer0 tick calling in here
+     * would run swkbd_poll()/ttyinput() in interrupt context far earlier
+     * in boot than they were ever exercised, on a stack that may not be
+     * ready; skip it. (idle() sets the flag just before it calls here, so
+     * idle()'s own call is never gated out.)
+     */
+    if (! console_poll_ready)
+        return;
+    if (console_poll_busy)
+        return;
+    console_poll_busy = 1;
+    /*
+     * swkbd BEFORE uart on purpose - swkbd injects via ttyinput(), whose
+     * echo lands in the tty output queue that uart_poll_input() drains;
+     * same ordering reason as the original idle() poll (see below).
+     */
+    swkbd_poll();
+    uart_poll_input();
+    console_poll_busy = 0;
+}
+
 IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
 {
     uint16_t flag = REG_IF;
@@ -214,6 +272,18 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
          * nothing ever checked whether it had expired.
          */
         hardclock((caddr_t)0, 0);
+
+        /*
+         * Sample console input here too, not just in idle(), so ^C and
+         * the software keyboard keep working while a command is running
+         * (the scheduler is not in idle() then). Guarded against idle()
+         * re-entrancy by console_poll_busy. NB: this runs in interrupt
+         * context on the interrupted code's stack (the user process's
+         * stack when a command was executing); swkbd_poll()/ttyinput()
+         * are heavier than hardclock(), so if a deep-stack crash ever
+         * appears right here, this call is the first thing to drop.
+         */
+        console_input_poll();
     }
     REG_IF = flag;
 }
@@ -502,11 +572,15 @@ idle(void)
 		 * echo arrived a pass too late and printed after the
 		 * command's output ("date" and its result ran together).
 		 */
-		extern void swkbd_poll(void);
-		swkbd_poll();
+		/*
+		 * Mark the scheduler loop live so the Timer0 interrupt may
+		 * also poll input (see console_input_poll()); set before the
+		 * call so idle()'s own poll is never gated out.
+		 */
+		console_poll_ready = 1;
 
-		extern void uart_poll_input(void);
-		uart_poll_input();
+		extern void console_input_poll(void);
+		console_input_poll();
 
 		/*
 		 * Blink the console's block cursor while idle - i.e. only
