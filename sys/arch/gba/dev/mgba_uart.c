@@ -21,19 +21,27 @@ void uart_poll_input(void);
 extern struct tty uartttys[];
 
 void uartinit(int unit) {
+#ifdef MGBA_LOG
     *(volatile unsigned short*)0x04FFF780 = 0xC0DE; // mGBA Enable
+#endif
 
     /*
-     * mGBA's debug log is emulator-only, and the on-screen text
-     * console is slow to work with over a rebuild/photo cycle; mirror
-     * the console unit's output to real hardware UART too (and read
-     * console input from it), for interactive debugging over a serial
-     * cable. Only the console unit gets set up here -- uartinit() is
-     * also called once for the non-console UART during device attach.
+     * Two optional output sinks mirror the on-screen (gtxt) console,
+     * each selected by a kernel config option (see the GBA/GBAED Config
+     * files):
+     *   MGBA_LOG        - mirror console output to mGBA's emulator debug
+     *                     log. Emulator-only; a no-op write on real
+     *                     hardware, so the GBAED build leaves it out.
+     *   SERIAL_CONSOLE  - real UART over the link cable (gsio), for
+     *                     interactive debugging; the GBAED build enables
+     *                     it, the cable-free GBA demo build does not (it
+     *                     would otherwise spin on CTS with no peer).
+     * Only the console unit gets set up here -- uartinit() is also
+     * called once for the non-console UART during device attach.
      */
     if (unit == CONS_MINOR) {
         gtxt_init(0xFFFF, 0x0000); // white on black
-#ifndef NO_SERIAL_CONSOLE
+#ifdef SERIAL_CONSOLE
         gsio_init(UART_BAUD);
 #endif
     }
@@ -241,7 +249,7 @@ uart_poll_input(void)
      * would hang idle() - and with it swtch()'s entire wait loop,
      * i.e. the whole scheduler - forever.
      */
-#ifndef NO_SERIAL_CONSOLE
+#ifdef SERIAL_CONSOLE
     for (n = 0; n < 32 && gsio_avail(); n++) {
         int rc = gsio_getc_bounded();
         if (rc < 0)
@@ -281,7 +289,7 @@ int uartselect(dev_t dev, int rw)
 
 /* r_read / r_write に相当する関数名 (conf.cの定義に合わせる) */
 char uartgetc(dev_t dev) {
-#ifndef NO_SERIAL_CONSOLE
+#ifdef SERIAL_CONSOLE
     return (char)gsio_getc();
 #else
     return (char)0;
@@ -290,12 +298,12 @@ char uartgetc(dev_t dev) {
 
 void uartputc(dev_t dev, char c) {
     gtxt_putc(c);
-#ifndef NO_SERIAL_CONSOLE
+#ifdef SERIAL_CONSOLE
     gsio_putc((unsigned char)c);
 #endif
 
+#ifdef MGBA_LOG
     MGBA_REG_DEBUG_ENABLE = 0xC0DE; // mGBA Enable
-#if 1 // buffering
     static int i = 0;
     if ((c && i < 255) && c != '\n') {
         MGBA_REG_DEBUG_BUFFER[i] = c;                // Buffer
@@ -305,14 +313,11 @@ void uartputc(dev_t dev, char c) {
         MGBA_REG_DEBUG_FLAGS = 0x100|MGBA_LOG_INFO;  // Send Info Log
         i = 0;
     }
-#else
-    MGBA_REG_DEBUG_BUFFER[0] = c;
-    MGBA_REG_DEBUG_BUFFER[1] = '\0';
-    MGBA_REG_DEBUG_FLAGS = 0x100|MGBA_LOG_INFO;  // Send Info Log
 #endif
 }
 
 void uartputs(dev_t dev, const char *s) {
+#ifdef MGBA_LOG
     MGBA_REG_DEBUG_ENABLE = 0xC0DE; // mGBA Enable
     int i = 0;
     while (s[i] && i < 255) {
@@ -321,6 +326,9 @@ void uartputs(dev_t dev, const char *s) {
     }
     MGBA_REG_DEBUG_BUFFER[i] = '\0';                // Buffer
     MGBA_REG_DEBUG_FLAGS = 0x100|MGBA_LOG_INFO;  // Send Info Log
+#else
+    (void)s;
+#endif
 }
 
 /* ioconf.c が期待するドライバ構造体 */
