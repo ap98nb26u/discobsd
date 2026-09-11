@@ -218,6 +218,39 @@ static void check_irq_pc(void)
 volatile int console_poll_busy;
 volatile int console_poll_ready;	/* set once idle() has run; see below */
 
+/*
+ * Console screen blanking (roadmap #6), the LCD console's screen-saver.
+ *
+ * console_blank_secs is the idle timeout in seconds: after that many
+ * seconds with no console activity the on-screen display is blanked
+ * (gtxt_blank(1), which disables BG2 so only a black backdrop shows -- see
+ * gba_text.c); any activity restores it. 0 disables blanking entirely.
+ * The compile-time default comes from the SCREEN_BLANK_SECS config option
+ * (0 if unset); it is also reachable at runtime via the machdep.console_blank
+ * sysctl (gba/sysctl.c) so it can be tuned or switched off on a live system.
+ *
+ * console_last_active holds time.tv_sec of the most recent activity.
+ * "Activity" is any console output (gtxt_putc) or input (a software-keyboard
+ * button or a serial byte); each calls console_activity() below, which both
+ * wakes the screen and restarts the countdown. The blank itself is applied
+ * from idle() (see below), the one place guaranteed to run only when nothing
+ * else is - i.e. exactly when the console is truly idle.
+ */
+#ifndef SCREEN_BLANK_SECS
+#define SCREEN_BLANK_SECS 0
+#endif
+int console_blank_secs = SCREEN_BLANK_SECS;
+static time_t console_last_active;
+
+void
+console_activity(void)
+{
+    extern void gtxt_blank(int);
+
+    console_last_active = time.tv_sec;
+    gtxt_blank(0);
+}
+
 void
 console_input_poll(void)
 {
@@ -583,6 +616,20 @@ idle(void)
 		console_input_poll();
 
 		/*
+		 * Screen blanking (roadmap #6): once the console has been idle
+		 * (no output or input) for console_blank_secs seconds, blank the
+		 * LCD; console_activity() unblanks it on the next output/input.
+		 * Checked here in idle() because a blank only makes sense when
+		 * nothing is running - and time.tv_sec advances only about once a
+		 * second, so a per-idle-pass compare is cheap. 0 disables it.
+		 */
+		extern void gtxt_blank(int);
+		extern int gtxt_is_blanked(void);
+		if (console_blank_secs > 0 && !gtxt_is_blanked() &&
+		    (time.tv_sec - console_last_active) >= console_blank_secs)
+			gtxt_blank(1);
+
+		/*
 		 * Blink the console's block cursor while idle - i.e. only
 		 * when nothing is runnable, which at the shell means we are
 		 * waiting for the user to type. A big solid square, 0.5s on
@@ -596,7 +643,8 @@ idle(void)
 		 * blocks or smears output.
 		 */
 		extern void gtxt_cursor(int on);
-		gtxt_cursor(lbolt < hz / 2);
+		if (!gtxt_is_blanked())
+			gtxt_cursor(lbolt < hz / 2);
 	}
 
 	/* Restore previous SPL. */

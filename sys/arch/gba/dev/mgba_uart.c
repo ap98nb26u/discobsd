@@ -18,6 +18,7 @@ void uartinit(int);
 void uartputc(dev_t dev, char c);
 char uartgetc(dev_t dev);
 void uart_poll_input(void);
+void console_activity(void);		/* machdep.c: console screen-saver */
 extern struct tty uartttys[];
 
 void uartinit(int unit) {
@@ -254,6 +255,8 @@ uart_poll_input(void)
         int rc = gsio_getc_bounded();
         if (rc < 0)
             break;
+        /* A serial byte is console activity: wake the screen-saver. */
+        console_activity();
         ttyinput(rc, tp);
     }
 #endif

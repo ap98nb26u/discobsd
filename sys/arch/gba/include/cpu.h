@@ -15,7 +15,8 @@
 #define	CPU_FREQ_KHZ		4	/* processor clock in kHz */
 #define	CPU_BUS_KHZ		5	/* i/o bus clock in kHz */
 #define	CPU_MPU			6	/* node: memory protection unit */
-#define	CPU_MAXID		7	/* number of valid machdep ids */
+#define	CPU_CONSBLANK		7	/* int: console screen-blank timeout (sec) */
+#define	CPU_MAXID		8	/* number of valid machdep ids */
 
 #ifndef	KERNEL
 #define	CTL_MACHDEP_NAMES { \
@@ -26,5 +27,6 @@
 	{ "cpu_khz", CTLTYPE_INT }, \
 	{ "bus_khz", CTLTYPE_INT }, \
 	{ "mpu", CTLTYPE_NODE }, \
+	{ "console_blank", CTLTYPE_INT }, \
 }
 #endif	/* !KERNEL */

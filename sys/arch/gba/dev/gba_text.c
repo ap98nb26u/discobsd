@@ -227,9 +227,55 @@ gtxt_init(unsigned short fg, unsigned short bg)
     gtxt_cls();
 }
 
+/*
+ * Screen blanking (the console screen-saver, roadmap #6). "on" turns the
+ * LCD image off by disabling BG2: the display then shows nothing but the
+ * backdrop colour (palette entry 0), which we force to black. VRAM is left
+ * untouched, so the text reappears intact the instant BG2 is re-enabled.
+ *
+ * This is a plain register write - deliberately NOT a BIOS power-down SWI
+ * (Halt/Stop). The BIOS reset/Halt SWIs behave inconsistently under mGBA
+ * (the undocumented HardReset SWI used by cpu_reboot() hangs the emulator
+ * inside the BIOS), so blanking stays SWI-free to work identically on real
+ * hardware and in the emulator. The original GBA's backlight is not
+ * software-controllable, so this darkens the image and stops BG/VRAM
+ * fetches rather than cutting the backlight; it prevents a static image
+ * from sitting on the panel and is the console-blanking behaviour other
+ * systems expose (blank on idle, restore on activity).
+ */
+static int gtxt_blanked;
+
+void
+gtxt_blank(int on)
+{
+    if (on == gtxt_blanked)
+        return;
+    gtxt_blanked = on;
+    if (on) {
+        *(volatile unsigned short *)0x5000000 = 0x0000; /* backdrop -> black */
+        REG_DISPCNT = 3;              /* Mode 3, BG2 OFF -> backdrop only */
+    } else {
+        REG_DISPCNT = 3 | (1 << 10);  /* Mode 3, BG2 ON  -> text visible */
+    }
+}
+
+int
+gtxt_is_blanked(void)
+{
+    return gtxt_blanked;
+}
+
 void
 gtxt_putc(char c)
 {
+    /*
+     * Console output is activity: wake the screen if it was blanked and
+     * restart the idle-blank countdown, so kernel/program output is never
+     * printed onto a dark screen (see console_activity() in machdep.c).
+     */
+    extern void console_activity(void);
+    console_activity();
+
     /*
      * Rub out the block cursor (if lit) before drawing anything, so it
      * neither gets scrolled up as a stray block nor is left behind at
