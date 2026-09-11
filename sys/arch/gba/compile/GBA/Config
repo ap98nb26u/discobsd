@@ -35,20 +35,24 @@ device          uart1                       # USART1 as console
 device          uart2                       # USART2
 options         "UART_BAUD=115200"          # default speed
 
-# Use USART1 on debug header as serial console
-options         "CONS_MAJOR=UART_MAJOR"     # UART device
+# Console. Output always goes to the on-screen LCD text console (gtxt),
+# and input always comes from the on-screen software keyboard (swkbd);
+# those are unconditional. Two optional mirror/aux sinks are selected
+# here (see mgba_uart.c):
+#
+#   MGBA_LOG - also mirror console output to mGBA's emulator debug log.
+#              This is the mGBA/demo build, so enable it. (Harmless but
+#              pointless on real hardware, hence omitted from GBAED.)
+#
+# SERIAL_CONSOLE is deliberately NOT set: this standalone build runs with
+# no serial cable, and the SIO/UART link-cable console (gsio) busy-waits
+# on CTS / a per-byte send-complete flag that never complete with nothing
+# wired up (~0.5s per character, and it would also mirror output to any
+# peer). Leaving it out keeps the LCD console full-speed and cable-free;
+# GBAED opts in to SERIAL_CONSOLE for interactive debugging over a cable.
+options         "CONS_MAJOR=UART_MAJOR"     # console is the uart tty
 options         "CONS_MINOR=0"              # uart1 is /dev/tty0
-
-# Standalone-demo build: the console is the LCD text screen driven by
-# the on-screen software keyboard, with NO serial cable attached. The
-# SIO/UART link-cable console (gsio_*) hardware-flow-controls on CTS
-# and a per-byte send-complete flag that never complete with nothing
-# wired to the cable -- costing ~0.5s per character on real hardware
-# and still mirroring output to a serial peer when one IS attached.
-# Compile the serial path out entirely for this config so the LCD
-# console runs at full speed cable-free; the GBAED config keeps serial
-# for interactive debugging over a cable.
-options         "NO_SERIAL_CONSOLE"         # LCD-only console, no gsio
+options         "MGBA_LOG"                  # mirror console to mGBA log
 
 # SDIO port
 #controller      sdio0                       # SDIO port
