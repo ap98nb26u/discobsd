@@ -30,6 +30,8 @@
 #include <machine/cpu.h>
 #include <machine/mpuvar.h>
 
+extern int console_blank_secs;		/* gba/machdep.c: screen-saver timeout */
+
 /*
  * Errno messages.
  */
@@ -329,6 +331,18 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case CPU_MPU:
 		return mpu_sysctl(name + 1, namelen - 1, oldp, oldlenp, newp,
 		    newlen);
+
+	case CPU_CONSBLANK:
+		/*
+		 * Console screen-blank idle timeout, in seconds (0 = never
+		 * blank). Backs the LCD console screen-saver in gba/machdep.c;
+		 * writable so it can be tuned or disabled on a live system, e.g.
+		 * "sysctl -w machdep.console_blank=5".
+		 */
+		if (namelen != 1)
+			return ENOTDIR;
+		return sysctl_int(oldp, oldlenp, newp, newlen,
+		    &console_blank_secs);
 
 	default:
 		return EOPNOTSUPP;

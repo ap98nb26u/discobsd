@@ -284,6 +284,16 @@ swkbd_poll(void)
 	swkbd_prev = down;
 
 	/*
+	 * Any button held is console activity: keep the screen awake (and
+	 * wake it if the screen-saver had blanked it). Waking is a side
+	 * effect - the press is still processed normally below.
+	 */
+	if (down) {
+		extern void console_activity(void);
+		console_activity();
+	}
+
+	/*
 	 * Auto-repeat: while exactly the same repeatable key(s) stay held,
 	 * measure elapsed time with the free-running Timer1 (REG_TM1CNT_L,
 	 * 16384Hz, IME-independent - see irq_enable() in machdep.c). Wait
