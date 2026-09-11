@@ -79,39 +79,52 @@ hostname "discobsd"
 
 rm -f /etc/nologin
 
-# Patch /etc/motd.
+# Patch /etc/motd: put the running kernel version on line 1 and keep any
+# custom text from the first blank line down - the stock 2.11BSD rc
+# behavior. Skipped on a ROM-backed root (kern.romroot): /etc/motd (and
+# /tmp) cannot be written there, so the committed placeholder motd stands.
 #
-# The original version of this piped `sysctl -n kern.version` through
-# `sed 1q`, extracted everything from the first blank line onward in
-# the old motd via a second sed, and only replaced motd if `cmp` said
-# it actually changed - preserving any custom text an admin appended
-# below the version banner. That needed sed, cmp, cp and a pipe, none
-# of which are worth depending on here: sed hung on real GBAED
-# hardware (reproducibly, at process entry, before any syscall -
-# never reproduced under mGBA) for reasons not yet understood, and
-# this whole step is cosmetic. Just overwrite motd outright.
-echo -n "Updating motd..."
-sysctl -n kern.version >/etc/motd
-chmod 664 /etc/motd
-chown root.wheel /etc/motd
-echo "done"
+# This had been simplified to a plain `sysctl -n kern.version >/etc/motd`
+# overwrite because `sed` reportedly hung at process entry on real GBAED
+# hardware. That was the same stale-userland/veneer class of exec failure
+# since resolved (and the SD userland has been rebuilt many times since),
+# so the original sed/cmp/cp logic is restored. If sed ever hangs here
+# again, boot stops right after "Updating motd..." - that is the signal.
+# NB: no "if ! cmd" here - this port's Bourne sh has no "!" negation
+# reserved word (it tries to exec "!": "/etc/rc: !: not found"), so the
+# ROM-root case is the empty "then" branch and the real work is in "else".
+if sysctl -q kern.romroot; then
+    :   # ROM-backed root: /etc/motd (and /tmp) are read-only, skip.
+else
+    echo -n "Updating motd..."
+    if [ ! -f /etc/motd ]; then
+        echo "" >/etc/motd && chmod 664 /etc/motd && chown root.wheel /etc/motd
+    fi
+    T=/tmp/_motd
+    sysctl -n kern.version | sed 1q >$T
+    sed -n '/^$/,$p' </etc/motd >>$T
+    cmp -s $T /etc/motd || cp $T /etc/motd
+    rm -f $T
+    echo "done"
+fi
 
 echo -n "Starting daemons:"
-# update/cron temporarily disabled - update.c is the first program in this
-# port's boot sequence to use setitimer()/sigsuspend() (a 30s SIGALRM
-# repeat, waited on via sigsuspend()), and boot hangs here on both mGBA
-# and real GBAED hardware (real hardware hangs slightly earlier than
-# mGBA, right after update's own execve returns - same kind of platform
-# timing difference seen with sed hanging on real hardware only, ../etc/rc
-# sed changes, this session). Kernel-side, schedcpu()'s once-a-second
-# p_realtimer decrement + psignal(SIGALRM) (kern_synch.c) and daemon()'s
-# fork()+_exit(0) (lib/libc/gen/daemon.c) both look correct on inspection,
-# but this is the *first* real-world exercise of that path on this port -
-# not yet proven correct end to end. Not essential for reaching a login
-# prompt, so skipped for now rather than blocking on it - re-enable once
-# the itimer/SIGALRM/sigsuspend chain has been debugged.
-#update && echo -n "update"
-#cron && echo -n "cron"
+# update (periodic sync) and cron both daemonize and rely on
+# setitimer()/SIGALRM. Starting update used to hang boot here: delivering
+# a caught signal was broken on this port (sigtramp had never been ported
+# to the GBA simulated-SWI syscall ABI, so a handler ran off into garbage
+# - the update hang and the sed hang above were the same root cause),
+# fixed in commit 447358a. With signal delivery working they are safe to
+# start. Skipped on a ROM-backed root (kern.romroot, the plain GBA/mrams
+# build): update's periodic sync is pointless on a read-only root, cron
+# cannot write its logs, and that build's tiny RAM/swap makes extra
+# resident daemons costly.
+if sysctl -q kern.romroot; then
+    :   # ROM-backed root: skip update/cron (see note above).
+else
+    update && echo -n " update"
+    cron && echo -n " cron"
+fi
 echo
 
 #/etc/rc.local
