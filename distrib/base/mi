@@ -21,6 +21,8 @@ dir /usr/sbin
 dir /usr/libexec
 dir /home
 dir /var
+dir /var/cron
+dir /var/cron/tabs
 dir /var/lock
 dir /var/log
 dir /var/run
