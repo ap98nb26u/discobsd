@@ -20,6 +20,14 @@ options         "CPU_KHZ=16777"             # Oscillator frequency of CPU core
 options         "BUS_KHZ=16777"             # Frequency of peripheral bus
 options         "HALTREBOOT"                # If halted, press key to reboot
 
+# On-screen console screen-saver: blank the LCD after this many idle
+# seconds (no console input or output), restore on any activity. Blanking
+# just disables BG2 so a black backdrop shows -- VRAM is kept, so the text
+# returns intact; no BIOS SWI is used, so it behaves the same on real
+# hardware and under mGBA. 0 disables it. Tunable at runtime via the
+# machdep.console_blank sysctl.
+options         "SCREEN_BLANK_SECS=60"      # blank LCD after 60s idle
+
 #options        "GLOBAL_DEBUG"              # Enable debugging
 options         "DIAGNOSTIC"                # Enable diagnostics
 

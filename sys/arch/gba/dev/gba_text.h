@@ -19,6 +19,10 @@ int gtxt_cols(void);
 int gtxt_rows(void);
 void gtxt_cursor(int on);
 
+/* Screen blanking (console screen-saver); see gtxt_blank() in gba_text.c. */
+void gtxt_blank(int on);
+int gtxt_is_blanked(void);
+
 #endif /* KERNEL */
 
 #endif /* _GBA_DEV_TEXT_H_ */
