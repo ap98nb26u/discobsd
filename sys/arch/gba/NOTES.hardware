@@ -124,6 +124,12 @@ SWIs actually issued:
               r0=0 (cold-boot target). Chosen over the documented
               SoftReset (swi 0x00), which only clears IWRAM/mode stacks,
               not I/O space, and left occasional post-reboot hangs.
+              NB: HardReset works on real hardware (reboots to the
+              EverDrive menu) but hangs inside the BIOS under mGBA -- the
+              emulator does not complete this undocumented SWI (observed
+              stuck in BIOS ROM ~0x1948 after "syncing disks... done").
+              This is the reason the screen-blanking feature (#6, below)
+              deliberately uses no SWI at all.
 
 SWIs deliberately NOT used:
   - System calls do NOT use a real SWI. The GBA SWI vector 0x00000018
@@ -134,16 +140,30 @@ SWIs deliberately NOT used:
     pointer.  machparam.h:124
   - Power-saving BIOS calls (Halt swi 0x02, Stop, IntrWait,
     VBlankIntrWait) are unused. idle() busy-waits with IME toggling
-    instead of BIOS Halt.
+    instead of BIOS Halt. (Screen blanking, roadmap #6, is implemented
+    WITHOUT any of these -- see below -- to stay emulator-safe given the
+    HardReset-under-mGBA problem noted above.)
 
 BIOS mechanism relied upon: the BIOS IRQ dispatch (reads the user
 vector at 0x03007FFC, and "bx lr" returns through the BIOS).
 
 
+Display power (roadmap #6, DONE):
+  Console screen blanking is implemented as a plain register write, not a
+  BIOS SWI. After console_blank_secs idle seconds (SCREEN_BLANK_SECS
+  option, default 60; runtime-tunable via the machdep.console_blank
+  sysctl) idle() calls gtxt_blank(1), which clears BG2 in REG_DISPCNT so
+  only the (black) backdrop shows; any console output or input calls
+  console_activity() to restore it. VRAM is untouched, so text returns
+  intact. The GBA's backlight is not software-controllable, so this stops
+  BG/VRAM fetch and darkens the panel rather than cutting the backlight.
+  gba_text.c: gtxt_blank(); gba/machdep.c: console_activity()/idle().
+
 FOLLOW-UP OPPORTUNITIES (not yet done)
 --------------------------------------
-  * idle() busy-waits; BIOS Halt (swi 0x02) would cut power/heat on
-    real hardware (relates to roadmap #6 screen blanking). Needs a
-    wake source -- likely keypad IRQ.
+  * idle() busy-waits; BIOS Halt (swi 0x02) would additionally cut CPU
+    power/heat on real hardware (a complement to the display blanking of
+    #6). Needs a wake source -- likely keypad IRQ -- and, given the mGBA
+    SWI problems above, would want to be real-hardware-gated.
   * DMA1/2 (sound FIFO) are free, to be claimed by roadmap #4 sound.
   * Keypad IRQ unused (polling suffices today; needed if Halt is added).
