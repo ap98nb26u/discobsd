@@ -25,6 +25,8 @@ typedef unsigned short uint16_t;
 
 #define REG_TM0CNT_L	(*(volatile uint16_t *)(REG_BASE+0x0100))
 #define REG_TM0CNT_H	(*(volatile uint16_t *)(REG_BASE+0x0102))
+#define REG_TM1CNT_L	(*(volatile uint16_t *)(REG_BASE+0x0104))
+#define REG_TM1CNT_H	(*(volatile uint16_t *)(REG_BASE+0x0106))
 
 /* Keypad input (active low: a 0 bit = pressed). See swkbd.c. */
 #define REG_KEYINPUT	(*(volatile uint16_t *)(REG_BASE+0x0130))

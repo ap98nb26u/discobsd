@@ -230,13 +230,22 @@ swkbd_move(int dx, int dy)
 }
 
 /*
- * Auto-repeat (frames, at the ~60Hz sample rate below): hold a movement
- * key or A for SWKBD_REPEAT_DELAY (~1s) and it then fires every
- * SWKBD_REPEAT_RATE frames (~0.25s). SELECT, shift and Enter never
+ * Auto-repeat: hold a movement key or A for SWKBD_REPEAT_DELAY and it
+ * then fires every SWKBD_REPEAT_RATE. SELECT, shift and Enter never
  * repeat.
+ *
+ * Timed off myticks (the ~100Hz Timer0 count), NOT the number of frames
+ * this function actually processes. Both matter now that swkbd_poll() is
+ * driven from the Timer0 interrupt as well as idle(): while a command's
+ * output scrolls, each write() runs with interrupts masked (IME=0) so
+ * the interrupt - and thus this poll's once-per-frame sampling - is
+ * starved, and a frame-counted repeat would take many real seconds to
+ * reach its delay (looked like "repeat doesn't work while scrolling").
+ * myticks advances in real time regardless of how sparsely we sample, so
+ * a held key repeats at the right wall-clock cadence even mid-scroll.
  */
-#define SWKBD_REPEAT_DELAY	60
-#define SWKBD_REPEAT_RATE	15
+#define SWKBD_REPEAT_DELAY	16384	/* ~1s at Timer1's 16384Hz */
+#define SWKBD_REPEAT_RATE	4096	/* ~0.25s */
 #define SWKBD_REPEAT_KEYS	(KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT | KEY_A)
 
 /*
@@ -248,7 +257,9 @@ swkbd_poll(void)
 {
 	static uint16_t last_vc;
 	static uint16_t held_prev;	/* repeatable keys held last frame */
-	static int hold_ctr;
+	static uint16_t held_since;	/* Timer1 value when this held run began */
+	static uint16_t last_rep;	/* Timer1 value at the last repeat fire */
+	static int repeating;		/* past the initial delay for held_prev */
 	uint16_t vc, raw, down, fresh, rep, act;
 
 	/*
@@ -274,18 +285,37 @@ swkbd_poll(void)
 
 	/*
 	 * Auto-repeat: while exactly the same repeatable key(s) stay held,
-	 * count frames; past the initial delay, fire once every RATE frames.
+	 * measure elapsed time with the free-running Timer1 (REG_TM1CNT_L,
+	 * 16384Hz, IME-independent - see irq_enable() in machdep.c). Wait
+	 * SWKBD_REPEAT_DELAY for the first repeat, then fire every
+	 * SWKBD_REPEAT_RATE. Using real hardware time rather than a count of
+	 * processed frames keeps the cadence correct even while a command's
+	 * scrolling output starves this poll (the interrupt-driven clocks
+	 * stall under IME=0, but Timer1 does not). All deltas are sub-second,
+	 * far under Timer1's 4s 16-bit wrap, so 16-bit unsigned math is fine;
+	 * the delay is checked only until `repeating` latches, so an
+	 * indefinitely-held key never trips the wrap.
 	 */
 	rep = 0;
 	{
 		uint16_t r = (uint16_t)(down & SWKBD_REPEAT_KEYS);
+		uint16_t t = REG_TM1CNT_L;
+
 		if (r != 0 && r == held_prev) {
-			hold_ctr++;
-			if (hold_ctr >= SWKBD_REPEAT_DELAY &&
-			    (hold_ctr - SWKBD_REPEAT_DELAY) % SWKBD_REPEAT_RATE == 0)
+			if (! repeating) {
+				if ((uint16_t)(t - held_since) >= SWKBD_REPEAT_DELAY) {
+					repeating = 1;
+					rep = r;
+					last_rep = t;
+				}
+			} else if ((uint16_t)(t - last_rep) >= SWKBD_REPEAT_RATE) {
 				rep = r;
-		} else
-			hold_ctr = 0;
+				last_rep = t;
+			}
+		} else {
+			held_since = t;
+			repeating = 0;
+		}
 		held_prev = r;
 	}
 	act = (uint16_t)(fresh | rep);		/* fresh presses + repeats */
