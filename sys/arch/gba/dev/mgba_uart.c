@@ -147,6 +147,7 @@ int uartopen(dev_t dev, int flag, int mode)
         tp->t_pgrp = pp->p_pid;
         pp->p_pgrp = pp->p_pid;
     }
+
     return 0;
 }
 int uartclose(dev_t dev, int flag, int mode) { return 0; }
@@ -215,6 +216,19 @@ int uartioctl(dev_t dev, u_int cmd, caddr_t addr, int flag)
      */
     register struct tty *tp = &uartttys[minor(dev)];
     int error;
+
+    /*
+     * The on-screen (LCD) console has a fixed 30x15 geometry, so pin its
+     * window size on every ioctl - in particular so TIOCGWINSZ always
+     * reports 30x15 to full-screen apps (vi). login(1) deliberately clears
+     * the window size to 0x0 on local login (login.c, "if (!hflag)"), and
+     * nothing on a hardwired console re-establishes it; re-asserting it
+     * here, just before ttioctl() reads or writes it, keeps it authoritative.
+     */
+    if (minor(dev) == CONS_MINOR) {
+        tp->t_winsize.ws_col = 30;
+        tp->t_winsize.ws_row = 15;
+    }
 
     error = ttioctl(tp, cmd, addr, flag);
     if (error < 0)
