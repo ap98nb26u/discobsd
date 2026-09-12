@@ -105,8 +105,8 @@ static const unsigned char rowlen[] = {
 };
 #define NROWS		(sizeof(rows)/sizeof(rows[0]))
 
-#define KB_FG		0xFFFF		/* white  (BGR555) */
-#define KB_BG		0x0000		/* black */
+#define KB_FG		GTXT_WHITE	/* keyboard: white on black */
+#define KB_BG		GTXT_BLACK
 
 static int	swkbd_shown;
 static int	swkbd_shift;		/* sticky: upper case / alternate symbol */
