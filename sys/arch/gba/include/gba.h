@@ -28,6 +28,16 @@ typedef unsigned short uint16_t;
 #define REG_TM1CNT_L	(*(volatile uint16_t *)(REG_BASE+0x0104))
 #define REG_TM1CNT_H	(*(volatile uint16_t *)(REG_BASE+0x0106))
 
+/* Sound. PSG channel 1 (square with sweep) + the master controls; used by
+ * gba_sound.c for the console beep. DirectSound (DMA) FIFOs are not here. */
+#define REG_SOUND1CNT_L	(*(volatile uint16_t *)(REG_BASE+0x0060))	/* ch1 sweep */
+#define REG_SOUND1CNT_H	(*(volatile uint16_t *)(REG_BASE+0x0062))	/* ch1 duty/len/env */
+#define REG_SOUND1CNT_X	(*(volatile uint16_t *)(REG_BASE+0x0064))	/* ch1 freq/control */
+#define REG_SOUNDCNT_L	(*(volatile uint16_t *)(REG_BASE+0x0080))	/* master vol/enables */
+#define REG_SOUNDCNT_H	(*(volatile uint16_t *)(REG_BASE+0x0082))	/* PSG/DMA mix ratio */
+#define REG_SOUNDCNT_X	(*(volatile uint16_t *)(REG_BASE+0x0084))	/* master sound enable */
+#define REG_SOUNDBIAS	(*(volatile uint16_t *)(REG_BASE+0x0088))	/* output bias/rate */
+
 /* Keypad input (active low: a 0 bit = pressed). See swkbd.c. */
 #define REG_KEYINPUT	(*(volatile uint16_t *)(REG_BASE+0x0130))
 #define KEY_A		0x0001
