@@ -200,7 +200,7 @@ const struct cdevsw cdevsw[] = {
     defined(UART5_ENABLED) || defined(UART6_ENABLED)
 		uartopen,	uartclose,	uartread,	uartwrite,
 		uartioctl,	nullstop,	uartttys,	uartselect,
-		nostrategy,	uartgetc,	uartputc,
+		nostrategy,	uartgetc,	uartputc_kmsg,
 #else
 		NOCDEV
 #endif

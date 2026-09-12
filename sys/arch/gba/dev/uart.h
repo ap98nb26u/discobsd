@@ -15,6 +15,7 @@ int             uartioctl(dev_t dev, u_int cmd, caddr_t addr, int flag);
 void            uartintr(dev_t dev);
 void            uartstart(struct tty *tp);
 void            uartputc(dev_t dev, char c);
+void            uartputc_kmsg(dev_t dev, char c); /* cdevsw r_write: kernel msgs */
 char            uartgetc(dev_t dev);
 
 extern struct   tty uartttys[NUART];

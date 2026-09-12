@@ -16,6 +16,7 @@
 
 void uartinit(int);
 void uartputc(dev_t dev, char c);
+void uartputc_kmsg(dev_t dev, char c);	/* r_write slot: kernel msgs (green) */
 char uartgetc(dev_t dev);
 void uart_poll_input(void);
 void console_activity(void);		/* machdep.c: console screen-saver */
@@ -49,7 +50,7 @@ void uartinit(int unit) {
      * called once for the non-console UART during device attach.
      */
     if (unit == CONS_MINOR) {
-        gtxt_init(0xFFFF, 0x0000); // white on black
+        gtxt_init(GTXT_WHITE, GTXT_BLACK); // console: white on black
 #ifdef MGBA_LOG
         /*
          * Detect mGBA at runtime rather than assuming it. Writing 0xC0DE to
@@ -342,6 +343,22 @@ void uartputc(dev_t dev, char c) {
         }
     }
 #endif
+}
+
+/*
+ * Console-put for KERNEL messages only. cnputc() (sys/dev/cons.c) reaches
+ * the console through the cdevsw r_write slot, and that slot is wired to
+ * THIS function (see conf.c); ordinary program/tty output calls uartputc()
+ * directly and never comes through here. So bracketing the character in the
+ * kernel-message colour tints exactly the kernel's own printf output green
+ * on the LCD, leaving login/shell/program output and the keyboard in the
+ * normal console colour (roadmap #8). The green applies only on the gtxt
+ * LCD console; the serial mirror and mGBA log are plain text.
+ */
+void uartputc_kmsg(dev_t dev, char c) {
+    gtxt_msgcolor(1);
+    uartputc(dev, c);
+    gtxt_msgcolor(0);
 }
 
 void uartputs(dev_t dev, const char *s) {

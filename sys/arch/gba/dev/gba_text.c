@@ -27,6 +27,7 @@ extern const unsigned char gtxt_font[2048];
 
 static unsigned short gtxt_fg;
 static unsigned short gtxt_bg;
+static unsigned short gtxt_fg_normal;	/* console fg to restore after a msg */
 static int gtxt_curx;		/* column 0..GTXT_COLS (COLS = deferred wrap) */
 static int gtxt_cury;		/* row of the current line (absolute cell) */
 static int gtxt_cursor_on;	/* is the block cursor currently lit? */
@@ -223,8 +224,23 @@ gtxt_init(unsigned short fg, unsigned short bg)
 {
     REG_DISPCNT = 3 | (1 << 10);   /* Mode 3, enable BG2 */
     gtxt_fg = fg;
+    gtxt_fg_normal = fg;
     gtxt_bg = bg;
     gtxt_cls();
+}
+
+/*
+ * Kernel messages (the printf path) are drawn in green to set them apart
+ * from ordinary console/program output, matching the raw-framebuffer
+ * console convention (roadmap #8). uartputc_kmsg() (mgba_uart.c) - which
+ * only the kernel's cnputc() reaches - brackets each character it emits
+ * with gtxt_msgcolor(1)/gtxt_msgcolor(0); everything else stays the normal
+ * console colour.
+ */
+void
+gtxt_msgcolor(int on)
+{
+    gtxt_fg = on ? GTXT_GREEN : gtxt_fg_normal;
 }
 
 /*
