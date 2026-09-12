@@ -48,9 +48,14 @@ options         "UART_BAUD=115200"          # default speed
 # those are unconditional. Two optional mirror/aux sinks are selected
 # here (see mgba_uart.c):
 #
-#   MGBA_LOG - also mirror console output to mGBA's emulator debug log.
-#              This is the mGBA/demo build, so enable it. (Harmless but
-#              pointless on real hardware, hence omitted from GBAED.)
+#   MGBA_LOG - compile in the mGBA emulator debug-log mirror. Whether it
+#              is actually used is decided AT RUNTIME: uartinit() probes for
+#              mGBA (writes 0xC0DE to the debug-enable register, expects
+#              0x1DEA back) and only mirrors to the log when the emulator is
+#              present, printing "mGBA detected." to the boot log. So this
+#              same GBA kernel is correct on real hardware too (silent on
+#              the log there) - handy for demoing the one ROM on both. The
+#              GBAED build only ever runs on hardware, so it omits this.
 #
 # SERIAL_CONSOLE is deliberately NOT set: this standalone build runs with
 # no serial cable, and the SIO/UART link-cable console (gsio) busy-waits

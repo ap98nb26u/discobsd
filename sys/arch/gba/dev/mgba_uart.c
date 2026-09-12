@@ -21,18 +21,26 @@ void uart_poll_input(void);
 void console_activity(void);		/* machdep.c: console screen-saver */
 extern struct tty uartttys[];
 
-void uartinit(int unit) {
-#ifdef MGBA_LOG
-    *(volatile unsigned short*)0x04FFF780 = 0xC0DE; // mGBA Enable
-#endif
+/*
+ * Set nonzero when running under the mGBA emulator (detected at boot in
+ * uartinit()). Gates the mGBA debug-log register writes in uartputc()/
+ * uartputs() so the SAME GBA kernel drives the emulator log under mGBA but
+ * stays silent on real hardware.
+ */
+int mgba_present;
 
+void uartinit(int unit) {
     /*
      * Two optional output sinks mirror the on-screen (gtxt) console,
      * each selected by a kernel config option (see the GBA/GBAED Config
      * files):
-     *   MGBA_LOG        - mirror console output to mGBA's emulator debug
-     *                     log. Emulator-only; a no-op write on real
-     *                     hardware, so the GBAED build leaves it out.
+     *   MGBA_LOG        - compile in the mGBA emulator debug-log mirror.
+     *                     Which is actually USED is decided at runtime:
+     *                     uartinit() probes for mGBA (below) and only then
+     *                     is the log written, so a MGBA_LOG kernel is
+     *                     correct on real hardware too (silent there). The
+     *                     GBAED build, which only ever runs on hardware,
+     *                     leaves it out entirely.
      *   SERIAL_CONSOLE  - real UART over the link cable (gsio), for
      *                     interactive debugging; the GBAED build enables
      *                     it, the cable-free GBA demo build does not (it
@@ -42,6 +50,22 @@ void uartinit(int unit) {
      */
     if (unit == CONS_MINOR) {
         gtxt_init(0xFFFF, 0x0000); // white on black
+#ifdef MGBA_LOG
+        /*
+         * Detect mGBA at runtime rather than assuming it. Writing 0xC0DE to
+         * the debug-enable register and reading back 0x1DEA identifies the
+         * emulator (the write also arms mGBA's logging). On real hardware
+         * that address is open bus, so the readback is not 0x1DEA,
+         * mgba_present stays 0, and every later debug-register write is
+         * skipped. Announce a hit so a hardware-vs-emulator demo of the one
+         * GBA kernel shows the difference in the boot log. printf() is live
+         * by now: startup() calls us before it prints the version banner.
+         */
+        MGBA_REG_DEBUG_ENABLE = 0xC0DE;
+        mgba_present = (MGBA_REG_DEBUG_ENABLE == 0x1DEA);
+        if (mgba_present)
+            printf("mGBA detected.\n");
+#endif
 #ifdef SERIAL_CONSOLE
         gsio_init(UART_BAUD);
 #endif
@@ -306,29 +330,31 @@ void uartputc(dev_t dev, char c) {
 #endif
 
 #ifdef MGBA_LOG
-    MGBA_REG_DEBUG_ENABLE = 0xC0DE; // mGBA Enable
-    static int i = 0;
-    if ((c && i < 255) && c != '\n') {
-        MGBA_REG_DEBUG_BUFFER[i] = c;                // Buffer
-        i++;
-    } else {
-        MGBA_REG_DEBUG_BUFFER[i] = '\0';                // Buffer
-        MGBA_REG_DEBUG_FLAGS = 0x100|MGBA_LOG_INFO;  // Send Info Log
-        i = 0;
+    if (mgba_present) {
+        static int i = 0;
+        if ((c && i < 255) && c != '\n') {
+            MGBA_REG_DEBUG_BUFFER[i] = c;                // Buffer
+            i++;
+        } else {
+            MGBA_REG_DEBUG_BUFFER[i] = '\0';                // Buffer
+            MGBA_REG_DEBUG_FLAGS = 0x100|MGBA_LOG_INFO;  // Send Info Log
+            i = 0;
+        }
     }
 #endif
 }
 
 void uartputs(dev_t dev, const char *s) {
 #ifdef MGBA_LOG
-    MGBA_REG_DEBUG_ENABLE = 0xC0DE; // mGBA Enable
-    int i = 0;
-    while (s[i] && i < 255) {
-        MGBA_REG_DEBUG_BUFFER[i] = s[i];                // Buffer
-        i++;
+    if (mgba_present) {
+        int i = 0;
+        while (s[i] && i < 255) {
+            MGBA_REG_DEBUG_BUFFER[i] = s[i];                // Buffer
+            i++;
+        }
+        MGBA_REG_DEBUG_BUFFER[i] = '\0';                // Buffer
+        MGBA_REG_DEBUG_FLAGS = 0x100|MGBA_LOG_INFO;  // Send Info Log
     }
-    MGBA_REG_DEBUG_BUFFER[i] = '\0';                // Buffer
-    MGBA_REG_DEBUG_FLAGS = 0x100|MGBA_LOG_INFO;  // Send Info Log
 #else
     (void)s;
 #endif
