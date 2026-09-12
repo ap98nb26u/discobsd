@@ -162,15 +162,19 @@ swkbd_show(int on)
 		return;
 	swkbd_shown = on;
 	if (on) {
-		gtxt_reserve_bottom(NROWS * 8);
 		swkbd_draw();
 	} else {
-		/* Blank the keyboard band and give the rows back. */
+		/*
+		 * Blank the keyboard band, but keep the rows reserved: the
+		 * console stays a fixed 30x15 (pinned in gtxt_init) so its size
+		 * always matches the TIOCGWINSZ the kernel reports, which a
+		 * full-screen app (vi) relies on. The bottom band is simply left
+		 * blank while the keyboard is hidden.
+		 */
 		int r, c, srow0 = gtxt_rows() - NROWS;
 		for (r = 0; r < (int)NROWS; r++)
 			for (c = 0; c < gtxt_cols(); c++)
 				gtxt_draw_cell(' ', c, srow0 + r, KB_FG, KB_BG);
-		gtxt_reserve_bottom(0);
 	}
 }
 
