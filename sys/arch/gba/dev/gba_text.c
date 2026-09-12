@@ -29,6 +29,20 @@ extern const unsigned char gtxt_font[2048];
 static unsigned short gtxt_fg;
 static unsigned short gtxt_bg;
 static unsigned short gtxt_fg_normal;	/* console fg to restore after a msg */
+
+/*
+ * VT100-subset terminal emulation state (roadmap #6/vi). Full-screen apps
+ * (vi) drive the console with ANSI/VT100 escape sequences; gtxt_putc()
+ * feeds them through this little state machine (gtxt_esc_feed/gtxt_csi)
+ * instead of printing them as glyphs. Only what vi emits is handled:
+ * cursor addressing (ESC[r;cH), cursor up (ESC[A), clear-to-EOL (ESC[K),
+ * clear-to-EOS (ESC[J) and standout on/off (ESC[7m / ESC[0m).
+ */
+static int gtxt_estate;			/* 0=text, 1=saw ESC, 2=in CSI */
+#define GTXT_MAXPARM	4
+static int gtxt_parm[GTXT_MAXPARM];	/* CSI numeric parameters */
+static int gtxt_nparm;			/* index of the current parameter */
+static int gtxt_reverse;		/* SGR reverse video: swap fg/bg */
 static int gtxt_curx;		/* column 0..GTXT_COLS (COLS = deferred wrap) */
 static int gtxt_cury;		/* row of the current line (absolute cell) */
 static int gtxt_cursor_on;	/* is the block cursor currently lit? */
@@ -42,24 +56,6 @@ static int gtxt_cursor_on;	/* is the block cursor currently lit? */
 static int gtxt_reserved;
 
 #define GTXT_CONS_H     (GTXT_SCREEN_H - gtxt_reserved)
-
-static void
-gtxt_blit(unsigned char c, int x, int y)
-{
-    volatile unsigned short *p = VRAM + (y * GTXT_SCREEN_W) + x;
-    const unsigned char *glyph = &gtxt_font[c * GTXT_CHAR_H];
-    int row, col;
-    unsigned char bits;
-
-    for (row = 0; row < GTXT_CHAR_H; row++) {
-        bits = glyph[row];
-        for (col = 0; col < GTXT_CHAR_W; col++) {
-            p[col] = (bits & 0x80) ? gtxt_fg : gtxt_bg;
-            bits <<= 1;
-        }
-        p += GTXT_SCREEN_W;
-    }
-}
 
 static void
 gtxt_shift(void)
@@ -170,25 +166,26 @@ gtxt_rows(void)
 }
 
 /*
- * Show (on != 0) or hide the console's block cursor - a solid filled
- * square in the current cell at the bottom console row. Idempotent, so
- * idle()'s once-a-pass blink call is free unless the state changes; the
- * heavy VRAM fill runs only on an actual on<->off transition. Lit with
- * the foreground colour, erased back to the background (the input
- * position is always blank, so nothing under it is lost).
+ * Show (on != 0) or hide the console's block cursor at the current cell.
+ * Idempotent, so idle()'s once-a-pass blink call is free unless the state
+ * changes; the VRAM work runs only on an actual on<->off transition.
+ *
+ * The cursor is drawn by XOR-inverting the 8x8 cell rather than filling it,
+ * so it is NON-DESTRUCTIVE: over a blank cell (the shell's input position)
+ * it shows as a solid block, over a glyph (a full-screen app's cursor sitting
+ * on live text) it shows as that glyph in reverse video, and toggling it off
+ * XORs the same cell again to restore exactly what was underneath. This lets
+ * vi's cursor be visible on the LCD without erasing the character beneath it.
  */
 void
 gtxt_cursor(int on)
 {
     volatile unsigned short *p;
-    unsigned short color;
     int row, col, cx;
 
     /*
      * While a glyph typed in the last column waits for its deferred
      * wrap, gtxt_curx == GTXT_COLS and there is no free cell to mark.
-     * Drawing the block over that glyph and later erasing it to the
-     * background wiped the character (it vanished as the line scrolled).
      * Show no cursor until the next character resolves the wrap.
      */
     cx = gtxt_curx < GTXT_COLS ? gtxt_curx : GTXT_COLS - 1;
@@ -198,11 +195,10 @@ gtxt_cursor(int on)
         return;
     gtxt_cursor_on = on;
 
-    color = on ? gtxt_fg : gtxt_bg;
     p = VRAM + gtxt_cury * GTXT_CHAR_H * GTXT_SCREEN_W + cx * GTXT_CHAR_W;
     for (row = 0; row < GTXT_CHAR_H; row++) {
         for (col = 0; col < GTXT_CHAR_W; col++)
-            p[col] = color;
+            p[col] ^= 0x7FFF;		/* invert the 15 colour bits */
         p += GTXT_SCREEN_W;
     }
 }
@@ -227,6 +223,15 @@ gtxt_init(unsigned short fg, unsigned short bg)
     gtxt_fg = fg;
     gtxt_fg_normal = fg;
     gtxt_bg = bg;
+    /*
+     * Permanently reserve the bottom 5 rows for the on-screen keyboard so
+     * the console is a fixed 30x15 (roadmap: vi/terminal support, "Option
+     * 2"). This matches the window size reported over TIOCGWINSZ, so a
+     * full-screen app addresses exactly the visible grid whether or not the
+     * keyboard happens to be drawn (swkbd.c paints/blanks that band but no
+     * longer grows the console back to 20 rows when hidden).
+     */
+    gtxt_reserved = 5 * GTXT_CHAR_H;
     gtxt_cls();
 }
 
@@ -282,6 +287,111 @@ gtxt_is_blanked(void)
     return gtxt_blanked;
 }
 
+/* Fill text cells [c0..c1] on row `row` with the background colour. */
+static void
+gtxt_clear_span(int row, int c0, int c1)
+{
+    int c;
+
+    for (c = c0; c <= c1; c++)
+        gtxt_draw_cell(' ', c, row, gtxt_bg, gtxt_bg);
+}
+
+/* Execute a CSI sequence whose final byte is `f` (params in gtxt_parm). */
+static void
+gtxt_csi(unsigned char f)
+{
+    int n = gtxt_parm[0] ? gtxt_parm[0] : 1;	/* default count/pos = 1 */
+    int row;
+
+    gtxt_cursor(0);		/* rub the block cursor before moving/clearing */
+
+    switch (f) {
+    case 'H':			/* CUP: ESC[row;colH, 1-based (default 1;1) */
+    case 'f':
+        gtxt_cury = (gtxt_parm[0] ? gtxt_parm[0] : 1) - 1;
+        gtxt_curx = (gtxt_parm[1] ? gtxt_parm[1] : 1) - 1;
+        if (gtxt_cury < 0) gtxt_cury = 0;
+        if (gtxt_cury > GTXT_BOTTOM) gtxt_cury = GTXT_BOTTOM;
+        if (gtxt_curx < 0) gtxt_curx = 0;
+        if (gtxt_curx > GTXT_COLS - 1) gtxt_curx = GTXT_COLS - 1;
+        break;
+    case 'A':			/* CUU: cursor up n */
+        gtxt_cury -= n;
+        if (gtxt_cury < 0) gtxt_cury = 0;
+        break;
+    case 'B':			/* CUD: cursor down n */
+        gtxt_cury += n;
+        if (gtxt_cury > GTXT_BOTTOM) gtxt_cury = GTXT_BOTTOM;
+        break;
+    case 'C':			/* CUF: cursor right n */
+        gtxt_curx += n;
+        if (gtxt_curx > GTXT_COLS - 1) gtxt_curx = GTXT_COLS - 1;
+        break;
+    case 'D':			/* CUB: cursor left n */
+        gtxt_curx -= n;
+        if (gtxt_curx < 0) gtxt_curx = 0;
+        break;
+    case 'K':			/* EL: erase in line (0=to EOL,1=to BOL,2=all) */
+        if (gtxt_parm[0] == 1)
+            gtxt_clear_span(gtxt_cury, 0, gtxt_curx);
+        else if (gtxt_parm[0] == 2)
+            gtxt_clear_span(gtxt_cury, 0, GTXT_COLS - 1);
+        else
+            gtxt_clear_span(gtxt_cury, gtxt_curx, GTXT_COLS - 1);
+        break;
+    case 'J':			/* ED: erase in display (0=to end,1=to start,2=all) */
+        if (gtxt_parm[0] == 2) {
+            for (row = 0; row <= GTXT_BOTTOM; row++)
+                gtxt_clear_span(row, 0, GTXT_COLS - 1);
+        } else if (gtxt_parm[0] == 1) {
+            for (row = 0; row < gtxt_cury; row++)
+                gtxt_clear_span(row, 0, GTXT_COLS - 1);
+            gtxt_clear_span(gtxt_cury, 0, gtxt_curx);
+        } else {
+            gtxt_clear_span(gtxt_cury, gtxt_curx, GTXT_COLS - 1);
+            for (row = gtxt_cury + 1; row <= GTXT_BOTTOM; row++)
+                gtxt_clear_span(row, 0, GTXT_COLS - 1);
+        }
+        break;
+    case 'm':			/* SGR: 7 = reverse on, 0/none = reset */
+        gtxt_reverse = (gtxt_parm[0] == 7);
+        break;
+    default:
+        break;			/* silently ignore anything else */
+    }
+}
+
+/* Feed one byte to the escape-sequence state machine. */
+static void
+gtxt_esc_feed(unsigned char c)
+{
+    if (gtxt_estate == 1) {			/* just saw ESC */
+        if (c == '[') {
+            gtxt_estate = 2;
+            gtxt_nparm = 0;
+            gtxt_parm[0] = gtxt_parm[1] = gtxt_parm[2] = gtxt_parm[3] = 0;
+        } else {
+            gtxt_estate = 0;			/* unsupported ESC x: drop it */
+        }
+        return;
+    }
+    /* gtxt_estate == 2: collecting a CSI sequence */
+    if (c >= '0' && c <= '9') {
+        if (gtxt_nparm < GTXT_MAXPARM)
+            gtxt_parm[gtxt_nparm] = gtxt_parm[gtxt_nparm] * 10 + (c - '0');
+        return;
+    }
+    if (c == ';') {
+        if (gtxt_nparm < GTXT_MAXPARM - 1)
+            gtxt_nparm++;
+        return;
+    }
+    if (c >= '@' && c <= '~')			/* a final byte: run it */
+        gtxt_csi(c);
+    gtxt_estate = 0;				/* sequence ends (or was bad) */
+}
+
 void
 gtxt_putc(char c)
 {
@@ -292,6 +402,20 @@ gtxt_putc(char c)
      */
     extern void console_activity(void);
     console_activity();
+
+    /*
+     * VT100-subset escape handling: once ESC (0x1b) starts a sequence,
+     * route the following bytes into the state machine instead of drawing
+     * them, until the sequence completes (see gtxt_esc_feed/gtxt_csi).
+     */
+    if (gtxt_estate) {
+        gtxt_esc_feed((unsigned char)c);
+        return;
+    }
+    if (c == 0x1b) {
+        gtxt_estate = 1;
+        return;
+    }
 
     /*
      * Rub out the block cursor (if lit) before drawing anything, so it
@@ -356,7 +480,9 @@ gtxt_putc(char c)
         gtxt_curx = 0;
         gtxt_linefeed();
     }
-    gtxt_blit((unsigned char)c, gtxt_curx * GTXT_CHAR_W,
-              gtxt_cury * GTXT_CHAR_H);
+    /* Draw with reverse video (SGR ESC[7m) applied when active. */
+    gtxt_draw_cell(c, gtxt_curx, gtxt_cury,
+        gtxt_reverse ? gtxt_bg : gtxt_fg,
+        gtxt_reverse ? gtxt_fg : gtxt_bg);
     gtxt_curx++;
 }
