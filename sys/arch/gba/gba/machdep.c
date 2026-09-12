@@ -371,6 +371,15 @@ startup(void)
 #endif
 
 	/*
+	 * Enable the sound hardware so the console beep (BEL) works; see
+	 * gba_sound.c. Harmless on both mGBA and real hardware.
+	 */
+	{
+		extern void gba_sound_init(void);
+		gba_sound_init();
+	}
+
+	/*
 	 * When User button is pressed - boot to single user mode.
 	 */
 	boothowto = 0;
