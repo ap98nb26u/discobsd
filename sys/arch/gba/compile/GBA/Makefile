@@ -68,7 +68,7 @@ OBJS = exec_aout.o exec_conf.o exec_elf.o exec_script.o exec_subr.o \
 	vfs_vnops.o vm_sched.o vm_swap.o vm_swp.o cons.o mem.o swap.o \
 	clock.o conf.o fault.o machdep.o mpu.o sig_machdep.o syscall.o \
 	sysctl.o systick.o sched_test.o mrams.o mgba_uart.o gba_text.o \
-	gba_font.o swkbd.o gba_sio_uart.o 
+	gba_font.o swkbd.o gba_sound.o gba_sio_uart.o
 
 CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/kern/exec_script.c $S/kern/exec_subr.c $S/kern/init_main.c \
@@ -94,8 +94,9 @@ CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/arch/gba/gba/systick.c $S/arch/gba/gba/sched_test.c \
 	$S/arch/gba/dev/mrams.c $S/arch/gba/dev/mgba_uart.c \
 	$S/arch/gba/dev/gba_text.c $S/arch/gba/dev/gba_font.c \
-	$S/arch/gba/dev/swkbd.c $S/arch/gba/dev/gba_sio_uart.c \
-	swapunix.c 
+	$S/arch/gba/dev/swkbd.c $S/arch/gba/dev/gba_sound.c \
+	$S/arch/gba/dev/gba_sio_uart.c \
+	swapunix.c
 
 # load lines for config "xxx" will be emitted as:
 # xxx: ${SYSTEM_DEP} swapxxx.o
@@ -366,6 +367,9 @@ gba_font.o: $S/arch/gba/dev/gba_font.c
 	${COMPILE_C}
 
 swkbd.o: $S/arch/gba/dev/swkbd.c
+	${COMPILE_C}
+
+gba_sound.o: $S/arch/gba/dev/gba_sound.c
 	${COMPILE_C}
 
 gba_sio_uart.o: $S/arch/gba/dev/gba_sio_uart.c

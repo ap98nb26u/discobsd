@@ -15,6 +15,7 @@
 
 #include <machine/gba.h>
 #include <gba/dev/gba_text.h>
+#include <gba/dev/gba_sound.h>
 
 extern const unsigned char gtxt_font[2048];
 
@@ -299,14 +300,21 @@ gtxt_putc(char c)
      */
     gtxt_cursor(0);
 
-    if (c == '\a' || c == 0x7f) {
+    if (c == '\a') {
         /*
-         * BEL is audible-only on a real terminal, and DEL is a
-         * non-printing rubout - draw neither. The cooked tty rings the
-         * bell (CTRL-G) for each keystroke once the input line hits
-         * TTYHOG (255 bytes); without this those printed as glyphs and
-         * marched the cursor off the screen. (DEL should not normally
-         * reach here now that Backspace sends ^H, but guard anyway.)
+         * BEL is audible-only on a real terminal: sound the console beep
+         * (roadmap #4) and draw no glyph. The cooked tty rings the bell
+         * (CTRL-G) on input errors and for each keystroke once the input
+         * line hits TTYHOG (255 bytes); without swallowing it here those
+         * printed as glyphs and marched the cursor off the screen.
+         */
+        gba_beep();
+        return;
+    }
+    if (c == 0x7f) {
+        /*
+         * DEL is a non-printing rubout - draw nothing. (It should not
+         * normally reach here now that Backspace sends ^H, but guard.)
          */
         return;
     }
