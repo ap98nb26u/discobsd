@@ -266,8 +266,8 @@ swkbd_move(int dx, int dy)
  * myticks advances in real time regardless of how sparsely we sample, so
  * a held key repeats at the right wall-clock cadence even mid-scroll.
  */
-#define SWKBD_REPEAT_DELAY	16384	/* ~1s at Timer1's 16384Hz */
-#define SWKBD_REPEAT_RATE	4096	/* ~0.25s */
+#define SWKBD_REPEAT_DELAY	6554	/* ~0.4s at Timer1's 16384Hz */
+#define SWKBD_REPEAT_RATE	1638	/* ~0.1s */
 #define SWKBD_REPEAT_KEYS	(KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT | KEY_A)
 
 /*
