@@ -11,7 +11,10 @@
  * Controls:
  *   SELECT      show / hide the keyboard (console output is confined to
  *               the rows above it while shown)
- *   D-pad       move the cursor over the keys
+ *   D-pad       keyboard shown: move the cursor over the keys;
+ *               keyboard hidden: send VT100 arrow-key escape sequences
+ *               (ESC[A/B/C/D) so vi and other full-screen apps get real
+ *               cursor-key input
  *   A           send the highlighted key
  *   B           send Enter (a shortcut for the En key)
  *   L           toggle shift (upper case / the alternate symbols); sticky
@@ -185,6 +188,21 @@ swkbd_send(char c)
 	ttyinput(c, &uartttys[CONS_MINOR]);
 }
 
+/*
+ * Send a VT100 cursor-key escape sequence: ESC [ <final>, where final is
+ * 'A'=up, 'B'=down, 'C'=right, 'D'=left. Used when the keyboard is hidden
+ * so the D-pad acts as arrow keys (vi's readit() maps ESC[A..D to its
+ * cursor keys). All three bytes are queued together, so the tty delivers
+ * them as one sequence exactly as a real terminal's arrow key would.
+ */
+static void
+swkbd_send_esc(char final)
+{
+	swkbd_send(0x1b);
+	swkbd_send('[');
+	swkbd_send(final);
+}
+
 static void
 swkbd_press(void)
 {
@@ -338,8 +356,24 @@ swkbd_poll(void)
 		swkbd_show(!swkbd_shown);
 		return;
 	}
-	if (!swkbd_shown)
+	if (!swkbd_shown) {
+		/*
+		 * Keyboard hidden: the D-pad sends cursor-key escape sequences
+		 * (arrow keys) instead of moving the on-screen key selection, so
+		 * vi and other full-screen apps get real arrow input. Uses `act`
+		 * (fresh presses + auto-repeat) so a held direction repeats,
+		 * exactly as the selection move does when the keyboard is shown.
+		 */
+		if (act & KEY_UP)
+			swkbd_send_esc('A');
+		if (act & KEY_DOWN)
+			swkbd_send_esc('B');
+		if (act & KEY_RIGHT)
+			swkbd_send_esc('C');
+		if (act & KEY_LEFT)
+			swkbd_send_esc('D');
 		return;
+	}
 
 	if (fresh & KEY_L) {			/* L shoulder: shift */
 		swkbd_shift = !swkbd_shift;
