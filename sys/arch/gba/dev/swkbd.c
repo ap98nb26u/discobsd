@@ -266,8 +266,38 @@ swkbd_move(int dx, int dy)
  * myticks advances in real time regardless of how sparsely we sample, so
  * a held key repeats at the right wall-clock cadence even mid-scroll.
  */
-#define SWKBD_REPEAT_DELAY	6554	/* ~0.4s at Timer1's 16384Hz */
-#define SWKBD_REPEAT_RATE	1638	/* ~0.1s */
+/*
+ * Auto-repeat timing is runtime-tunable via the machdep sysctls
+ * kbd_repeat_delay / kbd_repeat_rate (milliseconds), and persisted per build
+ * (cart SRAM on mrams, /etc/rc.local on the SD-root GBAED build; see sram.c). The ms values are the canonical setting; swkbd_set_repeat()
+ * clamps them and derives the Timer1 (16384Hz) tick counts actually compared
+ * against below. Defaults ~0.4s delay / ~0.1s interval.
+ */
+#define SWKBD_DEF_DELAY_MS	400
+#define SWKBD_DEF_RATE_MS	100
+#define SWKBD_MIN_DELAY_MS	50
+#define SWKBD_MAX_DELAY_MS	2000
+#define SWKBD_MIN_RATE_MS	20
+#define SWKBD_MAX_RATE_MS	1000
+
+int swkbd_repeat_delay_ms = SWKBD_DEF_DELAY_MS;	/* sysctl/SRAM-visible (ms) */
+int swkbd_repeat_rate_ms  = SWKBD_DEF_RATE_MS;
+static int swkbd_delay_ticks = (SWKBD_DEF_DELAY_MS * 16384) / 1000;
+static int swkbd_rate_ticks  = (SWKBD_DEF_RATE_MS  * 16384) / 1000;
+
+void
+swkbd_set_repeat(int delay_ms, int rate_ms)
+{
+	if (delay_ms < SWKBD_MIN_DELAY_MS)	delay_ms = SWKBD_MIN_DELAY_MS;
+	if (delay_ms > SWKBD_MAX_DELAY_MS)	delay_ms = SWKBD_MAX_DELAY_MS;
+	if (rate_ms  < SWKBD_MIN_RATE_MS)	rate_ms  = SWKBD_MIN_RATE_MS;
+	if (rate_ms  > SWKBD_MAX_RATE_MS)	rate_ms  = SWKBD_MAX_RATE_MS;
+	swkbd_repeat_delay_ms = delay_ms;
+	swkbd_repeat_rate_ms  = rate_ms;
+	swkbd_delay_ticks = (int)(((long)delay_ms * 16384) / 1000);
+	swkbd_rate_ticks  = (int)(((long)rate_ms  * 16384) / 1000);
+}
+
 #define SWKBD_REPEAT_KEYS	(KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT | KEY_A)
 
 /*
@@ -335,12 +365,12 @@ swkbd_poll(void)
 
 		if (r != 0 && r == held_prev) {
 			if (! repeating) {
-				if ((uint16_t)(t - held_since) >= SWKBD_REPEAT_DELAY) {
+				if ((uint16_t)(t - held_since) >= swkbd_delay_ticks) {
 					repeating = 1;
 					rep = r;
 					last_rep = t;
 				}
-			} else if ((uint16_t)(t - last_rep) >= SWKBD_REPEAT_RATE) {
+			} else if ((uint16_t)(t - last_rep) >= swkbd_rate_ticks) {
 				rep = r;
 				last_rep = t;
 			}
