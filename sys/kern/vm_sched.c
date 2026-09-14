@@ -18,6 +18,25 @@ char    runin;                  /* scheduling flag */
 char    runout;                 /* scheduling flag */
 
 /*
+ * Is p currently on the run queue? Used by the out-of-swap kill path
+ * below to re-queue a victim idempotently: setrq() panics (under
+ * DIAGNOSTIC) if handed a process that is already queued, and psignal()
+ * may itself have queued the victim via setrun(), so we must not blindly
+ * setrq() it a second time. Caller holds splhigh().
+ */
+static int
+on_runq (p)
+    register struct proc *p;
+{
+    register struct proc *q;
+
+    for (q = qs; q != NULL; q = q->p_link)
+        if (q == p)
+            return 1;
+    return 0;
+}
+
+/*
  * The main loop of the scheduling (swapping) process.
  * The basic idea is:
  *  see if anyone wants to be swapped in
@@ -40,8 +59,68 @@ sched()
     for (;;) {
         /* Perform swap-out/swap-in action. */
         spl0();
-        if (in_core)
-            swapout (in_core, X_FREECORE, X_OLDSIZE, X_OLDSIZE);
+        if (in_core &&
+            swapout (in_core, X_FREECORE, X_OLDSIZE, X_OLDSIZE) != 0) {
+            /*
+             * Out of swap space. This used to panic("out of swap
+             * space") from swapout(), killing the whole system.
+             * Instead, kill the process we were trying to evict.
+             * It is still fully resident (swapout failed before
+             * freeing its core and left p_addr/p_daddr/p_saddr
+             * untouched), so it can run and die without needing any
+             * swap; reaping it frees the core so the swapped-out
+             * process can be brought in on a later pass. On this
+             * port only one non-system process is resident at a
+             * time, so in_core is exactly that process - during a
+             * heavy job (e.g. a native compile that grew large) it
+             * is the memory hog itself. Restore the state sched()
+             * had already torn down for the swap (SLOAD cleared and,
+             * if runnable, removed from the run queue) so the doomed
+             * process is coherent, post the fatal signal, and back
+             * off: its exit wakes us on runin (kern_exit.c). brk()
+             * refuses growth that would not fit in swap, so this
+             * path is the transient/multi-process safety net, not
+             * the common case.
+             */
+            int s;
+
+            s = splhigh();
+            /*
+             * The victim is still fully resident (swapout failed before
+             * freeing its core, leaving p_addr/p_daddr/p_saddr intact),
+             * so it can run and die without needing any swap; reaping it
+             * frees the core for the swapped-out process on a later pass.
+             * Make it resident+runnable and post the fatal signal.
+             *
+             * Ordering and idempotence matter here. sched() cleared this
+             * process's SLOAD and (if it was SRUN) removed it from the run
+             * queue before we attempted the swap-out, but that happened at
+             * a lower spl and the swap-out ran with interrupts enabled, so
+             * the victim's state may have changed underneath us (a wakeup
+             * could have made a sleeper SRUN, etc.). Rather than assume a
+             * particular prior state: (1) mark it loaded; (2) psignal(),
+             * which safely makes a sleeping/stopped target runnable (and
+             * may itself setrq() it via setrun()); (3) only then, if it is
+             * SRUN but NOT already queued, add it - guarded by on_runq()
+             * because both setrq() and setrun() panic on a double enqueue.
+             * Announce only once per victim (SIGKILL already pending means
+             * we have been here before, e.g. re-selected while dying).
+             */
+            if ((in_core->p_sig & sigmask(SIGKILL)) == 0)
+                printf("out of swap: killing pid %d (%u kbytes)\n",
+                    in_core->p_pid,
+                    (in_core->p_dsize + in_core->p_ssize + USIZE) / 1024);
+            in_core->p_flag |= SLOAD;       /* never actually left core */
+            psignal (in_core, SIGKILL);
+            if (in_core->p_stat == SRUN && !on_runq (in_core))
+                setrq (in_core);
+            in_core = 0;
+            swapped_out = 0;                /* no room made; don't swap in */
+            ++runin;
+            sleep ((caddr_t) &runin, PSWP); /* let the victim run and die */
+            splx (s);
+            continue;
+        }
         if (swapped_out) {
             //printf("DBG: sched swapin pid=%d\n", swapped_out->p_pid);
             swapin (swapped_out);
