@@ -53,7 +53,12 @@ typedef unsigned short uint16_t;
 
 #define REG_IE		(*(volatile uint16_t *)(REG_BASE+0x0200))
 #define REG_IF		(*(volatile uint16_t *)(REG_BASE+0x0202))
+#define REG_WAITCNT	(*(volatile uint16_t *)(REG_BASE+0x0204))	/* GamePak/SRAM waitstates */
 #define REG_IME		(*(volatile uint16_t *)(REG_BASE+0x0208))
+
+/* Cartridge backup SRAM: 32KB, 8-bit bus (byte access only). See sram.c. */
+#define GBA_SRAM_BASE	0x0E000000
+#define GBA_SRAM_SIZE	0x8000
 
 #define MEM_PAL		0x05000000
 #define BG_PALETTE	((volatile uint16_t *)MEM_PAL)
