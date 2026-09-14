@@ -380,6 +380,18 @@ startup(void)
 	}
 
 	/*
+	 * Load persistent boot parameters from cartridge SRAM, falling back to
+	 * the compiled defaults if the block is blank/invalid. Meaningful only
+	 * on the mrams/ROM-root build (a no-op elsewhere): the SD-root GBAED
+	 * build cannot persist SRAM and reapplies settings from /etc/rc.local
+	 * instead. See sram.c.
+	 */
+	{
+		extern void sram_params_init(void);
+		sram_params_init();
+	}
+
+	/*
 	 * When User button is pressed - boot to single user mode.
 	 */
 	boothowto = 0;

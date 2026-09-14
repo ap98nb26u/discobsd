@@ -127,7 +127,17 @@ else
 fi
 echo
 
-#/etc/rc.local
+# Site-specific startup, incl. persistent tunables (writable-root builds).
+# On a ROM-backed root (mrams) this is skipped: it is read-only, and settings
+# there persist in cart SRAM instead (see sram.c). On the SD-root GBAED build,
+# put persistent "sysctl -w ..." lines (e.g. keyboard auto-repeat) in
+# /etc/rc.local to have them reapplied every boot. Same "no ! negation" note
+# as above, so the ROM-root case is the empty "then" branch.
+if sysctl -q kern.romroot; then
+    :   # ROM-backed root: skip (SRAM persists settings there).
+else
+    test -f /etc/rc.local && . /etc/rc.local
+fi
 
 date
 exit 0
