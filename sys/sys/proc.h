@@ -233,7 +233,7 @@ void hardclock (caddr_t pc, int ps);
 /*
  * Swap out a process.
  */
-void swapout (struct proc *p, int freecore, u_int odata, u_int ostack);
+int swapout (struct proc *p, int freecore, u_int odata, u_int ostack);
 
 /*
  * Swap a process in.
