@@ -31,6 +31,10 @@
 #include <machine/mpuvar.h>
 
 extern int console_blank_secs;		/* gba/machdep.c: screen-saver timeout */
+extern int swkbd_repeat_delay_ms;	/* dev/swkbd.c: auto-repeat delay (ms) */
+extern int swkbd_repeat_rate_ms;	/* dev/swkbd.c: auto-repeat interval (ms) */
+extern void swkbd_set_repeat(int, int);	/* dev/swkbd.c: apply live (clamped) */
+extern void sram_persist_params(void);	/* dev/sram.c: SRAM write (mrams; no-op else) */
 
 /*
  * Errno messages.
@@ -343,6 +347,35 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 			return ENOTDIR;
 		return sysctl_int(oldp, oldlenp, newp, newlen,
 		    &console_blank_secs);
+
+	case CPU_KBD_RPT_DELAY:
+	case CPU_KBD_RPT_RATE:
+		/*
+		 * Software-keyboard auto-repeat timing, in milliseconds. Read the
+		 * current value; on a write, apply it live (swkbd_set_repeat
+		 * clamps it) and persist it. Persistence differs by build (see
+		 * sram.c): the mrams/ROM-root build writes cart SRAM; the SD-root
+		 * GBAED build makes sram_persist_params() a no-op and instead
+		 * reapplies "sysctl -w" lines from /etc/rc.local each boot.
+		 * E.g. "sysctl -w machdep.kbd_repeat_rate=80".
+		 */
+		if (namelen != 1)
+			return ENOTDIR;
+		{
+			int error, v;
+
+			v = (name[0] == CPU_KBD_RPT_DELAY) ?
+			    swkbd_repeat_delay_ms : swkbd_repeat_rate_ms;
+			error = sysctl_int(oldp, oldlenp, newp, newlen, &v);
+			if (error == 0 && newp != NULL) {
+				if (name[0] == CPU_KBD_RPT_DELAY)
+					swkbd_set_repeat(v, swkbd_repeat_rate_ms);
+				else
+					swkbd_set_repeat(swkbd_repeat_delay_ms, v);
+				sram_persist_params();
+			}
+			return error;
+		}
 
 	default:
 		return EOPNOTSUPP;

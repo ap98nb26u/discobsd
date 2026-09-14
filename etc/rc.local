@@ -1,2 +1,10 @@
 #! /bin/sh -
-# site-specific startup actions, daemons
+# Site-specific startup actions. Sourced by /etc/rc at the end of multiuser
+# boot, but only on a writable (SD) root - a ROM-backed root skips it.
+#
+# Persistent settings for the SD-root (GBAED) build go here: they are
+# reapplied on every boot. For example, the on-screen keyboard's auto-repeat
+# timing (milliseconds) - uncomment and adjust to taste:
+#
+#sysctl -w machdep.kbd_repeat_delay=400
+#sysctl -w machdep.kbd_repeat_rate=100
