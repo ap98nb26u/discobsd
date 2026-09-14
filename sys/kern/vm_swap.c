@@ -155,9 +155,16 @@ swapin (p)
  * off when called to create an image for a child process
  * in newproc.
  *
- * panic: out of swap space
+ * Returns 0 on success and -1 if there was no room in swap for the
+ * process image. This used to panic("out of swap space"), taking the
+ * whole system down; instead the failure is reported to the caller,
+ * which recovers by killing (sched()) or refusing to create
+ * (newproc()) the process, so swap exhaustion costs one process rather
+ * than the machine. brk() (kern_mman.c) also rejects up front any
+ * growth that could not be swapped, so a well-behaved caller normally
+ * never reaches a failing swapout here.
  */
-void
+int
 swapout (p, freecore, odata, ostack)
     register struct proc *p;
     int freecore;
@@ -172,7 +179,7 @@ swapout (p, freecore, odata, ostack)
     //printf("DBG: before malloc3\n");
     if (malloc3 (swapmap, btod (p->p_dsize), btod (p->p_ssize),
         btod (USIZE), a) == NULL)
-        panic ("out of swap space");
+        return -1;
     //printf("DBG: after malloc3\n");
     p->p_flag |= SLOCK;
     if (odata) {
@@ -225,4 +232,5 @@ swapout (p, freecore, odata, ostack)
         runout = 0;
         wakeup ((caddr_t)&runout);
     }
+    return 0;
 }
