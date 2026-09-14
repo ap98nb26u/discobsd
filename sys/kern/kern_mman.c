@@ -25,6 +25,24 @@ brk()
         u.u_error = ENOMEM;
         return;
     }
+    /*
+     * Also refuse to grow past what swap can hold. The test above
+     * bounds the resident image (physical user RAM); this one bounds
+     * the *swapped* image, since the swapper must be able to write the
+     * whole process (data + stack + u.) out to swap. If it cannot, the
+     * old behavior was to panic("out of swap space") from swapout() the
+     * instant this process was picked for eviction, taking the whole
+     * system down. Rejecting the growth here turns "grew bigger than
+     * swap" into an ordinary ENOMEM the process sees from sbrk()/malloc()
+     * (e.g. a native compiler on a large source can fail gracefully),
+     * long before any swap-out is attempted. Sizes are converted to
+     * DEV_BSIZE swap blocks to compare against nswap; this mirrors the
+     * three-part allocation swapout()/malloc3() performs.
+     */
+    if (btod (newsize) + btod (u.u_ssize) + btod (USIZE) > nswap) {
+        u.u_error = ENOMEM;
+        return;
+    }
 
     u.u_procp->p_dsize = newsize;
 

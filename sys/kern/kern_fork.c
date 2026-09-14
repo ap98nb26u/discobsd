@@ -163,8 +163,46 @@ again:
     child->p_addr = parent->p_addr;
     child->p_stat = SRUN;
     //printf("DBG: newproc before swapout\n");
-    swapout (child, X_DONTFREE, X_OLDSIZE, X_OLDSIZE);
-    //printf("DBG: newproc after swapout\n");
+    if (swapout (child, X_DONTFREE, X_OLDSIZE, X_OLDSIZE) != 0) {
+        /*
+         * No room in swap for the child image. Rather than let
+         * swapout() panic("out of swap space") and take the system
+         * down, undo the proc-table entry built above and fail the
+         * fork with EAGAIN. Nothing of the child has run yet (its
+         * longjmp resume point is only reached on a later swap-in)
+         * and its core was never separately allocated (it shares the
+         * parent's until this swap-out), so backing out is just the
+         * bookkeeping from above reversed in the opposite order.
+         */
+        register int i;
+
+        u.u_procp = parent;
+        parent->p_stat = SRUN;
+
+        /* drop the extra references taken for the child */
+        for (i = 0; i <= u.u_lastfile; i++) {
+            fp = u.u_ofile[i];
+            if (fp != NULL)
+                fp->f_count--;
+        }
+        u.u_cdir->i_count--;
+        if (u.u_rdir)
+            u.u_rdir->i_count--;
+
+        /* remove child from allproc (it was inserted at the head) */
+        allproc = child->p_nxt;
+        allproc->p_prev = &allproc;
+
+        /* remove child from its pid hash chain (also inserted at head) */
+        pidhash[PIDHASH (child->p_pid)] = child->p_hash;
+
+        /* return the slot to the free list */
+        child->p_stat = 0;
+        child->p_nxt = freeproc;
+        freeproc = child;
+
+        return (-1);
+    }
     child->p_flag |= SSWAP;
     parent->p_stat = SRUN;
     u.u_procp = parent;
@@ -227,7 +265,17 @@ fork1 (isvfork)
         return;
     }
     p1 = u.u_procp;
-    if (newproc (isvfork)) {
+    a = newproc (isvfork);
+    if (a < 0) {
+        /*
+         * newproc() could not swap the child out (out of swap) and
+         * has already backed out everything it did. Report a normal
+         * resource shortage instead of crashing the kernel.
+         */
+        u.u_error = EAGAIN;
+        return;
+    }
+    if (a) {
         /* Child */
         u.u_rval = 0;
         u.u_start = time.tv_sec;
