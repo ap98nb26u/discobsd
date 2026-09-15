@@ -286,10 +286,18 @@ console_input_poll(void)
 IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
 {
     uint16_t flag = REG_IF;
+    uint16_t ack = 0;
 
     check_irq_pc();
+#ifdef SERIAL_CONSOLE
+    if (flag & IRQ_SERIAL) {    // serial byte received (or send done)
+        extern void gsio_rx_isr(void);
+        ack |= IRQ_SERIAL;
+        gsio_rx_isr();          /* capture the byte the instant it lands */
+    }
+#endif
     if (flag & IRQ_TIMER0) { // TIMER0
-        flag = IRQ_TIMER0;
+        ack |= IRQ_TIMER0;
         myticks++;
         timer0_flag = 1;
         need_resched = 1;
@@ -318,7 +326,9 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
          */
         console_input_poll();
     }
-    REG_IF = flag;
+    /* Acknowledge the sources we handled; if somehow none matched, clear
+     * whatever was pending so the interrupt can't latch up. */
+    REG_IF = ack ? ack : flag;
 }
 
 void irq_enable(void)
@@ -341,8 +351,16 @@ void irq_enable(void)
 	 * which nothing read; on-screen input and the cursor blink are
 	 * polled via REG_VCOUNT/lbolt, not the VBLANK IRQ. Leaving it out
 	 * so the only interrupt that fires is the one that has real work.
+	 *
+	 * IRQ_SERIAL (bit7) is added on the serial-console build so a byte
+	 * arriving on the link cable is captured immediately by gsio_rx_isr()
+	 * (gba_sio_uart.c) instead of being polled for and lost - see there.
 	 */
+#ifdef SERIAL_CONSOLE
+	REG_IE = IRQ_TIMER0 | IRQ_SERIAL;
+#else
 	REG_IE = IRQ_TIMER0;
+#endif
 
 	REG_IME = 1;
 }

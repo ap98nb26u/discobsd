@@ -40,6 +40,92 @@
 #define SIO_SEND_ENABLE 0x0400
 #define SIO_RECV_ENABLE 0x0800
 
+#define SIO_RECV_DATA   0x0020	/* SIOCNT d05 recv-data flag: 0 = a byte waiting */
+#define SIO_FIFO_ENABLE 0x0100	/* SIOCNT d08: enable the 4-byte send/recv FIFOs */
+#define SIO_IRQ_ENABLE  0x4000	/* SIOCNT d14: request the SIO interrupt */
+
+/*
+ * Interrupt-driven receive, with the UART's 4-byte hardware FIFO.
+ *
+ * The GBA UART has a 4-entry receive FIFO (AGB Programming Manual 13.3,
+ * SIOCNT d08), previously left disabled. With it off the SIO holds only ONE
+ * received byte in REG_SIODATA8, so a fast multi-byte burst - an arrow key's
+ * ESC[C, three bytes in ~260us at 115200 - overran that single register far
+ * quicker than any poll could drain it, dropping the middle byte and leaving
+ * the trailing letter to print literally (while the software keyboard, which
+ * injects its three bytes at once, always worked). Enabling the FIFO buffers
+ * a whole such burst; the bytes are moved into this ring and handed to the
+ * tty by the input poll. The hardware drives the SD/RTS line and fills the
+ * FIFO on its own once receive-enable is set - no manual arming (and, in UART
+ * mode, RCNT is not the SD line: it just selects serial mode, RCNT[15:14]=0).
+ *
+ * With the FIFO on, the interrupt fires when the receive FIFO becomes FULL
+ * (4 bytes), not per byte, so a short burst may never raise it - the input
+ * poll therefore also drains the FIFO, with the SIO interrupt masked so the
+ * two drainers cannot race.
+ */
+#define GSIO_RXBUF	64			/* must stay a power of two */
+static volatile unsigned char gsio_rxbuf[GSIO_RXBUF];
+static volatile unsigned char gsio_rxhead, gsio_rxtail;
+
+/*
+ * Move every byte now in the hardware RX FIFO into the ring. The caller must
+ * ensure the SIO interrupt cannot run concurrently: gsio_rx_isr() is already
+ * in IRQ context, and gsio_rx_service() masks the SIO IRQ around its call.
+ */
+static void
+gsio_fifo_drain(void)
+{
+    while ((REG_SIOCNT & SIO_RECV_DATA) == 0) {	/* d05==0: a byte is waiting */
+        unsigned char b = (unsigned char)REG_SIODATA8;
+        unsigned char nh = (unsigned char)((gsio_rxhead + 1) & (GSIO_RXBUF - 1));
+
+        if (nh != gsio_rxtail) {		/* silently drop on ring overflow */
+            gsio_rxbuf[gsio_rxhead] = b;
+            gsio_rxhead = nh;
+        }
+    }
+}
+
+/*
+ * SIO interrupt service, called from the kernel IRQ dispatch
+ * (gba_do_schedule(), machdep.c) when IRQ_SERIAL is pending. It fires on a
+ * full receive FIFO, an emptied send FIFO, or an error; just move whatever
+ * has been received into the ring (nothing if it was a send/error IRQ).
+ */
+void
+gsio_rx_isr(void)
+{
+    gsio_fifo_drain();
+}
+
+/*
+ * Drain the FIFO from the tty input poll (uart_poll_input()). Masks the SIO
+ * interrupt for the duration so gsio_rx_isr() cannot run at the same instant
+ * and race on the FIFO/ring; a byte arriving meanwhile simply waits in the
+ * FIFO and is taken on the next pass.
+ */
+void
+gsio_rx_service(void)
+{
+    REG_SIOCNT = REG_SIOCNT & (unsigned short)~SIO_IRQ_ENABLE;
+    gsio_fifo_drain();
+    REG_SIOCNT = REG_SIOCNT | SIO_IRQ_ENABLE;
+}
+
+/* Pop one received byte for the tty input poll, or -1 if the ring is empty. */
+int
+gsio_rx_pop(void)
+{
+    int b;
+
+    if (gsio_rxtail == gsio_rxhead)
+        return -1;
+    b = gsio_rxbuf[gsio_rxtail];
+    gsio_rxtail = (unsigned char)((gsio_rxtail + 1) & (GSIO_RXBUF - 1));
+    return b;
+}
+
 void
 gsio_init(unsigned int baud)
 {
@@ -66,10 +152,16 @@ gsio_init(unsigned int baud)
      */
     REG_SIODATA8 = 'A';
 
-    REG_RCNT = 0;
+    REG_RCNT = 0;		/* RCNT[15:14]=0 -> serial (UART) mode */
     REG_SIOCNT = 0;
+    /*
+     * Enter UART mode with the FIFO disabled first - this initializes the
+     * FIFO sequencer (AGB Programming Manual 13.3) - then turn the 4-byte
+     * FIFO and the receive interrupt on.
+     */
     REG_SIOCNT = rate | SIO_CTS | SIO_LENGTH_8 | SIO_SEND_ENABLE |
                  SIO_RECV_ENABLE | SIO_USE_UART;
+    REG_SIOCNT = REG_SIOCNT | SIO_FIFO_ENABLE | SIO_IRQ_ENABLE;
 }
 
 /*
