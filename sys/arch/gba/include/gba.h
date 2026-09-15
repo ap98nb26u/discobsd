@@ -71,6 +71,7 @@ typedef unsigned short uint16_t;
 #define IRQ_HBLANK	(1 << 1)
 #define IRQ_VCOUNT	(1 << 2)
 #define IRQ_TIMER0	(1 << 3)
+#define IRQ_SERIAL	(1 << 7)
 #define IRQ_KEYPAD	(1 << 12)
 
 
