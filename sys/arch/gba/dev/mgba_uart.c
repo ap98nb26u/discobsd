@@ -185,10 +185,35 @@ int uartwrite(dev_t dev, struct uio *uio, int flag)
      * straight out through uartputc(), the same raw path the kernel's
      * own printf() uses.
      */
+    extern void console_input_poll(void);
     char buf[16];
     int n, i, error;
+    register struct proc *pp = u.u_procp;
 
     while (uio->uio_resid > 0) {
+        /*
+         * Keep ^C responsive while a command is streaming output. This
+         * write runs with interrupts masked - the syscall trampoline holds
+         * REG_IME=0 for the whole syscall (gba/syscall.c) - so the
+         * Timer0-driven console_input_poll() that normally samples the
+         * keyboard and serial line cannot fire until the write returns.
+         * A long "cat" would therefore run to the end before an interrupt
+         * key was even noticed. Sample the console here instead, each
+         * chunk: swkbd and serial alike reach ttyinput(), whose intr-char
+         * handling raises SIGINT on the foreground process group.
+         */
+        console_input_poll();
+
+        /*
+         * ...and act on it. If an unblocked interrupt or quit signal is now
+         * pending for us, stop and return so the syscall's exit path
+         * delivers it - otherwise the signal would only take effect once
+         * the entire output had drained, which is what made ^C feel dead
+         * mid-scroll.
+         */
+        if (pp->p_sig & ~pp->p_sigmask & (sigmask(SIGINT) | sigmask(SIGQUIT)))
+            return EINTR;
+
         n = uio->uio_resid;
         if (n > sizeof(buf))
             n = sizeof(buf);
