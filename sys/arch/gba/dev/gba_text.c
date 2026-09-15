@@ -181,21 +181,34 @@ void
 gtxt_cursor(int on)
 {
     volatile unsigned short *p;
-    int row, col, cx;
+    int row, col, cx, cy;
 
     /*
-     * While a glyph typed in the last column waits for its deferred
-     * wrap, gtxt_curx == GTXT_COLS and there is no free cell to mark.
-     * Show no cursor until the next character resolves the wrap.
+     * A glyph typed in the last column holds a deferred wrap: gtxt_curx
+     * == GTXT_COLS and the logical cursor sits at the START of the next
+     * line. Draw it there - a free cell - so it stays visible, e.g. when
+     * the line-edit cursor lands exactly on the right margin (moving one
+     * step left/right otherwise being needed to make it reappear). Only
+     * when that next row is on-screen; at the very bottom the wrap will
+     * scroll on the next output, so leave the cursor hidden there rather
+     * than mark a row that is about to move.
      */
-    cx = gtxt_curx < GTXT_COLS ? gtxt_curx : GTXT_COLS - 1;
-    if (gtxt_curx >= GTXT_COLS)
-        on = 0;
+    cx = gtxt_curx;
+    cy = gtxt_cury;
+    if (gtxt_curx >= GTXT_COLS) {
+        if (gtxt_cury < GTXT_BOTTOM) {
+            cx = 0;
+            cy = gtxt_cury + 1;
+        } else {
+            on = 0;
+            cx = GTXT_COLS - 1;
+        }
+    }
     if (on == gtxt_cursor_on)
         return;
     gtxt_cursor_on = on;
 
-    p = VRAM + gtxt_cury * GTXT_CHAR_H * GTXT_SCREEN_W + cx * GTXT_CHAR_W;
+    p = VRAM + cy * GTXT_CHAR_H * GTXT_SCREEN_W + cx * GTXT_CHAR_W;
     for (row = 0; row < GTXT_CHAR_H; row++) {
         for (col = 0; col < GTXT_CHAR_W; col++)
             p[col] ^= 0x7FFF;		/* invert the 15 colour bits */

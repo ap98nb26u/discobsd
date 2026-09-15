@@ -14,6 +14,7 @@ PARAM += -DDST=0
 PARAM += -DTIMEZONE=-540
 PARAM += -DRTC_OFFSET=-540
 PARAM += -DDIAGNOSTIC
+PARAM += -DTTYEDIT
 PARAM += -DSCREEN_BLANK_SECS=60
 PARAM += -DHALTREBOOT
 PARAM += -DBUS_KHZ=16777
@@ -74,7 +75,7 @@ OBJS = exec_aout.o exec_conf.o exec_elf.o exec_script.o exec_subr.o \
 	vfs_vnops.o vm_sched.o vm_swap.o vm_swp.o cons.o mem.o swap.o \
 	clock.o conf.o fault.o machdep.o mpu.o sig_machdep.o syscall.o \
 	sysctl.o systick.o sched_test.o ed.o sd.o rtc.o mgba_uart.o \
-	gba_text.o gba_font.o swkbd.o gba_sound.o sram.o gba_sio_uart.o
+	gba_text.o gba_font.o swkbd.o gba_sound.o sram.o gba_sio_uart.o 
 
 CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/kern/exec_script.c $S/kern/exec_subr.c $S/kern/init_main.c \
@@ -102,7 +103,7 @@ CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/arch/gba/dev/mgba_uart.c $S/arch/gba/dev/gba_text.c \
 	$S/arch/gba/dev/gba_font.c $S/arch/gba/dev/swkbd.c \
 	$S/arch/gba/dev/gba_sound.c $S/arch/gba/dev/sram.c \
-	$S/arch/gba/dev/gba_sio_uart.c swapunix.c
+	$S/arch/gba/dev/gba_sio_uart.c swapunix.c 
 
 # load lines for config "xxx" will be emitted as:
 # xxx: ${SYSTEM_DEP} swapxxx.o
