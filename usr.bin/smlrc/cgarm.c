@@ -95,7 +95,6 @@ void GenLabel(char* Label, int Static)
 }
 
 STATIC void GenNumLabel(int Label) { printf2(".L%d:\n", Label); }
-STATIC void GenPrintNumLabel(int label) { printf2(".L%d", label); }
 
 STATIC
 void GenPrintLabel(char* Label)
@@ -574,14 +573,6 @@ void GenFxnEpilog(void)
 }
 
 STATIC int GenMaxLocalsSize(void) { return 0x7FFFFFFF; }
-
-/* --- binary-operator instruction selection (for inc/dec/compound) -------- */
-STATIC
-int GenGetBinaryOperatorInstr(int tok)
-{
-  /* returned value is the token itself; GenBinReg/GenBinConst map it */
-  return tok;
-}
 
 /* --- inc / dec ----------------------------------------------------------- */
 STATIC
