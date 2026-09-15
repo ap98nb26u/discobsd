@@ -261,6 +261,15 @@ void ttyflush (tp, rw)
         tp->t_rocount = 0;
         tp->t_rocol = 0;
         tp->t_state &= ~TS_LOCAL;
+#ifdef TTYEDIT
+        /*
+         * Discard any half-edited line too, so an interrupted prompt
+         * (^C flushes FREAD) starts the next line clean instead of the
+         * next keystroke inserting into stale editor state.
+         */
+        tp->t_edlen = tp->t_edcur = 0;
+        tp->t_edesc = 0;
+#endif
         ttwakeup (tp);
     }
     if (rw & FWRITE) {
@@ -990,6 +999,216 @@ ttbreakc (c, tp)
         (c == '\r' && (tp->t_flags & CRMOD)));
 }
 
+#ifdef TTYEDIT
+/*
+ * Cooked-mode command-line editing (options TTYEDIT).
+ *
+ * Plain 2.11BSD cooked mode only appends to, and erases from, the END of the
+ * line being typed (t_rawq). This lets the console's cursor keys - arriving
+ * as ESC[C / ESC[D whether from the GBA D-pad (swkbd.c) or a serial terminal -
+ * move within the line, and lets characters be inserted or deleted anywhere in
+ * it. The line is edited in a flat per-tty buffer (t_edbuf) with a cursor
+ * (t_edcur); on a line delimiter it is flushed into t_rawq and canonicalized
+ * exactly as the normal path would, so read()/select() see no difference.
+ *
+ * Echo uses only the printable characters, backspace and space - never any
+ * insert/delete-char escape - so it redraws correctly on any VT100-class
+ * terminal and on the LCD console (gba_text.c) with no extra emulator support.
+ * tty_edit() runs only in cooked mode with echo on; raw/cbreak apps (vi) never
+ * reach it and are unaffected, and the whole feature compiles out without the
+ * option.
+ */
+
+/* Move the on-screen cursor left n columns (a backspace does not erase). */
+static void
+ted_back(struct tty *tp, int n)
+{
+    while (n-- > 0)
+        (void) ttyoutput('\b', tp);
+}
+
+/*
+ * Redraw t_edbuf[from .. t_edlen-1] starting at the current cursor column,
+ * append `pad` spaces to paint over characters the line just lost, then park
+ * the cursor back where it started (column `from`). Used after an insert or
+ * delete shifts the tail of the line.
+ */
+static void
+ted_redraw_tail(struct tty *tp, int from, int pad)
+{
+    int i;
+
+    for (i = from; i < tp->t_edlen; i++)
+        (void) ttyoutput(tp->t_edbuf[i] & 0377, tp);
+    for (i = 0; i < pad; i++)
+        (void) ttyoutput(' ', tp);
+    ted_back(tp, (tp->t_edlen - from) + pad);
+}
+
+/* Flush the edited line + its delimiter into t_rawq, canonicalize, reset. */
+static void
+ted_commit(struct tty *tp, int c)
+{
+    int i;
+
+    for (i = 0; i < tp->t_edlen; i++)
+        (void) putc(tp->t_edbuf[i] & 0377, &tp->t_rawq);
+    (void) putc(c, &tp->t_rawq);
+    tp->t_rocount = 0;
+    catq(&tp->t_rawq, &tp->t_canq);
+    ttwakeup(tp);
+    if (tp->t_flags & ECHO)
+        ttyecho(c, tp);
+    tp->t_edlen = tp->t_edcur = 0;
+    tp->t_edesc = 0;
+}
+
+/*
+ * Feed one cooked-mode character to the line editor. Called from ttyinput()
+ * only when echoing (see there). Special signal/flow characters (intr, quit,
+ * suspend, stop/start, lnext, flush) have already been handled before this.
+ */
+static void
+tty_edit(int c, struct tty *tp)
+{
+    int lit = 0;
+    int i;
+
+    c &= 0377;
+
+    /*
+     * ESC-sequence parsing. The state persists across calls because a serial
+     * terminal trickles ESC, '[', final as separate bytes; the D-pad injects
+     * all three at once. Either way we assemble them here.
+     */
+    if (tp->t_edesc == 1) {                     /* saw ESC */
+        tp->t_edesc = (c == '[') ? 2 : 0;
+        if (tp->t_edesc == 2)
+            return;
+        /* a lone ESC: drop it and process c as an ordinary character */
+    } else if (tp->t_edesc == 2) {              /* saw ESC[ */
+        switch (c) {
+        case 'C':                               /* cursor right */
+            if (tp->t_edcur < tp->t_edlen) {
+                (void) ttyoutput(tp->t_edbuf[tp->t_edcur] & 0377, tp);
+                tp->t_edcur++;
+            }
+            break;
+        case 'D':                               /* cursor left */
+            if (tp->t_edcur > 0) {
+                tp->t_edcur--;
+                (void) ttyoutput('\b', tp);
+            }
+            break;
+        case 'H':                               /* home */
+            ted_back(tp, tp->t_edcur);
+            tp->t_edcur = 0;
+            break;
+        case 'F':                               /* end */
+            for (i = tp->t_edcur; i < tp->t_edlen; i++)
+                (void) ttyoutput(tp->t_edbuf[i] & 0377, tp);
+            tp->t_edcur = tp->t_edlen;
+            break;
+        default:                                /* A/B (no history), etc: ignore */
+            break;
+        }
+        tp->t_edesc = 0;
+        return;
+    }
+
+    if (c == 033) {                             /* ESC: begin a sequence */
+        tp->t_edesc = 1;
+        return;
+    }
+
+    /* Line delimiter: commit the line. */
+    if (ttbreakc(c, tp)) {
+        ted_commit(tp, c);
+        return;
+    }
+
+    /* Erase the character before the cursor (t_erase, ^H, or DEL). */
+    if (CCEQ(tp->t_erase, c) || CCEQ(CTRL('h'), c) || c == 0177) {
+        if (tp->t_edcur > 0) {
+            for (i = tp->t_edcur; i < tp->t_edlen; i++)
+                tp->t_edbuf[i-1] = tp->t_edbuf[i];
+            tp->t_edcur--;
+            tp->t_edlen--;
+            (void) ttyoutput('\b', tp);
+            ted_redraw_tail(tp, tp->t_edcur, 1);
+        }
+        return;
+    }
+
+    /* Kill the whole line (t_kill). */
+    if (CCEQ(tp->t_kill, c)) {
+        ted_back(tp, tp->t_edcur);
+        for (i = 0; i < tp->t_edlen; i++)
+            (void) ttyoutput(' ', tp);
+        ted_back(tp, tp->t_edlen);
+        tp->t_edcur = tp->t_edlen = 0;
+        return;
+    }
+
+    /* Word erase before the cursor (t_werasc). */
+    if (CCEQ(tp->t_werasc, c)) {
+        int from = tp->t_edcur, ndel;
+
+        while (from > 0 &&
+            (tp->t_edbuf[from-1] == ' ' || tp->t_edbuf[from-1] == '\t'))
+            from--;
+        while (from > 0 &&
+            tp->t_edbuf[from-1] != ' ' && tp->t_edbuf[from-1] != '\t')
+            from--;
+        ndel = tp->t_edcur - from;
+        if (ndel > 0) {
+            for (i = tp->t_edcur; i < tp->t_edlen; i++)
+                tp->t_edbuf[i-ndel] = tp->t_edbuf[i];
+            tp->t_edlen -= ndel;
+            tp->t_edcur -= ndel;
+            ted_back(tp, ndel);
+            ted_redraw_tail(tp, tp->t_edcur, ndel);
+        }
+        return;
+    }
+
+    /* Reprint the current line (t_rprntc): fresh line, redraw, repark. */
+    if (CCEQ(tp->t_rprntc, c)) {
+        (void) ttyoutput('\r', tp);
+        (void) ttyoutput('\n', tp);
+        for (i = 0; i < tp->t_edlen; i++)
+            (void) ttyoutput(tp->t_edbuf[i] & 0377, tp);
+        ted_back(tp, tp->t_edlen - tp->t_edcur);
+        return;
+    }
+
+    /* A ^V-quoted character arrives with 0200 set; insert it literally. */
+    if (c & 0200) {
+        lit = 1;
+        c &= 0177;
+    }
+
+    /* Insert a printable (or quoted) character at the cursor. */
+    if (lit || (c >= 040 && c < 0177)) {
+        if (tp->t_edlen >= (int)sizeof(tp->t_edbuf) - 1 ||
+            tp->t_rawq.c_cc + tp->t_canq.c_cc + tp->t_edlen >= TTYHOG) {
+            (void) ttyoutput(CTRL('g'), tp);    /* full: ring the bell */
+            return;
+        }
+        for (i = tp->t_edlen; i > tp->t_edcur; i--)
+            tp->t_edbuf[i] = tp->t_edbuf[i-1];
+        tp->t_edbuf[tp->t_edcur] = c;
+        tp->t_edlen++;
+        (void) ttyoutput(c, tp);
+        tp->t_edcur++;
+        ted_redraw_tail(tp, tp->t_edcur, 0);
+        return;
+    }
+
+    /* Any other stray control character: ignore. */
+}
+#endif /* TTYEDIT */
+
 /*
  * Place a character on raw TTY input queue,
  * putting in delimiters and waking up top
@@ -1147,6 +1366,20 @@ ttyinput (c, tp)
      * From here on down cooked mode character
      * processing takes place.
      */
+#ifdef TTYEDIT
+    /*
+     * When echoing an interactive line, hand cooked input to the full-line
+     * editor (cursor movement + insert/delete anywhere in the line). It owns
+     * erase/kill/werase/reprint and the ordinary-character and line-delimiter
+     * handling below; only signal/flow characters, handled above, bypass it.
+     * With ECHO off (e.g. a password prompt) there is nothing to edit against,
+     * so fall through to the plain cooked path.
+     */
+    if (t_flags & ECHO) {
+        tty_edit(c, tp);
+        goto endcase;
+    }
+#endif
     if (CCEQ(tp->t_erase, c) || CCEQ(CTRL('h'), c)) {
         if (tp->t_rawq.c_cc)
             ttyrub(unputc(&tp->t_rawq), tp);
