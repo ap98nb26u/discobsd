@@ -290,13 +290,23 @@ uart_poll_input(void)
      * i.e. the whole scheduler - forever.
      */
 #ifdef SERIAL_CONSOLE
-    for (n = 0; n < 32 && gsio_avail(); n++) {
-        int rc = gsio_getc_bounded();
-        if (rc < 0)
-            break;
-        /* A serial byte is console activity: wake the screen-saver. */
-        console_activity();
-        ttyinput(rc, tp);
+    /*
+     * Drain the interrupt-driven receive ring (gba_sio_uart.c). The bytes
+     * were captured off the single-byte SIO register the instant they
+     * arrived by gsio_rx_isr(); here we just hand them to the tty at
+     * idle()/Timer0 pace. Bounded at the ring size - it can hold no more.
+     */
+    {
+        extern void gsio_rx_service(void);
+        extern int gsio_rx_pop(void);
+        int rc;
+
+        gsio_rx_service();	/* empty the hardware FIFO into the ring */
+        for (n = 0; n < 64 && (rc = gsio_rx_pop()) >= 0; n++) {
+            /* A serial byte is console activity: wake the screen-saver. */
+            console_activity();
+            ttyinput(rc, tp);
+        }
     }
 #endif
 
