@@ -28,3 +28,16 @@ the GBA kernel can exec (needs the ISA-aware-exec kernel, commit 0e9de6f).
 NEEDS for on-hardware use: put a built .out into the userland SD/ROM image and
 run it from the shell; a proper lib Makefile to build crt0.o + a libc.a with
 the native tools; more libc (printf, string, malloc) as smlrc coverage grows.
+
+--- libc.c (item 2: C library, compiled by smlrc) ---
+libc.c: string (strlen/strcmp/strcpy/strchr/memcpy/memset), stdlib (atoi),
+stdio (putchar/puts/printf). printf supports %d %u %x %c %s %% and uses varargs
+- the SmallerC stack-based va model matches cgarm's frame (r0-r3 spilled
+contiguously to [fp+8..20], stack args at [fp+24+]), so it Just Works.
+Build: smlrc-arm libc.c libc.s; as_arm -o libc.o libc.s. Link libc.o + clib.o.
+LIMITATION: a call with >4 args errors (cgarm errorInternal 200), so printf is
+limited to fmt + <=3 varargs until item 4 (>4-arg AAPCS stack passing) lands -
+that is the key unlock for full printf. Validated in Unicorn AND on the real
+kernel via mgbarun (a printf program auto-run at boot printed correctly).
+Still TODO for item 2: malloc/free (bump allocator over sbrk), more string/
+ctype/stdio as needed.
