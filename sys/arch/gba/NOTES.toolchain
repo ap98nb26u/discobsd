@@ -294,9 +294,21 @@ division through a self-hosted __aeabi_uidiv/idiv runtime written in C
 `mainall` that sums 8 such functions - all correct. Plus the 42/42 encoder and
 22/22 single-object functional tests from section 8.
 
+INTEGRATED into the tree (2026-09-16): the ARM assembler and linker now live at
+usr.bin/as/as_arm.c and usr.bin/ld/ld_arm.c and are built for MACHINE_ARCH=arm
+(the Makefiles pick as_arm.o/ld_arm.o via a shell `!=` select that works under
+both BSD make and GNU make; mips keeps as.c/ld.c). RARM_PC24=0x06 added to
+include/a.out.h and tools/aoututils/include/a.out.h. Both sources compile clean
+via the tree's arm7tdmi toolchain; the full self-hosted chain (9/9) re-verified
+through the integrated sources. CLI: `as_arm -o out.o in.s` (object; -b flat,
+-e encode), `ld_arm -Ttext=<hex> -e <entry> -o out obj...`. Dev harnesses moved
+to usr.bin/as/arm-dev/ (build.sh builds them from the tree sources).
+
 REMAINING for a complete Phase 1:
-- Integrate the prototypes into usr.bin/{as,ld} (+ tools/aoututils/{as,ld}) and
-  the build; add the RARM_PC24 constant to the shared a.out.h.
+- tools/aoututils/{as,ld} host builds for arm (optional; the arm build uses
+  arm-none-eabi today, so the host ARM as/ld are only needed to self-host).
+- Wire the cc driver (usr.bin/cc) to call smlrc+as_arm+ld_arm for arm, and
+  give ld_arm real -l/-L/crt0 handling (it currently ignores unknown flags).
 - Thumb interworking veneers in ld (to link the Thumb-built libc), OR build an
   ARM libc.
 - __aeabi_idivmod/uidivmod (r0=quot, r1=rem) for '%' - needs a tiny asm runtime

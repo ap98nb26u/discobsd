@@ -128,9 +128,11 @@ int main(int argc,char**argv)
     int i, verbose=0;
     for(i=1;i<argc;i++){
         if(!strncmp(argv[i],"-Ttext=",7)) Ttext=strtoul(argv[i]+7,0,0);
+        else if(!strcmp(argv[i],"-T")) Ttext=strtoul(argv[++i],0,0);
         else if(!strcmp(argv[i],"-e")) entry=argv[++i];
         else if(!strcmp(argv[i],"-o")) out=argv[++i];
         else if(!strcmp(argv[i],"-v")) verbose=1;
+        else if(argv[i][0]=='-') { /* ignore other flags (e.g. -X, -N from cc) */ }
         else load_obj(argv[i]);
     }
     /* layout: text region, then data, then bss */
