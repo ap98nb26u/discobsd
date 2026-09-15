@@ -1019,6 +1019,20 @@ ttbreakc (c, tp)
  * option.
  */
 
+#ifndef TTYEDIT_HISTORY
+#define TTYEDIT_HISTORY 8	/* command-history lines (up/down); -D overrides */
+#endif
+/*
+ * Shared command-history ring: recently committed console lines, recalled by
+ * the up/down cursor keys. One ring for the machine (a single interactive
+ * console), so it is deliberately not per-tty - see the note in <sys/tty.h>.
+ */
+static char          ted_hist[TTYEDIT_HISTORY][256];
+static unsigned char ted_hlen[TTYEDIT_HISTORY];	/* length of each stored line */
+static unsigned char ted_hcount;		/* valid entries, 0..HISTORY */
+static unsigned char ted_hnext;			/* ring slot the next push uses */
+static short         ted_hpos;			/* recall depth: 0 = new line */
+
 /* Move the on-screen cursor left n columns (a backspace does not erase). */
 static void
 ted_back(struct tty *tp, int n)
@@ -1059,8 +1073,119 @@ ted_commit(struct tty *tp, int c)
     ttwakeup(tp);
     if (tp->t_flags & ECHO)
         ttyecho(c, tp);
+    /*
+     * Save a non-empty line into the command-history ring, unless it just
+     * repeats the most recent entry. Then leave recall at the new line.
+     */
+    if (tp->t_edlen > 0) {
+        int prev = (ted_hnext + TTYEDIT_HISTORY - 1) % TTYEDIT_HISTORY;
+        int dup = (ted_hcount > 0 && ted_hlen[prev] == tp->t_edlen);
+
+        if (dup) {
+            for (i = 0; i < tp->t_edlen; i++)
+                if (ted_hist[prev][i] != tp->t_edbuf[i]) {
+                    dup = 0;
+                    break;
+                }
+        }
+        if (! dup) {
+            for (i = 0; i < tp->t_edlen; i++)
+                ted_hist[ted_hnext][i] = tp->t_edbuf[i];
+            ted_hlen[ted_hnext] = (unsigned char) tp->t_edlen;
+            ted_hnext = (unsigned char)((ted_hnext + 1) % TTYEDIT_HISTORY);
+            if (ted_hcount < TTYEDIT_HISTORY)
+                ted_hcount++;
+        }
+    }
+    ted_hpos = 0;
     tp->t_edlen = tp->t_edcur = 0;
     tp->t_edesc = 0;
+}
+
+/* Move the cursor to the start of the line (Home). */
+static void
+ted_home(struct tty *tp)
+{
+    ted_back(tp, tp->t_edcur);
+    tp->t_edcur = 0;
+}
+
+/* Move the cursor to the end of the line (End). */
+static void
+ted_end(struct tty *tp)
+{
+    int i;
+
+    for (i = tp->t_edcur; i < tp->t_edlen; i++)
+        (void) ttyoutput(tp->t_edbuf[i] & 0377, tp);
+    tp->t_edcur = tp->t_edlen;
+}
+
+/* Delete the character AT the cursor (forward delete / Del key). */
+static void
+ted_del_fwd(struct tty *tp)
+{
+    int i;
+
+    if (tp->t_edcur < tp->t_edlen) {
+        for (i = tp->t_edcur; i < tp->t_edlen - 1; i++)
+            tp->t_edbuf[i] = tp->t_edbuf[i+1];
+        tp->t_edlen--;
+        ted_redraw_tail(tp, tp->t_edcur, 1);
+    }
+}
+
+/*
+ * Replace the whole edited line, on screen and in t_edbuf, with s[0..len).
+ * Used to recall a history entry: repaint from column 0, then blank over any
+ * tail the old (longer) line left behind, and leave the cursor at the end.
+ */
+static void
+ted_set_line(struct tty *tp, const char *s, int len)
+{
+    int old = tp->t_edlen, i;
+
+    ted_back(tp, tp->t_edcur);			/* cursor to column 0 */
+    for (i = 0; i < len; i++) {
+        tp->t_edbuf[i] = s[i];
+        (void) ttyoutput(s[i] & 0377, tp);
+    }
+    for (i = len; i < old; i++)			/* paint over the old tail */
+        (void) ttyoutput(' ', tp);
+    ted_back(tp, (old > len) ? (old - len) : 0);
+    tp->t_edlen = len;
+    tp->t_edcur = len;
+}
+
+/* Recall an older history line (up-arrow). t_hpos: 0 = the new line being
+ * typed, 1 = newest saved, up to t_hcount = oldest. */
+static void
+ted_hist_up(struct tty *tp)
+{
+    int idx;
+
+    if (ted_hpos >= ted_hcount)			/* nothing older */
+        return;
+    ted_hpos++;
+    idx = (ted_hnext + TTYEDIT_HISTORY - ted_hpos) % TTYEDIT_HISTORY;
+    ted_set_line(tp, ted_hist[idx], ted_hlen[idx]);
+}
+
+/* Recall a newer history line, or return to an empty new line (down-arrow). */
+static void
+ted_hist_down(struct tty *tp)
+{
+    int idx;
+
+    if (ted_hpos <= 0)				/* already on the new line */
+        return;
+    ted_hpos--;
+    if (ted_hpos == 0) {
+        ted_set_line(tp, tp->t_edbuf, 0);	/* clear back to a new line */
+        return;
+    }
+    idx = (ted_hnext + TTYEDIT_HISTORY - ted_hpos) % TTYEDIT_HISTORY;
+    ted_set_line(tp, ted_hist[idx], ted_hlen[idx]);
 }
 
 /*
@@ -1082,11 +1207,18 @@ tty_edit(int c, struct tty *tp)
      * all three at once. Either way we assemble them here.
      */
     if (tp->t_edesc == 1) {                     /* saw ESC */
-        tp->t_edesc = (c == '[') ? 2 : 0;
-        if (tp->t_edesc == 2)
+        if (c == '[') {
+            tp->t_edesc = 2;
+            tp->t_edparm = 0;
             return;
+        }
+        tp->t_edesc = 0;
         /* a lone ESC: drop it and process c as an ordinary character */
-    } else if (tp->t_edesc == 2) {              /* saw ESC[ */
+    } else if (tp->t_edesc == 2) {              /* saw ESC[ , maybe collecting digits */
+        if (c >= '0' && c <= '9') {
+            tp->t_edparm = tp->t_edparm * 10 + (c - '0');
+            return;                             /* stay in the sequence */
+        }
         switch (c) {
         case 'C':                               /* cursor right */
             if (tp->t_edcur < tp->t_edlen) {
@@ -1100,14 +1232,25 @@ tty_edit(int c, struct tty *tp)
                 (void) ttyoutput('\b', tp);
             }
             break;
-        case 'H':                               /* home */
-            ted_back(tp, tp->t_edcur);
-            tp->t_edcur = 0;
+        case 'A':                               /* up: older history */
+            ted_hist_up(tp);
             break;
-        case 'F':                               /* end */
-            for (i = tp->t_edcur; i < tp->t_edlen; i++)
-                (void) ttyoutput(tp->t_edbuf[i] & 0377, tp);
-            tp->t_edcur = tp->t_edlen;
+        case 'B':                               /* down: newer history */
+            ted_hist_down(tp);
+            break;
+        case 'H':                               /* home (ESC[H) */
+            ted_home(tp);
+            break;
+        case 'F':                               /* end (ESC[F) */
+            ted_end(tp);
+            break;
+        case '~':                               /* ESC[n~ : 1 home, 3 del, 4 end */
+            if (tp->t_edparm == 1)
+                ted_home(tp);
+            else if (tp->t_edparm == 4)
+                ted_end(tp);
+            else if (tp->t_edparm == 3)
+                ted_del_fwd(tp);
             break;
         default:                                /* A/B (no history), etc: ignore */
             break;

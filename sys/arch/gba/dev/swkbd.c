@@ -48,10 +48,11 @@ extern struct tty uartttys[];
  * is sent. For a special key `label` is a 2-char string drawn in the
  * key's two cells and `n` (== `s`) is the control character sent.
  */
-/* kind values: an ordinary character, or a sticky modifier toggle. */
+/* kind values: an ordinary character, a sticky modifier toggle, or Del. */
 #define K_CHAR	0
 #define K_SHIFT	1
 #define K_CTRL	2
+#define K_DEL	3	/* forward delete: sends ESC[3~ (see swkbd_press) */
 
 struct swkey {
 	char		n;	/* character sent / drawn, unshifted */
@@ -95,7 +96,7 @@ static const struct swkey row3[] = {
  * as a literal 0x7f glyph on the LCD.
  */
 static const struct swkey row4[] = {
-	{'\t','\t',"Tb"},{' ',' ',"Sp"},{'\b','\b',"Bs"},
+	{'\t','\t',"Tb"},{' ',' ',"Sp"},{'\b','\b',"Bs"},{0,0,"De",K_DEL},
 	{'\r','\r',"En"},{0x1b,0x1b,"Es"},
 	{0,0,"Sh",K_SHIFT},{0,0,"Ct",K_CTRL},
 };
@@ -217,6 +218,15 @@ swkbd_press(void)
 	if (k->kind == K_CTRL) {
 		swkbd_ctrl = !swkbd_ctrl;
 		swkbd_draw();
+		return;
+	}
+	if (k->kind == K_DEL) {
+		/* Forward delete: the standard Del sequence, which the tty line
+		 * editor turns into "delete the character at the cursor". */
+		swkbd_send(0x1b);
+		swkbd_send('[');
+		swkbd_send('3');
+		swkbd_send('~');
 		return;
 	}
 
@@ -393,15 +403,20 @@ swkbd_poll(void)
 		 * vi and other full-screen apps get real arrow input. Uses `act`
 		 * (fresh presses + auto-repeat) so a held direction repeats,
 		 * exactly as the selection move does when the keyboard is shown.
+		 *
+		 * Holding R (the Ctrl shoulder) turns Left/Right into Home/End
+		 * (ESC[H / ESC[F), extending cursor movement to the whole-line
+		 * jumps the tty line editor understands - Ctrl+arrow, in effect.
 		 */
+		int he = (down & KEY_R);
 		if (act & KEY_UP)
 			swkbd_send_esc('A');
 		if (act & KEY_DOWN)
 			swkbd_send_esc('B');
 		if (act & KEY_RIGHT)
-			swkbd_send_esc('C');
+			swkbd_send_esc(he ? 'F' : 'C');		/* End : right */
 		if (act & KEY_LEFT)
-			swkbd_send_esc('D');
+			swkbd_send_esc(he ? 'H' : 'D');		/* Home : left */
 		return;
 	}
 

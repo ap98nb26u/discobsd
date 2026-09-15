@@ -28,6 +28,7 @@ options         "HALTREBOOT"                # If halted, press key to reboot
 # machdep.console_blank sysctl.
 options         "SCREEN_BLANK_SECS=60"      # blank LCD after 60s idle
 options         "TTYEDIT"                   # cooked-mode command-line editing (cursor/insert/delete)
+options         "TTYEDIT_HISTORY=8"         # command-history lines (up/down)
 
 #options        "GLOBAL_DEBUG"              # Enable debugging
 options         "DIAGNOSTIC"                # Enable diagnostics
