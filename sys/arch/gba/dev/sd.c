@@ -977,6 +977,14 @@ card_release(int unit)
 }
 
 /*
+ * How many times to re-attempt the initial card bring-up at boot before
+ * declaring no card. See the comment in sd_setup() - this turns the
+ * EverDrive-menu "START fails, pick it again" cold-boot flakiness into a
+ * silent in-boot retry.
+ */
+#define SD_INIT_RETRIES 8
+
+/*
  * Detect a card.
  */
 static int
@@ -984,10 +992,31 @@ sd_setup(int unit)
 {
     struct disk *du = &sddrives[unit];
     u_short buf[256];
+    int tries;
 
-    if (! card_init(unit)) {
-        printf("sd%d: no SD/MMC card detected\n", unit);
-        return 0;
+    /*
+     * Retry the card bring-up a few times before giving up. On real
+     * EverDrive hardware the SD card / FPGA can still be unsettled when
+     * control reaches this ROM - especially right after the EverDrive's
+     * own menu firmware has just driven the card to load us - and a
+     * single card_init() then times out a command and returns 0, which
+     * aborts the root mount (panic "No root filesystem found!") and
+     * reboots. That is what the user sees as the menu's START "failing"
+     * and having to be selected two or three times. card_init() issues
+     * CMD0 (GO_IDLE_STATE) and re-runs its own power/signal settle delay
+     * on every call, so re-attempting is safe and self-contained: each
+     * retry hands the card another settle window plus a clean reset,
+     * which brings it up within this same boot instead of costing a whole
+     * reboot cycle. The mrams (ROM-root) build never touches the SD and
+     * never hits this. Treat the cold-boot flakiness as an EverDrive/SD
+     * fact of life and absorb it here rather than surfacing it.
+     */
+    for (tries = 0; ! card_init(unit); tries++) {
+        if (tries >= SD_INIT_RETRIES) {
+            printf("sd%d: no SD/MMC card detected\n", unit);
+            return 0;
+        }
+        printf("sd%d: card not ready, retrying init (%d)\n", unit, tries + 1);
     }
     /* Get the size of raw partition. */
     bzero(du->part, sizeof(du->part));
