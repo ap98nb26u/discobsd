@@ -1,0 +1,30 @@
+Native ARM (a.out) C runtime for DiscoBSD/GBA - crt0 + minimal libc, built by
+this port's own toolchain (smlrc -> as_arm -> ld_arm). Prototype; not yet wired
+into a lib Makefile. See sys/arch/gba/NOTES.toolchain section 11.
+
+crt0.s  - _start: environ=envp; call main(argc,argv,envp); _exit(). ARM, links
+          at an even address so ISA-aware exec (syscall.c) enters ARM state.
+clib.s  - syscalls via the simulated-SWI trampoline at 0x03006400: write, read,
+          open, close, lseek, _exit/exit, _brk; sbrk (uses _end/_curbrk); errno;
+          __aeabi_uidiv/idiv/uidivmod/idivmod (repeated subtraction - correct,
+          slow; avoids instructions as_arm doesn't yet emit, e.g. flag-setting
+          S-suffix / tst). Only as_arm-supported instructions are used.
+
+Build one native ARM a.out and run it:
+  ./build.sh                              # builds as_arm ld_arm smlrc-arm (parent)
+  ./smlrc-arm rt/hello.c hello.s
+  ./as_arm -o hello.o hello.s
+  ./as_arm -o crt0.o rt/crt0.s
+  ./as_arm -o clib.o rt/clib.s
+  ./ld_arm -e _start -o hello.out crt0.o hello.o clib.o     # OMAGIC a.out (GBA)
+  python3 rt/run_omagic.py hello.out       # load like the kernel, run in Unicorn
+  # (ld_arm -b ... = flat image for rt/run_rt.py instead)
+
+Validated in Unicorn (emulated syscall trampoline): hello.c prints its string;
+num.c prints numbers via division/modulo/recursion. hello.out/num.out are real
+OMAGIC/MID=0 a.out executables (a_entry even = ARM, load base 0x02001800) that
+the GBA kernel can exec (needs the ISA-aware-exec kernel, commit 0e9de6f).
+
+NEEDS for on-hardware use: put a built .out into the userland SD/ROM image and
+run it from the shell; a proper lib Makefile to build crt0.o + a libc.a with
+the native tools; more libc (printf, string, malloc) as smlrc coverage grows.

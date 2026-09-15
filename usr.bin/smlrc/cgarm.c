@@ -264,10 +264,21 @@ void GenStoreMem(int rs, int base, int ofs, int opSz)
   }
 }
 
+/* load the address of a symbol/label into reg: "ldr reg, =<label>". Routes
+   through GenPrintLabel so numeric labels (string literals, static data) get
+   the ".L" prefix - a bare "ldr r0, =3" would load the integer 3, not &.L3. */
+STATIC
+void GenLdrEq(int reg, int label)
+{
+  printf2("\tldr\t"); prn(reg); printf2(", =");
+  GenPrintLabel(IdentTable + label);
+  puts2("");
+}
+
 STATIC
 void GenReadIdent(int rd, int opSz, int label)
 {
-  printf2("\tldr\t"); prn(rd); printf2(", =%s\n", IdentTable + label);
+  GenLdrEq(rd, label);
   GenLoadMem(rd, rd, 0, opSz);
 }
 
@@ -279,7 +290,7 @@ void GenReadIndirect(int rd, int rsrc, int opSz) { GenLoadMem(rd, rsrc, 0, opSz)
 STATIC
 void GenWriteIdent(int rs, int opSz, int label)
 {
-  printf2("\tldr\tip, =%s\n", IdentTable + label);
+  GenLdrEq(ArmIP, label);
   GenStoreMem(rs, ArmIP, 0, opSz);
 }
 
@@ -966,7 +977,7 @@ void GenExpr0(void)
                            t == tokInc || t == tokDec ||
                            t == tokPostInc || t == tokPostDec)))
       {
-        printf2("\tldr\t"); prn(GenWreg); printf2(", =%s\n", IdentTable + v);
+        GenLdrEq(GenWreg, v);
       }
       gotUnary = 1;
       break;
