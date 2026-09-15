@@ -232,7 +232,79 @@ Deferred (documented limits, NOT bugs): struct-by-value, float (both #ifdef'd
 off), >4 args, __interrupt functions (GenIsrProlog=errorInternal(201)), stack
 8-byte alignment for variadic/double libc calls.
 
-NEXT: 1b retarget usr.bin/as (+ tools/aoututils/as) for ARM/Thumb encodings +
-ARM reloc types; 1c retarget usr.bin/ld for ARM relocs + Thumb veneers; then
-lift the >4-arg / struct / float limits. cgarm.c is UNCOMMITTED (awaiting the
-user's go-ahead).
+cgarm.c committed 839dd10.
+
+## 8. Phase 1b status: ARM assembler core DONE + validated (2026-09-15)
+
+Prototype lives in usr.bin/as/arm-dev/ (asarm.c + Unicorn harnesses; a
+development prototype, NOT yet wired into the build - see its README).
+
+asarm.c is a from-scratch ARMv4T assembler for the EXACT assembly subset
+cgarm.c emits (it was cleaner than retrofitting the MIPS as's deeply
+MIPS-shaped operand-flag table). It reuses nothing from usr.bin/as yet; the
+plan is to fold the validated encoder into usr.bin/as (+ tools/aoututils/as)
+alongside the a.out object framing (which IS reused - see below).
+
+DONE + validated:
+- ARM instruction ENCODER: `asarm -e "<instr>"` prints the 32-bit encoding.
+  Byte-exact vs `arm-none-eabi-as -march=armv4t` for all 42 instruction forms
+  cgarm emits (mov/mvn/movCC, add/sub/rsb/and/orr/eor/bic +imm/+reg, cmp/cmn,
+  lsl/lsr/asr imm+reg, mul, push/pop reglist incl. the single-reg str/ldr
+  form, ldr/str/ldrb/strb/ldrh/strh/ldrsb/ldrsh with [rn,#imm]/pre!/post,
+  b/bCC/bl, bx, mov lr,pc). Immediate encoding uses the 8-bit-rotated form.
+- Two-pass file ASSEMBLER: `asarm in.s out.bin`. Labels (name: and .Lnnn:),
+  sections (.text/.data/.section .rodata/.bss), data dirs (.word/.short/.byte/
+  .space/.ascii/.align), .globl, and the `ldr rd,=imm|=sym` literal-pool
+  pseudo flushed at `.ltorg` (pc-relative `ldr rd,[pc,#off]` + pooled .word).
+  Produces a flat text+rodata+data image with internal labels + pools resolved.
+- Functional: smlrc-arm -> asarm -> flat image -> Unicorn = 22/22 external-free
+  programs correct (recursion fact/fib/sumc, calls, if/while/for, arrays, big
+  immediates, char/short, comparisons). External-free because linking to
+  libgcc (__aeabi_*) needs ld (Phase 1c).
+  KEY BUG fixed: literal-pool bookkeeping must be driven by a per-pass running
+  ldr-index (curldr), not the pass-1-only total (npool), or pass 2 never
+  reserves/emits the pool word and the next function overwrites its slot.
+
+DONE (Phase 1b increment 2): a.out OBJECT output - `asarm -c in.s out.o`.
+Header a_midmag=RMAGIC(0406, MID=0) a_entry=0; then text, data(=.data ++
+.rodata), text-relocs, data-relocs, symtab. Relocs are PARALLEL-PER-WORD (one
+record per 4-byte word, in order; RABS=0x00 for a word needing none - matches
+usr.bin/as makereloc's `for i+=WORDSZ`). Record = flags byte (RSMASK seg |
+RFMASK fmt) [+3-byte index if REXT]. nlist = n_len(1) n_type(1) n_value(4 LE)
+name; symbol n_value is SEGMENT-RELATIVE, n_type = N_TEXT/N_DATA/N_BSS|N_EXT.
+ARM reloc types: RBYTE32=0x01 (ABS32) for `.word sym`/pool `=sym` (internal =
+segment reloc RSEG_TEXT/DATA/BSS, external = RSEG_EXT+index); new RARM_PC24=
+0x06 for `bl <external>` (internal bl is PC-relative = resolved, no reloc).
+KEY BUG fixed: an external symbol referenced only by a reloc must be forced
+into the symtab (asarm's addrel now calls sym_get) or its reloc gets index 0.
+
+## 9. Phase 1c: ldarm (linker) DONE + full self-hosted chain validated
+
+usr.bin/as/arm-dev/ldarm.c - reads asarm's a.out objects, concatenates
+text/data/bss, builds a global symbol table, applies ARM relocations (ABS32
+= add final segment/symbol base; PC24 = (target-(P+8))>>2 into the low 24
+bits), writes a flat linked image + prints ENTRY/SYM. Thumb interworking
+veneers not needed yet (all-ARM); that is the remaining piece for a Thumb libc.
+  ldarm -Ttext=<hex> -e <entry> -o out.bin obj1.o obj2.o ...
+
+FULL CHAIN VALIDATED (smlrc-arm -> asarm -c -> ldarm -> Unicorn, NO GNU tools
+in the chain): cross-object calls (external PC24), bss globals (ABS32),
+division through a self-hosted __aeabi_uidiv/idiv runtime written in C
+(repeated subtraction, no '/'), recursion (fact/fib), loops, arrays, and a
+`mainall` that sums 8 such functions - all correct. Plus the 42/42 encoder and
+22/22 single-object functional tests from section 8.
+
+REMAINING for a complete Phase 1:
+- Integrate the prototypes into usr.bin/{as,ld} (+ tools/aoututils/{as,ld}) and
+  the build; add the RARM_PC24 constant to the shared a.out.h.
+- Thumb interworking veneers in ld (to link the Thumb-built libc), OR build an
+  ARM libc.
+- __aeabi_idivmod/uidivmod (r0=quot, r1=rem) for '%' - needs a tiny asm runtime
+  (a C function can't return two registers); asarm would need numeric local
+  labels (1f/1b) or use .L labels.
+- smlrc side: >4 args, struct-by-value, float.
+- Phase 2: cross-build cc/as/ld themselves into GBA a.out and run on-target.
+
+Reproduce: pip install --user --break-system-packages unicorn; build smlrc-arm
+(NOTES 7), asarm (`gcc -O1 -o asarm asarm.c`), ldarm (`gcc -O1 -o ldarm
+ldarm.c`); harnesses run.py/run_asarm.py/run_ld.py in usr.bin/as/arm-dev/.
