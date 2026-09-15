@@ -64,6 +64,19 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 #endif
 
+// ARM target (GBA native toolchain, cgarm.c). Struct-by-value is not yet
+// implemented for ARM (it needs the StructCpy/StructPush runtime helpers,
+// which GenFin only emits for x86/MIPS), so disable it for now - the first
+// ARM targets are small programs. See sys/arch/gba/NOTES.toolchain.
+#ifdef ARM
+#ifndef NO_STRUCT_BY_VAL
+#define NO_STRUCT_BY_VAL
+#endif
+#ifndef NO_FP
+#define NO_FP
+#endif
+#endif
+
 #ifndef __SMALLER_C__
 
 #include <limits.h>
@@ -2262,11 +2275,18 @@ int GetToken(void)
 #endif
 #include "cgmips.c"
 #else
+#ifdef ARM
+#ifndef CAN_COMPILE_32BIT
+#error ARM target requires a 32-bit compiler
+#endif
+#include "cgarm.c"
+#else
 #ifdef TR3200
 #include "cgtr3k2.c"
 #else
 #include "cgx86.c"
 #endif // #ifdef TR3200
+#endif // #ifdef ARM
 #endif // #ifdef MIPS
 
 // expr.c code
