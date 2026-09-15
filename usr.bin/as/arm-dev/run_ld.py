@@ -6,7 +6,7 @@ def build(cfiles):
     objs=[]
     for c in cfiles:
         s=c[:-2]+".s"; o=c[:-2]+".o"
-        subprocess.check_call(["./smlrc-arm",c,s]); subprocess.check_call(["./asarm","-c",s,o])
+        subprocess.check_call(["./smlrc-arm",c,s]); subprocess.check_call(["./asarm","-o",o,s])
         objs.append(o)
     return objs
 def link(objs,entry):
