@@ -10,7 +10,7 @@ def build(cfiles):
         objs.append(o)
     return objs
 def link(objs,entry):
-    r=subprocess.run(["./ldarm","-Ttext=0x%x"%TT,"-e",entry,"-o","out.bin"]+objs,capture_output=True,text=True)
+    r=subprocess.run(["./ldarm","-b","-Ttext=0x%x"%TT,"-e",entry,"-o","out.bin"]+objs,capture_output=True,text=True)
     if r.returncode!=0: raise RuntimeError(r.stderr)
     ent=None
     for ln in r.stderr.splitlines():
