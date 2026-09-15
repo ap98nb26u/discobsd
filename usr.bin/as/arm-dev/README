@@ -1,0 +1,38 @@
+DiscoBSD/GBA native ARM toolchain - development prototypes (Phase 1b + 1c).
+Full status in sys/arch/gba/NOTES.toolchain sections 8-9.
+
+These are HOST development prototypes that prove the design end to end. They
+are validated but NOT yet folded into usr.bin/as / usr.bin/ld or the build.
+
+asarm.c  - ARM (ARMv4T) assembler for the exact subset usr.bin/smlrc/cgarm.c
+           emits. Two modes:
+             asarm -e "<one instr>"  -> print the 32-bit encoding (oracle)
+             asarm in.s out.bin      -> flat text+data image (labels + literal
+                                        pools resolved)
+             asarm -c in.s out.o     -> DiscoBSD a.out RELOCATABLE OBJECT
+                                        (header/segments/symtab/ARM relocs)
+           Validated: 42/42 encodings byte-exact vs arm-none-eabi-as; 22/22
+           single-object programs run in Unicorn.
+
+ldarm.c  - ARM linker. Reads asarm's a.out objects, lays out text/data/bss,
+           resolves globals, applies ARM relocs (ABS32 + PC24), writes a flat
+           linked image + prints ENTRY/SYM.
+             ldarm -Ttext=<hex> -e <entry> -o out.bin a.o b.o ...
+           (Thumb interworking veneers: not needed while all-ARM; TODO for a
+           Thumb libc.)
+
+FULL SELF-HOSTED CHAIN (no GNU tools): smlrc-arm -> asarm -c -> ldarm -> run.
+Validated on cross-object calls, bss globals, division via a self-hosted
+__aeabi runtime (rt.c), recursion, loops, arrays.
+
+Build + validate (needs arm-none-eabi-as only for the encoder oracle; Unicorn
+for execution):
+  pip install --user --break-system-packages unicorn
+  # smlrc-arm: see NOTES.toolchain section 7 for the exact gcc -DARM line
+  gcc -O1 -o asarm asarm.c
+  gcc -O1 -o ldarm ldarm.c
+  python3 run_ld.py        # or run.py / run_asarm.py
+
+Test inputs: suite.c exta.c big.c lib.c app.c divp.c rt.c
+Harnesses:   run.py (via arm-none-eabi-ld+libgcc), run_asarm.py (asarm flat),
+             run_ld.py (asarm -c + ldarm, fully self-hosted)
