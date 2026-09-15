@@ -22,18 +22,10 @@
 #define MAXLIT   4096
 #define TEXTMAX  (1<<20)
 
-static unsigned char text[TEXTMAX];
-static int textlen;
-
 /* symbols */
 struct sym { char name[64]; int addr; int defined; int global; };
 static struct sym syms[MAXSYM];
 static int nsym;
-
-/* literal pool: pending ldr= entries awaiting the next .ltorg */
-struct lit { int at; unsigned val; char sym[64]; int issym; };
-static struct lit lits[MAXLIT];
-static int nlit;
 
 static const char *infile = "<expr>";
 static int lineno;
@@ -350,8 +342,6 @@ static unsigned encode(char *mnem, char *ops, int addr, char *extname, int *extk
         else if (!strcmp(base,"ldrsh")){isload=1;half=1;sign=1;}
         if (isload>=0) {
             /* operands: rd, [rn] | [rn, #imm] | [rn, #imm]! | [rn], #imm | =lit */
-            char *comma = ops;
-            /* first operand rd up to first ',' at depth 0 */
             no = split_ops(ops,o,4);
             int rd = reg_num(o[0]);
             /* ldr rd, =literal */
@@ -741,9 +731,17 @@ static void do_expr(const char *instr)
 
 int main(int argc, char **argv)
 {
-    if (argc>=3 && !strcmp(argv[1],"-e")) { do_expr(argv[2]); return 0; }
-    if (argc>=4 && !strcmp(argv[1],"-c")) { objmode=1; return assemble(argv[2], argv[3]); }
-    if (argc>=3) return assemble(argv[1], argv[2]);
-    fprintf(stderr, "usage: asarm -e \"<instr>\"  |  asarm [-c] <in.s> <out>\n");
-    return 2;
+    const char *in=NULL, *out=NULL;
+    int i, flat=0;
+    for (i=1; i<argc; i++) {
+        if (!strcmp(argv[i],"-e")) { do_expr(argv[i+1]?argv[i+1]:""); return 0; }
+        else if (!strcmp(argv[i],"-o")) { out=argv[++i]; }
+        else if (!strcmp(argv[i],"-b")) { flat=1; }   /* flat image (dev/test) */
+        else if (argv[i][0]=='-') { /* ignore other flags (e.g. from cc) */ }
+        else { if (!in) in=argv[i]; else if (!out) out=argv[i]; }
+    }
+    if (!in)  { fprintf(stderr,"as_arm: no input file\n"); return 2; }
+    if (!out) { fprintf(stderr,"as_arm: no output file (use -o)\n"); return 2; }
+    objmode = !flat;                  /* default: emit an a.out object */
+    return assemble(in, out);
 }

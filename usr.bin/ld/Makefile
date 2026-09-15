@@ -7,15 +7,18 @@ include ${TOPSRC}/share/mk/sys.mk
 CFLAGS		+= -Wall -Os
 LDFLAGS		+=
 
-SRCS		= ld.c
-OBJS            = ld.o
+# ARM targets (gba/stm32) use the native ARM linker (ld_arm.c); MIPS (pic32)
+# keeps the 2BSD MIPS linker (ld.c). Shell-based selection so it works under
+# both BSD make and GNU make (like sys.mk). See sys/arch/gba/NOTES.toolchain.
+LDOBJ!=		if [ x"${MACHINE_ARCH}" = x"arm" ]; then echo ld_arm.o; else echo ld.o; fi
+
 MAN		= ld.0
 MANSRC		= ld.1
 
 all:            ld $(MAN)
 
-ld:             ${OBJS}
-		${CC} ${CFLAGS} ${LDFLAGS} -o ld.elf ${OBJS} ${LIBS}
+ld:             ${LDOBJ}
+		${CC} ${CFLAGS} ${LDFLAGS} -o ld.elf ${LDOBJ} ${LIBS}
 		${OBJDUMP} -S ld.elf > ld.dis
 		${SIZE} ld.elf
 		${ELF2AOUT} ld.elf $@ && rm ld.elf
