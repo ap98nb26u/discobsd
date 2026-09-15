@@ -83,7 +83,14 @@ struct tty {
     char            t_edbuf[256];       /* line being edited (<= TTYHOG) */
     short           t_edcur;            /* cursor position, 0..t_edlen */
     short           t_edlen;            /* current edited length */
+    short           t_edparm;           /* numeric param of an ESC[n~ seq */
     char            t_edesc;            /* incoming ESC-sequence state 0/1/2 */
+    /*
+     * Command history (up/down recall) lives in one shared ring in
+     * kern/tty.c, NOT here: this port has a single interactive console but
+     * two struct tty instances (uartttys + cons.c's cnttys), so a per-tty
+     * TTYEDIT_HISTORYx256B array would be allocated - and wasted - twice.
+     */
 #endif
 /* be careful of tchars & co. */
 #define t_erase     t_chars.tc_erase
