@@ -325,11 +325,41 @@ VERIFIED end to end: the exact driver pipeline run by hand on a program using
 #define macros - `cpp -P hello.c | smlrc-arm | as_arm -o | ld_arm` - links and
 returns the right value in Unicorn (70 for `(4+3)*10`).
 
+## 11. ARM crt0 + minimal libc + OMAGIC executables (2026-09-16)
+
+Native ARM (a.out) runtime in usr.bin/as/arm-dev/rt/ (crt0.s, clib.s), built by
+smlrc -> as_arm -> ld_arm. crt0.s: _start (environ=envp; main(argc,argv,envp);
+_exit) - ARM, even entry so ISA-aware exec enters ARM. clib.s: syscalls via the
+0x03006400 trampoline (write/read/open/close/lseek/_exit/exit/_brk), sbrk
+(_end/_curbrk), errno, and __aeabi_uidiv/idiv/uidivmod/idivmod (repeated
+subtraction - correct, slow; uses only instructions as_arm emits, so no
+flag-setting S-suffix or tst needed).
+
+ld_arm now emits a DiscoBSD **OMAGIC a.out executable by default**: 8-word
+header a_midmag=0x00000107 (OMAGIC 0407 | MID 0), a_text/a_data/a_bss,
+a_reltext=a_reldata=a_syms=0, a_entry=_start; text+data follow (bss implied);
+default load base 0x02001800 (override -T; -b = old flat image for Unicorn).
+Added linker symbols _end/_edata/_etext (+ no-underscore aliases). Verified the
+header (magic 0407, MID 0, entry EVEN=ARM, size=32+text+data).
+
+BUG FOUND+FIXED in cgarm.c (committed backend): label references in
+instructions used raw "=%s" so a string literal compiled to `ldr r0, =3`
+(the integer 3) instead of `ldr r0, =.L3`. Added GenLdrEq() routing through
+GenPrintLabel (".L" prefix for numeric labels); GenReadIdent/GenWriteIdent/
+tokIdent now use it. cgarm regression still 9/9.
+
+VALIDATED end to end in Unicorn with an emulated 0x03006400 trampoline: hello.c
+(write a string) and num.c (print numbers via /,%,recursion,char,&local) both
+run and exit 0, BOTH as a flat image (rt/run_rt.py) AND as an OMAGIC a.out
+loaded exactly like the kernel does - at 0x02001800, ARM entry, user stack with
+argc/argv/envp, syscall vector (rt/run_omagic.py). So `cc hello.c` now yields a
+GBA-loadable a.out that enters ARM and uses real syscalls.
+
 REMAINING for a complete Phase 1:
-- Full link of a normal program needs an ARM crt0 + libc and real -l/-L/crt0
-  handling in ld_arm (it currently ignores unknown flags; crt0.o passed
-  positionally would already be linked). Today only standalone/self-linked
-  programs link. This is the Phase 2 / libc piece.
+- On-hardware test: drop a built .out into the userland SD/ROM image and run it
+  from the shell (needs the ISA-aware-exec kernel 0e9de6f). A proper lib
+  Makefile to build crt0.o + libc.a with the native tools. More libc (printf,
+  string, malloc) as smlrc coverage grows. ld_arm -l/-L/archive handling.
 - tools/aoututils/{as,ld} host builds for arm (optional; the arm build uses
   arm-none-eabi today, so host ARM as/ld are only needed to self-host).
 - Testing the actual cc.c binary on host is awkward (absolute /usr paths); it
