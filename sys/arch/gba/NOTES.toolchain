@@ -304,11 +304,37 @@ through the integrated sources. CLI: `as_arm -o out.o in.s` (object; -b flat,
 -e encode), `ld_arm -Ttext=<hex> -e <entry> -o out obj...`. Dev harnesses moved
 to usr.bin/as/arm-dev/ (build.sh builds them from the tree sources).
 
+## 10. cc driver wired for ARM (2026-09-16)
+
+The driver usr.bin/cc/cc.c ALREADY drives the Smaller C toolchain for every
+arch: invoked as `cc`, its default mode is MODE_SMALLERC -> pass0 =
+/usr/libexec/smlrc, and it calls the preprocessor (/usr/bin/cpp) and `as`/`ld`
+by name (which resolve to as_arm/ld_arm on arm). The `#ifdef MULTITARGET`
+ccom_<mach> override (cc.c:828) is NOT compiled - the cc Makefile never defines
+MULTITARGET - so nothing clobbers the smlrc default. So the pipeline
+cc -> cpp -> smlrc -> as -> ld is arch-neutral and needed NO driver code change.
+
+The one gap was smlrc's own build: usr.bin/smlrc/Makefile hard-coded -DMIPS and
+-mips16. Fixed to select the code generator by MACHINE_ARCH (shell `!=`, both
+makes): arm -> -DARM (cgarm.c), no -mips16; mips -> -DMIPS -mips16. smlrc.o now
+compiles for arm via the tree's arm7tdmi toolchain. (cgarm.c also lost two
+unused functions; the 3 remaining warnings are pre-existing smlrc.c
+vprintf/vfprintf/vsprintf builtin-mismatch, unrelated.)
+
+VERIFIED end to end: the exact driver pipeline run by hand on a program using
+#define macros - `cpp -P hello.c | smlrc-arm | as_arm -o | ld_arm` - links and
+returns the right value in Unicorn (70 for `(4+3)*10`).
+
 REMAINING for a complete Phase 1:
+- Full link of a normal program needs an ARM crt0 + libc and real -l/-L/crt0
+  handling in ld_arm (it currently ignores unknown flags; crt0.o passed
+  positionally would already be linked). Today only standalone/self-linked
+  programs link. This is the Phase 2 / libc piece.
 - tools/aoututils/{as,ld} host builds for arm (optional; the arm build uses
-  arm-none-eabi today, so the host ARM as/ld are only needed to self-host).
-- Wire the cc driver (usr.bin/cc) to call smlrc+as_arm+ld_arm for arm, and
-  give ld_arm real -l/-L/crt0 handling (it currently ignores unknown flags).
+  arm-none-eabi today, so host ARM as/ld are only needed to self-host).
+- Testing the actual cc.c binary on host is awkward (absolute /usr paths); it
+  is validated by inspection + the by-hand pipeline above. On-target it runs in
+  Phase 2.
 - Thumb interworking veneers in ld (to link the Thumb-built libc), OR build an
   ARM libc.
 - __aeabi_idivmod/uidivmod (r0=quot, r1=rem) for '%' - needs a tiny asm runtime
