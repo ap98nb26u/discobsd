@@ -1,0 +1,238 @@
+# GBA native C toolchain — Phase 0 spec (Smaller C ARM/Thumb retarget)
+
+DiscoBSD/GBA. Goal: on-target self-hosted `cc/as/ld` emitting the GBA
+kernel's a.out. This is the read-only recon deliverable: the exact seams
+to fill for ARM/Thumb. No code changed.
+
+## 0. The pipeline that already exists in-tree (all BSD, MIPS today)
+
+    cc (usr.bin/cc)  driver: cpp -> smlrc -> as -> ld
+      usr.bin/cpp    preprocessor (Frunze)
+      usr.bin/smlrc  Smaller C compiler  -> emits ASSEMBLY TEXT
+      usr.bin/as     assembler (Vakulenko, MIPS32) -> a.out object (.o)
+      usr.bin/ld     linker -> a.out OMAGIC executable
+
+Key architectural fact confirmed: **smlrc emits assembly TEXT**, not object
+code. So the ARM job splits cleanly in three:
+  1. smlrc: add `cgarm.c` that emits ARM/Thumb *assembly text*.
+  2. as: parse+encode ARM/Thumb text -> a.out object with ARM relocs.
+  3. ld: resolve ARM relocs + ARM/Thumb interworking veneers -> OMAGIC.
+
+## 1. a.out container (LOCKED — verified against the kernel loader)
+
+Producer of the final executable = `usr.bin/ld`. It MUST match
+`sys/kern/exec_aout.c` + `sys/sys/exec_aout.h`:
+- `struct exec` = 8 LE 32-bit words: a_midmag, a_text, a_data, a_bss,
+  a_reltext, a_reldata, a_syms, a_entry. GBA is little-endian: no swap.
+- **OMAGIC (0407) ONLY** — the kernel loader's switch rejects everything else.
+- **MID = 0 (MID_ZERO), flags = 0** — loader asserts N_GETMID==0 && N_GETFLAG==0.
+  So a_midmag = 0x00000107. (NOT MID_ARM6.)
+- Load/link the whole text+data blob at **__user_data_start = 0x02001800**
+  (EWRAM), entry = a_entry = `_start`. bss after. No relocs/syms in the
+  final executable (a_reltext=a_reldata=a_syms=0). File = 32B header + blob.
+- Object files (as output / ld input): a.out header + BSD nlist
+  {n_strx, n_type(N_UNDF/ABS/TEXT/DATA/BSS | N_EXT), n_ovly, n_value} +
+  `struct reloc {flags, index, offset}` — all in tools/aoututils/include/
+  {a.out.h,nlist.h}, which #include sys/exec_aout.h (shared container, no drift).
+  `struct reloc` format nibble types today are MIPS (RWORD26, RHIGH16/S,
+  RGPREL...). **ARM needs new format types**: ABS32, ARM PC24 (BL/B),
+  Thumb BL/BLX pair, optionally movw/movt (R_ARM_MOVW/MOVT_ABS).
+
+## 2. smlrc backend contract (what cgarm.c must implement)
+
+Target selected by a `-D` macro in usr.bin/smlrc/Makefile
+(`-DMIPS` -> `#include "cgmips.c"`, `-DTR3200` -> cgx86.c). Add `-DARM` +
+`#ifdef ARM #include "cgarm.c"` in smlrc.c near line 2259-2270, plus
+`-D__arm__`. cgmips.c = 2264 lines; cgx86.c = 3408; budget cgarm.c similarly.
+
+### 2a. PUBLIC seam — the entry points smlrc.c (shared core) calls
+(from smlrc.c refs ~lines 390-436, 623, 7768). cgarm.c MUST provide all:
+
+  GenInit, GenInitParams, GenInitFinalize
+  GenStartCommentLine, GenWordAlignment(bss)
+  GenLabel(label,static), GenNumLabel(n)
+  GenZeroData(size,bss), GenIntData(size,val), GenAddrData(size,label,ofs),
+    GenStartAsciiString, GenDumpChar(ch)
+  GenExpr(), GenFin()
+  GenFxnProlog, GenFxnEpilog, GenIsrProlog, GenIsrEpilog, GenMaxLocalsSize
+  GenJumpUncond(label), GenJumpIfZero(label), GenJumpIfNotZero(label),
+    GenJumpIfEqual(val,label)
+  + flag GenExterns (emit .globl for non-static)
+
+Everything else in cgmips.c is INTERNAL to the backend's own implementation
+of the above (not called by the core): the instruction enum + GenPrintInstr,
+the operand model (GenPrintOperand: reg / indirect-reg / const / label /
+numlabel / label-lo), GenPrintInstr{1,2,3}Operands, the temp-register stack
+(GenPushReg/GenPopReg, MAX_TEMP_REGS=8), GenExpr0 (the big expression walker,
+~line 1533), GenPrep, GenCmp, GenReadIdent/Local/Indirect,
+GenWriteIdent/Local/Indirect, GenIncDec*, GenPostIncDec*. These are the bulk
+and get fully rewritten for ARM — this is Phase 1a, the multi-day part.
+
+### 2b. GenInit knobs to set for ARM
+SizeOfWord=4; OutputFormat=FormatSegmented; section headers
+".text"/".data"/".rdata"/".bss"; UseLeadingUnderscores=0 (or match as);
+FileHeader (MIPS uses ".set reorder"; ARM: probably ARM/Thumb mode directive
+like ".code 16"/".thumb" or ".arm" depending on default emission).
+.align 2 (word), .byte/.half/.word for data, .space for bss, .ascii for strings.
+
+### 2c. Frame / calling convention model (MIPS today, to map to ARM)
+MIPS frame (cgmips.c GenWriteFrameSize/GenFxnProlog/GenFxnEpilog, 522-598):
+- SP=$29 grows down; FP=$30; RA=$31 saved at [FP+4], old FP at [FP+0].
+- Prolog: `subu sp,sp,size; sw fp,size-8(sp); addu fp,sp,size-8; sw ra,4(fp)`
+  (ra store suppressed for leaf fns). Args A0-A3 spilled to [sp+4*i].
+- Frame size is BACK-PATCHED (GenUpdateFrameSize seeks with fsetpos to the
+  prolog position once locals are known) — cgarm.c must keep the same
+  fgetpos/fsetpos back-patch trick.
+- Locals at negative offsets from FP (CurFxnMinLocalOfs).
+- Temp-reg stack: T0..T7 hold subexpression results; T8/T9 scratch (like AT).
+- Return value in V0.
+ARM mapping (AAPCS-ish, keep it minimal/simple like Smaller C):
+  args r0-r3 (+stack), return r0, temps r4-r10 (callee-saved -> save/restore
+  in prolog/epilog), fp=r11, sp=r13, lr=r14, pc=r15. Leaf-fn optimization =
+  don't push lr. Same back-patched frame size. BL for calls (sets GenLeaf=0),
+  BX lr (or pop {..,pc}) for return, with ARM/Thumb interworking on calls.
+
+## 3. as (usr.bin/as, ~2862 lines) ARM/Thumb work
+
+**No -D arch seam** (unlike smlrc): MIPS knowledge is hardcoded, so retarget =
+edit/fork the C. Two trees to touch: usr.bin/as (the TARGET a.out binary,
+built via cross-gcc->ELF->elf2aout) and tools/aoututils/as (host copy used in
+the cross build). Both build the same sources.
+
+Pipeline (main as.c:2751): startup -> hashinit -> pass1 -> middle -> pass2 ->
+makereloc -> makesymtab -> makeheader. Output order: header, text, data(+strng),
+text-relocs, data-relocs, symbols.
+
+REPLACE:
+- **Opcode table** `struct optable {opcode; name; type; func}` (as.c:168-173) +
+  the operand-format flag scheme (FRD*/FRT*/FOFF16/FHIGH16/FAOFF28... as.c:178-200)
+  + the whole `optable[]` (as.c:209-333). These flags encode both which operands
+  to parse AND where they land in the 32-bit word = deeply MIPS-shaped.
+- Operand parse/field-pack in `makecmd` (1336-1756). DELETE the delay-slot /
+  FDSLOT / reorder machinery and the MIPS li/la macro expanders (emit_li 1270,
+  emit_la 1303) - no ARM analog.
+- The in-assembler fixup engine `relocate` (2477-2512): a SECOND copy of the
+  6 MIPS reloc formats to rewrite for ARM (mirrors ld's).
+- `lookreg` (802) register-name table -> ARM regs.
+KEEP (arch-neutral, works as-is): lexer getlex(976), expr parser
+getterm/getexpr(1067/1137), symtab lookname(925)/hashing, sections .text/.data/
+.bss/.rdata (setsection 772), labels incl. numeric 1f/1b (findlabel 2393), data
+dirs .word(2057)/.byte/.half/.space/.align(align 1938)/.ascii(makeascii 1783),
+.globl/.local/.weak/.comm(2126-2224), the many ignored GNU dirs (.ent/.type/...).
+On-disk records: nlist = n_len(1B) n_type(1B) n_value(4B) name-bytes (fputsym 505);
+reloc = variable 1-6B: flags(1B) [+index(3B) if REXT] [+offset(2B) if RHIGH16/S]
+(fputrel 463). Header `makeheader` (2457): a_midmag=RMAGIC bare (MID=0), a_entry=0.
+NEW reloc format types needed in the 3-bit RFMASK field (a.out.h:54-60, only 6/8
+used today): ABS32, ARM PC24 (BL/B), Thumb BL/BLX pair, movw/movt lo/hi.
+
+## 4. ld (usr.bin/ld, ~1571 lines) ARM/Thumb work
+
+Same two-tree note (usr.bin/ld + tools/aoututils/ld). Passes (main ld.c:1510):
+pass1(scan/resolve) -> middle(assign addrs) -> setupout -> pass2(relocate/emit)
+-> finishout.
+
+REPLACE:
+- **`relword` (ld.c:524-645)** - THE reloc-apply switch. Two sub-switches on
+  rel->flags&RFMASK: extract (535-559) then patch-back (605-637). Rewrite the
+  MIPS formats -> ARM: RBYTE32(611 `word=addr+delta`) is the nearest analog to
+  ARM ABS32; RWORD26(622, MIPS J/JAL >>2 26-bit) is where ARM PC24 BL / Thumb
+  BL/BLX-pair goes but the field width, >>2 word-scaling, and MIPS implicit-top-
+  4-PC-bits differ FUNDAMENTALLY from ARM signed PC-relative BL; RHIGH16/S
+  (627/632, MIPS lui) -> ARM movw/movt split-immediate (scattered bitfields, not
+  contiguous word&0xffff).
+- **ADD the entire veneer subsystem - currently ABSENT.** ld does NO stub /
+  veneer / long-branch island / Thumb-interworking / BLX / range-checking; it
+  assumes every reloc fits in place. A GBA arm7tdmi thumb-interwork target MUST
+  add: BL-range checks, veneer/island synthesis, Thumb-bit (BLX) mode-change.
+  This is the single biggest gap (and the historically delicate part here -
+  project_gba_wildjump_swap_crash).
+- **`BADDR 0x7f008000` (ld.c:52)** the MIPS load base -> GBA **0x02001800**
+  (our verified __user_data_start); overridable with `-T`. Drop the MIPS
+  `_gp`/`gpoffset=0x8000`(137)/RGPREL small-data path (dead on ARM).
+Header `finishout` (1489): a_midmag = RMAGIC(-r) / **OMAGIC** (final exe), MID=0,
+a_entry = entrypt->n_value (needs N_EXT+N_TEXT, our `_start`) else basaddr.
+Final resolved link emits NO relocs/syms unless -r/-s (OMAGIC blob) = exactly
+the kernel-loadable form.
+
+### !! CORRECTION to the survey's advice
+The survey suggested "start setting MID_ARM6 (143)" in as/ld headers. **DO NOT.**
+The GBA kernel loader (exec_aout.c) asserts `N_GETMID==MID_ZERO && N_GETFLAG==0`
+and REJECTS anything else. Keep the existing bare RMAGIC/OMAGIC with MID=0 and
+flags=0. Only the load base (0x02001800) and the ARM reloc/veneer logic change.
+
+## 5. Bootstrap plan (cross-then-native)
+- Phase 1 (host cross): build cc/smlrc/cpp/as/ld as host tools for ARM.
+  1a cgarm.c (ARM-only first, then +Thumb/BX). 1b as ARM/Thumb+relocs.
+  1c ld ARM relocs+veneers. Test: tiny C -> ARM a.out -> mGBA under
+  DiscoBSD/GBA; diff vs arm-elf-gcc+elf2aout.
+- Phase 2 (native): cross-build the ARM cc set itself into a.out, install to
+  the GBA root /usr/{bin,libexec}, run `cc hello.c` on-target. Needs the
+  out-of-swap->kill kernel change (done, awaiting hw test) so a too-big
+  compile fails gracefully instead of panicking.
+- Phase 3: build libc.a in ARM a.out (tools/aoututils host or native as/ld).
+
+## 6. Risks
+(1) ld ARM/Thumb interworking veneers (historically delicate here).
+(2) Smaller C is a C89-ish subset — first targets = small programs.
+(3) on-target RAM for large compiles.
+
+## 7. Phase 1a status: cgarm.c DONE and execution-validated (2026-09-15)
+
+usr.bin/smlrc/cgarm.c written; usr.bin/smlrc/smlrc.c wired for `-DARM`
+(NO_STRUCT_BY_VAL + NO_FP forced for ARM; include-ladder branch added;
+CAN_COMPILE_32BIT auto-set on a host build). MIPS/x86 builds verified
+UNCHANGED (the ARM bits are all `#ifdef ARM`).
+
+Target = **ARMv4T / ARM7TDMI** (GBA): NO movw/movt (big constants -> `ldr
+rN,=imm` literal pools, flushed with a per-function `.ltorg` in the epilog),
+NO `blx <reg>` (indirect call = `mov lr,pc; bx rN`), NO hardware divide
+(`/ % u/ u%` -> `__aeabi_idiv/uidiv/idivmod/uidivmod` runtime calls).
+
+Emits GNU-as ARM (`.syntax unified` / `.arm`). Register model: r0 = working/
+return reg (the core's V0) AND arg0 (they coincide on ARM, unlike MIPS $2/$4);
+r0-r3 = args; r4-r10 = the 7-deep temp-register stack (T0..T6); ip(r12) =
+TEMP_REG_A, lr(r14) = TEMP_REG_B (momentary scratch, never live across a bl);
+r11 = frame pointer.
+
+Frame (GenFxnProlog/Epilog) realizes the core's convention (AddFxnParamSymbols
+puts param1 at fp+2*SizeOfWord) AND is AAPCS-compatible:
+  sub sp,#24; str {r11,lr,r0,r1,r2,r3} at [sp+0,4,8,12,16,20]; mov r11,sp;
+  push {r4-r10}; ldr ip,=<locals>; sub sp,sp,ip
+  => [fp+0]=oldfp [fp+4]=retaddr [fp+8..20]=param regs [fp+24..]=stack params
+     fp = entry_sp-24, locals at fp-negative. Epilog restores r4-r11/sp, bx lr.
+The `<locals>` word is emitted fixed-width (`=0x%08X`) so the single-pass
+prolog is back-patched in place via fgetpos/fsetpos (same trick as cgmips).
+
+Comparisons REWRITTEN ARM-idiomatic (flags: cmp + b<cc> / mov;mov<cc> #1) - the
+whole MIPS slt/CmpBlocks machinery is gone. GenPrep copied verbatim (arch-
+neutral). GenExpr0 ported from cgmips with ARM emit helpers.
+
+KEY BUG FOUND+FIXED: division is a hidden `bl` that clobbers r0-r3, but the
+temp-register model keeps live subexpression values in r0 - so an expression
+containing `/ %` must NOT use the register-temp path. GenExpr0 now sets
+CanUseTempRegs = (maxCallDepth==0 && no div/mod token) - spills to stack
+instead. (MIPS is immune; its div isn't a call.)
+
+Calls (increment 2): direct `bl`, recursive, and indirect (function pointer,
+`mov lr,pc; bx ip`) all work for **<=4 args** (loaded into r0-r3 from the
+pushed arg area, arg1->r0 = AAPCS-correct, so it interoperates with the
+gcc-built libc for <=4-arg calls). >4 args -> errorInternal(200) for now.
+
+VALIDATION HARNESS (no qemu/sudo here): host-build smlrc with `gcc -DARM ...`;
+compile C -> ARM asm -> arm-none-eabi-as -march=armv4t -> arm-none-eabi-ld
+(pulls libgcc for __aeabi_*, and auto-inserts the ARM->Thumb interworking
+veneers = a live preview of the Phase-1c ld work) -> load into the **Unicorn**
+CPU emulator (pip --user unicorn), set r0-r3, run, check r0. 48 tests pass:
+arithmetic/mul/div/mod (signed+unsigned), all comparisons, all shifts, if/else/
+while/for, &&/||, bitwise, unary, arrays (local+global), globals, pointer args
+(&local through a call), char/short sign+zero extension, big immediates,
+params, recursion (fact/fib/gcd/sum), function pointers.
+
+Deferred (documented limits, NOT bugs): struct-by-value, float (both #ifdef'd
+off), >4 args, __interrupt functions (GenIsrProlog=errorInternal(201)), stack
+8-byte alignment for variadic/double libc calls.
+
+NEXT: 1b retarget usr.bin/as (+ tools/aoututils/as) for ARM/Thumb encodings +
+ARM reloc types; 1c retarget usr.bin/ld for ARM relocs + Thumb veneers; then
+lift the >4-arg / struct / float limits. cgarm.c is UNCOMMITTED (awaiting the
+user's go-ahead).
