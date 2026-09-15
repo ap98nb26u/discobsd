@@ -1007,15 +1007,23 @@ void GenExpr0(void)
       break;
 
     case ')':
+      /*
+       * AAPCS call. The args sit on the stack with arg1 at [sp+0] ... argn
+       * highest (they were pushed in reverse), i.e. already in AAPCS order.
+       * Load args 1-4 into r0-r3, then drop those 4 slots (add sp,#16) so sp
+       * points at arg5 - the callee reads on-stack args 5.. from [fp+24..] =
+       * its entry sp. After the call, pop the on-stack args (v-16 bytes).
+       * For <=4 args the outgoing area is padded to 16 (see the '(' case), so
+       * the add sp,#16 restores the stack and there is nothing more to pop.
+       */
       GenLeaf = 0;
-      if (v > 16)
-        errorInternal(200);   /* >4 args: next increment */
       if (stack[i - 1][0] == tokIdent)
       {
         if (v >= 4)  GenLoadMem(0, ArmSP, 0, 4);
         if (v >= 8)  GenLoadMem(1, ArmSP, 4, 4);
         if (v >= 12) GenLoadMem(2, ArmSP, 8, 4);
         if (v >= 16) GenLoadMem(3, ArmSP, 12, 4);
+        GenGrowStack(-16);           /* drop the 4 register-arg slots */
         printf2("\tbl\t%s\n", IdentTable + stack[i - 1][1]);
       }
       else
@@ -1027,12 +1035,12 @@ void GenExpr0(void)
         if (v >= 8)  GenLoadMem(1, ArmSP, 4, 4);
         if (v >= 12) GenLoadMem(2, ArmSP, 8, 4);
         if (v >= 16) GenLoadMem(3, ArmSP, 12, 4);
+        GenGrowStack(-16);
         puts2("\tmov\tlr, pc");
         puts2("\tbx\tip");
       }
-      if (v < 16)
-        v = 16;
-      GenGrowStack(-v);
+      if (v > 16)
+        GenGrowStack(-(v - 16));     /* pop the on-stack args (arg5..argn) */
       break;
 
     case tokUnaryStar:
