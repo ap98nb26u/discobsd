@@ -32,3 +32,20 @@ Build + validate:
 Test inputs: suite.c exta.c big.c lib.c app.c divp.c rt.c
 Harnesses:   run.py (via arm-none-eabi-ld+libgcc), run_asarm.py (as_arm flat),
              run_ld.py (as_arm -o + ld_arm, fully self-hosted)
+
+--- Automated headless kernel test (mgbarun.c, needs libmgba-dev) ---
+mgbarun.c: loads a GBA ROM in libmgba (headless, no GUI), runs N frames, and
+prints every mGBA-log line (this port's kernel printf AND user console output
+go there). Build: `gcc -O1 mgbarun.c -o mgbarun -lmgba`.
+
+End-to-end kernel test loop (all in WSL2, no manual emulator):
+  1. build a native ARM a.out:  smlrc-arm p.c p.s; as_arm -o p.o p.s;
+     as_arm -o crt0.o rt/crt0.s; as_arm -o clib.o rt/clib.s;
+     ld_arm -e _start -o p crt0.o p.o clib.o        # OMAGIC a.out
+  2. embed it + auto-run:  chmod 755 p; fsutil --partition=1 --add sdcard.img bin/p
+     (and overwrite /etc/rc to run /bin/p before `exit 0`), cp to
+     sys/arch/gba/dev/sdcard.img, rebuild the GBA kernel (embeds the image).
+  3. ./mgbarun sys/arch/gba/compile/GBA/unix.bin 3000 | grep '<expected output>'
+Confirmed 2026-09-16: /bin/hello auto-run at boot prints
+"hello, GBA (native ARM a.out)!" in the captured log = the native toolchain's
+ARM a.out runs on the real kernel. (mGBA-log carries user console output too.)
