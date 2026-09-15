@@ -71,6 +71,20 @@ struct tty {
     int             t_rocount, t_rocol; /* tty */
     struct  ttychars t_chars;           /* tty */
     struct  winsize t_winsize;          /* window size */
+#ifdef TTYEDIT
+    /*
+     * Cooked-mode command-line editing state (options TTYEDIT). The line
+     * being typed is held here, flat, with a movable cursor, so the arrow
+     * keys can move within it and characters can be inserted/deleted
+     * anywhere - see tty_edit() in kern/tty.c. Flushed into t_rawq on the
+     * line delimiter. Appended at the end of the struct so its presence or
+     * absence does not shift any other field's offset.
+     */
+    char            t_edbuf[256];       /* line being edited (<= TTYHOG) */
+    short           t_edcur;            /* cursor position, 0..t_edlen */
+    short           t_edlen;            /* current edited length */
+    char            t_edesc;            /* incoming ESC-sequence state 0/1/2 */
+#endif
 /* be careful of tchars & co. */
 #define t_erase     t_chars.tc_erase
 #define t_kill      t_chars.tc_kill
