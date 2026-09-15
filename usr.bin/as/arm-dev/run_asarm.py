@@ -5,7 +5,7 @@ STOP=0x00F00000
 def asm(cfile):
     stem=cfile[:-2]
     subprocess.check_call(["./smlrc-arm",cfile,stem+".s"])
-    r=subprocess.run(["./asarm",stem+".s",stem+".bin"],capture_output=True,text=True)
+    r=subprocess.run(["./asarm","-b",stem+".s",stem+".bin"],capture_output=True,text=True)
     syms={}; und=[]
     for ln in r.stderr.splitlines():
         p=ln.split()

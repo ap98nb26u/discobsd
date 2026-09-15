@@ -58,6 +58,7 @@ struct reloc {
 #define RHIGH16S    0x03        /* upper part of address with signed offset */
 #define RWORD16     0x04        /* word address: bits 17:2 */
 #define RWORD26     0x05        /* word address: bits 27:2 */
+#define RARM_PC24   0x06        /* ARM b/bl PC-relative: (target-(P+8))>>2, bits 23:0 */
 
     unsigned index;             /* 24-bit index in symbol table,
                                  * for REXT */
