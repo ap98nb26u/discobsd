@@ -54,6 +54,7 @@ static unsigned base_text, base_data, base_bss;
 
 static unsigned rd32(unsigned char*p){ return p[0]|p[1]<<8|p[2]<<16|(unsigned)p[3]<<24; }
 static void wr32(unsigned char*p,unsigned v){ p[0]=v;p[1]=v>>8;p[2]=v>>16;p[3]=v>>24; }
+static void put4(FILE*f,unsigned v){ fputc(v&0xff,f);fputc((v>>8)&0xff,f);fputc((v>>16)&0xff,f);fputc((v>>24)&0xff,f); }
 
 static void load_obj(const char*fn)
 {
@@ -124,17 +125,21 @@ static void relocate(struct obj*o, unsigned char*seg, unsigned segsz,
 
 int main(int argc,char**argv)
 {
-    unsigned Ttext=0x10000; const char*entry="main"; const char*out="a.bin";
-    int i, verbose=0;
+    unsigned Ttext=0x10000; const char*entry="_start"; const char*out="a.out";
+    int i, verbose=0, omagic=1, tset=0;
     for(i=1;i<argc;i++){
-        if(!strncmp(argv[i],"-Ttext=",7)) Ttext=strtoul(argv[i]+7,0,0);
-        else if(!strcmp(argv[i],"-T")) Ttext=strtoul(argv[++i],0,0);
+        if(!strncmp(argv[i],"-Ttext=",7)){ Ttext=strtoul(argv[i]+7,0,0); tset=1; }
+        else if(!strcmp(argv[i],"-T")){ Ttext=strtoul(argv[++i],0,0); tset=1; }
         else if(!strcmp(argv[i],"-e")) entry=argv[++i];
         else if(!strcmp(argv[i],"-o")) out=argv[++i];
         else if(!strcmp(argv[i],"-v")) verbose=1;
+        else if(!strcmp(argv[i],"-b")) omagic=0;          /* flat image (dev/Unicorn) */
+        else if(!strcmp(argv[i],"-A")) omagic=1;          /* a.out OMAGIC executable */
         else if(argv[i][0]=='-') { /* ignore other flags (e.g. -X, -N from cc) */ }
         else load_obj(argv[i]);
     }
+    /* OMAGIC executables load at the GBA user base unless -T given */
+    if(omagic && !tset) Ttext=0x02001800;
     /* layout: text region, then data, then bss */
     { unsigned t=0,d=0,b=0; for(i=0;i<nobj;i++){ objs[i].toff=t; objs[i].doff=d; objs[i].boff=b;
         t+=(objs[i].textsz+3)&~3; d+=(objs[i].datasz+3)&~3; b+=(objs[i].bsssz+3)&~3; }
@@ -147,24 +152,44 @@ int main(int argc,char**argv)
                         :base_data+objs[i].doff) + s->val;
             gsym_add(s->name,a);
         } } }
+      /* linker-defined symbols (end of segments) if referenced/undefined */
+      { unsigned tb=0; unsigned e; for(i=0;i<nobj;i++) tb+=(objs[i].bsssz+3)&~3;
+        e=base_bss+tb;
+        if(!gsym_find("_end",&e)) gsym_add("_end", base_bss+tb);
+        if(!gsym_find("end",&e))  gsym_add("end",  base_bss+tb);
+        if(!gsym_find("_edata",&e)) gsym_add("_edata", base_bss);
+        if(!gsym_find("edata",&e))  gsym_add("edata",  base_bss);
+        if(!gsym_find("_etext",&e)) gsym_add("_etext", base_data);
+        if(!gsym_find("etext",&e))  gsym_add("etext",  base_data);
+      }
       /* apply relocations */
       for(i=0;i<nobj;i++){
         relocate(&objs[i], objs[i].text, objs[i].textsz, objs[i].treloc, objs[i].treloc+objs[i].rtsz, base_text+objs[i].toff);
         relocate(&objs[i], objs[i].data, objs[i].datasz, objs[i].dreloc, objs[i].dreloc+objs[i].rdsz, base_data+objs[i].doff);
       }
-      /* emit flat image: text region (padded), data region (padded), bss zeros */
-      { FILE*of=fopen(out,"wb"); if(!of){perror(out);return 1;}
-        int pad; unsigned k, total_bss=0;
-        for(i=0;i<nobj;i++){ fwrite(objs[i].text,1,objs[i].textsz,of);
-            for(pad=((objs[i].textsz+3)&~3)-objs[i].textsz; pad>0; pad--) fputc(0,of); }
-        for(i=0;i<nobj;i++){ fwrite(objs[i].data,1,objs[i].datasz,of);
-            for(pad=((objs[i].datasz+3)&~3)-objs[i].datasz; pad>0; pad--) fputc(0,of); }
-        for(i=0;i<nobj;i++) total_bss+=((objs[i].bsssz+3)&~3);
-        for(k=0;k<total_bss;k++) fputc(0,of);
-        fclose(of);
+      /* segment sizes (word-padded, matching the relocated layout) */
+      { unsigned a_text=0,a_data=0,a_bss=0; unsigned ea=0; int pad;
+        for(i=0;i<nobj;i++){ a_text+=(objs[i].textsz+3)&~3; a_data+=(objs[i].datasz+3)&~3; a_bss+=(objs[i].bsssz+3)&~3; }
+        if(!gsym_find(entry,&ea)) fprintf(stderr,"ld_arm: no entry symbol %s\n",entry);
+        {
+          FILE*of=fopen(out,"wb"); if(!of){perror(out);return 1;}
+          if(omagic){
+            /* DiscoBSD a.out OMAGIC executable: 8-word header, then text+data.
+               a_midmag = OMAGIC(0407) | MID_ZERO(0) = 0x00000107. bss implied. */
+            put4(of,0x00000107); put4(of,a_text); put4(of,a_data); put4(of,a_bss);
+            put4(of,0); put4(of,0); put4(of,0); put4(of,ea);   /* reltext,reldata,syms,entry */
+          }
+          for(i=0;i<nobj;i++){ fwrite(objs[i].text,1,objs[i].textsz,of);
+              for(pad=((objs[i].textsz+3)&~3)-objs[i].textsz; pad>0; pad--) fputc(0,of); }
+          for(i=0;i<nobj;i++){ fwrite(objs[i].data,1,objs[i].datasz,of);
+              for(pad=((objs[i].datasz+3)&~3)-objs[i].datasz; pad>0; pad--) fputc(0,of); }
+          if(!omagic){ unsigned k; for(k=0;k<a_bss;k++) fputc(0,of); }  /* flat: zero bss */
+          fclose(of);
+        }
+        fprintf(stderr,"ENTRY %x\n",ea);
+        if(verbose){ fprintf(stderr,"a_text=%u a_data=%u a_bss=%u\n",a_text,a_data,a_bss);
+          for(i=0;i<ngsym;i++) fprintf(stderr,"SYM %s %x\n",gsyms[i].name,gsyms[i].addr); }
       }
-      { unsigned ea; if(gsym_find(entry,&ea)) fprintf(stderr,"ENTRY %x\n",ea); else fprintf(stderr,"ldarm: no entry %s\n",entry);
-        if(verbose) for(i=0;i<ngsym;i++) fprintf(stderr,"SYM %s %x\n",gsyms[i].name,gsyms[i].addr); }
     }
     return 0;
 }
