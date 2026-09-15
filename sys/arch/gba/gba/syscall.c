@@ -594,20 +594,27 @@ syscall_handler(int sys_num, struct trapframe *frame)
 	}
 out:
 	/*
-	 * Only force the Thumb bit for the just-succeeded execve() case:
-	 * tf_pc there is the new process's entry point, and crt0 is always
-	 * compiled Thumb. Every ordinary syscall wrapper on this port (the
-	 * GBA branch of SYS.h's ENTRY macro, and icode in locore.S) is
-	 * written in ARM (.arm), so the trampoline's computed return address
-	 * always points back into ARM code. Forcing the Thumb bit there
-	 * unconditionally made the CPU decode those ARM instruction bytes as
-	 * Thumb after every ordinary syscall returned - harmless-looking for
-	 * a few instructions by chance, but eventually wandering off into
-	 * whatever those bytes happened to decode to (observed: execution
-	 * ending up inside a .rodata table after sigaction() returned).
+	 * Instruction-set-aware exec entry.
+	 *
+	 * On a successful execve(), tf_pc is the new program's entry point
+	 * (a_entry, written by exec_setupstack) and ALREADY carries its
+	 * instruction set in bit 0: a Thumb-built crt0 links _start at an odd
+	 * address (init=0x0200195d, sh=0x020019f9, echo=0x020018d5, ...), an
+	 * ARM-built one - as produced by this port's native as_arm/ld_arm
+	 * toolchain - links it even. The "bx r12" that returns to userland
+	 * (r12 = tf_pc, above) honours that bit, so a Thumb image enters Thumb
+	 * state and an ARM image enters ARM state. We therefore let tf_pc's
+	 * own bit 0 select the mode and do NOT touch it here.
+	 *
+	 * This used to force the Thumb bit unconditionally on exec ("crt0 is
+	 * always Thumb"), which entered ARM images in Thumb state and mis-
+	 * decoded their first instructions. It must likewise never be forced
+	 * for ordinary syscalls, whose wrappers are ARM (.arm): forcing it
+	 * once made the CPU decode those ARM return bytes as Thumb and wander
+	 * off (observed landing in a .rodata table after sigaction returned).
+	 * gba_exec_switched_stack is retained for its documented role above;
+	 * the exec sp switch happens via tf_ip in the return trampoline.
 	 */
-	if (gba_exec_switched_stack)
-		frame->tf_pc |= 1;
 	frame->tf_psr |= 0x80;
 
 	/*
