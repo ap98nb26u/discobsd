@@ -63,14 +63,31 @@
 #ifndef MAXUSERS
 #define MAXUSERS        1                       /* number of user logins */
 #endif
+/*
+ * Kernel table sizes. Deep shell pipelines are bounded by these: each
+ * `|` is a pipe() = 1 inode + 2 file-table entries + (per stage) 1 proc.
+ * Measured on real GBAED hardware (project_gba_oom_root_cause): a
+ * cat-pipeline ran fine to 9 stages but "file: table full" / "cannot make
+ * pipe" at 10 (9 pipes = 18 file entries + ~6 baseline = the old NFILE 24).
+ * NFILE is the first wall (2 entries per pipe), then NINODE (1 per pipe),
+ * then NPROC (1 per stage). Raised to roughly double the usable depth
+ * (~18-stage pipelines): NFILE 40 -> ~18 pipes, NINODE 32 and NPROC 28
+ * keep pace. Cost is IWRAM .bss (struct file 24B, inode 108B, proc ~92B;
+ * NNAMECACHE and SMAPSIZ scale off these) and must stay under the SYSVEC
+ * vector at IWRAM+0x6400 - the kern.ldscript ASSERT enforces it. At these
+ * values ~2K of the ~3.9K IWRAM slack below SYSVEC is used, leaving margin;
+ * pushing much higher needs the SYSVEC-relocation reclamation first
+ * (project_gba_config_completeness workstream #4). Shared by both the GBA
+ * (mrams) and GBAED builds - rebuild both when changing these.
+ */
 #ifndef NPROC
-#define NPROC           25                      /* number of processes */
+#define NPROC           28                      /* number of processes */
 #endif
 #ifndef NINODE
-#define NINODE          24
+#define NINODE          32
 #endif
 #ifndef NFILE
-#define NFILE           24
+#define NFILE           40
 #endif
 #define NNAMECACHE      (NINODE * 11/10)
 #define NCALL           (16 + 2 * MAXUSERS)
