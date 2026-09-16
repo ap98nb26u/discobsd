@@ -11,7 +11,16 @@
 #include <sys/systm.h>
 #include <sys/vm.h>
 
-/* Diagnostic only: checksum a memory range to check a swap round trip. */
+/*
+ * The swap-integrity checksum below is GBA-only. It exists solely for the
+ * EverDrive (GBAED) SD swap round trip, which has a rare read-back
+ * corruption and no driver-level CRC on the read path (see the swapin/
+ * swapout comments). Other ports (pic32, stm32) and the GBA mrams build
+ * (EWRAM memcpy swap) have no such failure mode, so they compile a plain
+ * swap with none of this machinery, its per-NPROC tables, or its printfs.
+ */
+#ifdef GBA
+/* Checksum a memory range, to verify an SD swap round trip (GBAED). */
 static unsigned
 dbg_cksum(size_t addr, size_t len)
 {
@@ -62,6 +71,7 @@ static unsigned dcksum_tab[NPROC];
 static unsigned scksum_tab[NPROC];
 
 #define SWAPIN_CKSUM_RETRIES 4
+#endif  /* GBA */
 
 /*
  * Swap a process in.
@@ -79,57 +89,59 @@ swapin (p)
     size_t uaddr = (size_t) &u0;
 
     if (p->p_dsize) {
-        int slot = p - proc;
-        unsigned want = dcksum_tab[slot];
-        unsigned got;
-        int retry;
-
         swap (p->p_daddr, daddr, p->p_dsize, B_READ);
-        got = dbg_cksum(daddr, p->p_dsize);
-        //printf("DBG: swapin pid=%d data blkno=%u len=%u cksum=%x\n",
-        //    p->p_pid, (unsigned)p->p_daddr, (unsigned)p->p_dsize, got);
+#ifdef GBA
+        /* Verify the data-segment SD swap round trip (see dbg_cksum). */
+        {
+            int slot = p - proc;
+            unsigned want = dcksum_tab[slot];
+            unsigned got = dbg_cksum(daddr, p->p_dsize);
+            int retry;
 
-        for (retry = 0; got != want && retry < SWAPIN_CKSUM_RETRIES; retry++) {
-            printf("DBG: swapin cksum MISMATCH pid=%d blkno=%u "
-                "want=%x got=%x, retrying (%d)\n",
-                p->p_pid, (unsigned)p->p_daddr, want, got, retry + 1);
-            swap (p->p_daddr, daddr, p->p_dsize, B_READ);
-            got = dbg_cksum(daddr, p->p_dsize);
+            for (retry = 0; got != want && retry < SWAPIN_CKSUM_RETRIES; retry++) {
+                printf("swap: data cksum mismatch pid=%d blkno=%u "
+                    "want=%x got=%x, retrying (%d)\n",
+                    p->p_pid, (unsigned)p->p_daddr, want, got, retry + 1);
+                swap (p->p_daddr, daddr, p->p_dsize, B_READ);
+                got = dbg_cksum(daddr, p->p_dsize);
+            }
+            if (got != want)
+                printf("swap: data cksum still bad after retries, pid=%d "
+                    "blkno=%u want=%x got=%x - giving up\n",
+                    p->p_pid, (unsigned)p->p_daddr, want, got);
+            else if (retry)
+                printf("swap: data cksum recovered pid=%d after %d retr%s\n",
+                    p->p_pid, retry, retry == 1 ? "y" : "ies");
         }
-        if (got != want)
-            printf("DBG: swapin cksum still bad after retries, pid=%d "
-                "blkno=%u want=%x got=%x - giving up\n",
-                p->p_pid, (unsigned)p->p_daddr, want, got);
-        else if (retry)
-            printf("DBG: swapin cksum recovered pid=%d after %d retr%s\n",
-                p->p_pid, retry, retry == 1 ? "y" : "ies");
-
+#endif
         mfree (swapmap, btod (p->p_dsize), p->p_daddr);
     }
     if (p->p_ssize) {
-        int slot = p - proc;
-        unsigned want = scksum_tab[slot];
-        unsigned got;
-        int retry;
-
         swap (p->p_saddr, saddr, p->p_ssize, B_READ);
-        got = dbg_cksum(saddr, p->p_ssize);
+#ifdef GBA
+        /* Verify the stack-segment SD swap round trip (see dbg_cksum). */
+        {
+            int slot = p - proc;
+            unsigned want = scksum_tab[slot];
+            unsigned got = dbg_cksum(saddr, p->p_ssize);
+            int retry;
 
-        for (retry = 0; got != want && retry < SWAPIN_CKSUM_RETRIES; retry++) {
-            printf("DBG: swapin STACK cksum MISMATCH pid=%d blkno=%u "
-                "want=%x got=%x, retrying (%d)\n",
-                p->p_pid, (unsigned)p->p_saddr, want, got, retry + 1);
-            swap (p->p_saddr, saddr, p->p_ssize, B_READ);
-            got = dbg_cksum(saddr, p->p_ssize);
+            for (retry = 0; got != want && retry < SWAPIN_CKSUM_RETRIES; retry++) {
+                printf("swap: stack cksum mismatch pid=%d blkno=%u "
+                    "want=%x got=%x, retrying (%d)\n",
+                    p->p_pid, (unsigned)p->p_saddr, want, got, retry + 1);
+                swap (p->p_saddr, saddr, p->p_ssize, B_READ);
+                got = dbg_cksum(saddr, p->p_ssize);
+            }
+            if (got != want)
+                printf("swap: stack cksum still bad after retries, pid=%d "
+                    "blkno=%u want=%x got=%x - giving up\n",
+                    p->p_pid, (unsigned)p->p_saddr, want, got);
+            else if (retry)
+                printf("swap: stack cksum recovered pid=%d after %d retr%s\n",
+                    p->p_pid, retry, retry == 1 ? "y" : "ies");
         }
-        if (got != want)
-            printf("DBG: swapin STACK cksum still bad after retries, pid=%d "
-                "blkno=%u want=%x got=%x - giving up\n",
-                p->p_pid, (unsigned)p->p_saddr, want, got);
-        else if (retry)
-            printf("DBG: swapin STACK cksum recovered pid=%d after %d retr%s\n",
-                p->p_pid, retry, retry == 1 ? "y" : "ies");
-
+#endif
         mfree (swapmap, btod (p->p_ssize), p->p_saddr);
     }
     swap (p->p_addr, uaddr, USIZE, B_READ);
@@ -176,28 +188,23 @@ swapout (p, freecore, odata, ostack)
         odata = p->p_dsize;
     if (ostack == (u_int) X_OLDSIZE)
         ostack = p->p_ssize;
-    //printf("DBG: before malloc3\n");
     if (malloc3 (swapmap, btod (p->p_dsize), btod (p->p_ssize),
         btod (USIZE), a) == NULL)
         return -1;
-    //printf("DBG: after malloc3\n");
     p->p_flag |= SLOCK;
     if (odata) {
-        unsigned cksum = dbg_cksum(p->p_daddr, odata);
-
-        //printf("DBG: before swap a[0] odata=%u pid=%d blkno=%u cksum=%x\n",
-        //    odata, p->p_pid, (unsigned)a[0], cksum);
-        dcksum_tab[p - proc] = cksum;
+#ifdef GBA
+        /* Record the data checksum so swapin() can verify the SD round trip. */
+        dcksum_tab[p - proc] = dbg_cksum(p->p_daddr, odata);
+#endif
         swap (a[0], p->p_daddr, odata, B_WRITE);
-        //printf("DBG: after swap a[0]\n");
     }
     if (ostack) {
-        unsigned cksum = dbg_cksum(p->p_saddr, ostack);
-
-        scksum_tab[p - proc] = cksum;
-        //printf("DBG: before swap a[1] ostack=%u\n", ostack);
+#ifdef GBA
+        /* Record the stack checksum so swapin() can verify the SD round trip. */
+        scksum_tab[p - proc] = dbg_cksum(p->p_saddr, ostack);
+#endif
         swap (a[1], p->p_saddr, ostack, B_WRITE);
-        //printf("DBG: after swap a[1]\n");
     }
     /*
      * Increment u_ru.ru_nswap for process being tossed out of core.
@@ -216,9 +223,7 @@ swapout (p, freecore, odata, ostack)
         u.u_ru.ru_nswap++;
         splx (s);
     }
-    //printf("DBG: before swap a[2] (uarea)\n");
     swap (a[2], p->p_addr, USIZE, B_WRITE);
-    //printf("DBG: after swap a[2]\n");
     p->p_daddr = a[0];
     p->p_saddr = a[1];
     p->p_addr = a[2];
