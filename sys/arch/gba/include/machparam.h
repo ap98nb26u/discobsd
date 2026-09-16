@@ -146,9 +146,19 @@
  * binaries are linked separately from the kernel and never see it).
  * The kernel writes the pointer here once at boot, before running any
  * user process (see gba/gba/machdep.c: startup()). Address must match
- * the SYSVEC region reserved in gba/conf/kern.ldscript.
+ * the SYSVEC region reserved in gba/conf/kern.ldscript AND the literal
+ * in the native-toolchain runtime (usr.bin/as/arm-dev/rt/clib.s);
+ * changing it forces a full userland rebuild (every binary bakes this
+ * address into its syscall stubs).
+ *
+ * Placed high in IWRAM, just under the BIOS-convention IRQ stack region
+ * (0x03007F00..0x03007FA0), so the kernel's .data/.bss can occupy IWRAM
+ * all the way up to here instead of being capped at the old 0x03006400 -
+ * reclaiming ~6.5K of IWRAM for kernel tables (NFILE/NINODE/NPROC etc.).
+ * The SYS/USR kernel stack is in EWRAM (locore0.S), so only the small
+ * IRQ stack sits above this point.
  */
-#define SYSCALL_VECTOR_ADDR	0x03006400
+#define SYSCALL_VECTOR_ADDR	0x03007E00
 
 /*
  * Collect kernel statistics by default.

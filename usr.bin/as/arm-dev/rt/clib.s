@@ -1,5 +1,5 @@
 @ clib.s - minimal ARM (a.out) libc for DiscoBSD/GBA, native toolchain.
-@ Syscalls use this port's simulated-SWI trampoline at 0x03006400:
+@ Syscalls use this port's simulated-SWI trampoline at 0x03007E00:
 @   push{lr}; ldr r12,=vec; ldr r12,[r12]; mov lr,pc; bx r12; .word SYS_n; pop{lr}
 @ carry set on error (trampoline convention).
 	.arm
@@ -8,7 +8,7 @@
 	.globl	_exit
 _exit:
 	push	{lr}
-	ldr	r12, =0x03006400
+	ldr	r12, =0x03007E00
 	ldr	r12, [r12]
 	mov	lr, pc
 	bx	r12
@@ -23,7 +23,7 @@ exit:
 	.globl	write
 write:
 	push	{lr}
-	ldr	r12, =0x03006400
+	ldr	r12, =0x03007E00
 	ldr	r12, [r12]
 	mov	lr, pc
 	bx	r12
@@ -41,7 +41,7 @@ write:
 	.globl	read
 read:
 	push	{lr}
-	ldr	r12, =0x03006400
+	ldr	r12, =0x03007E00
 	ldr	r12, [r12]
 	mov	lr, pc
 	bx	r12
@@ -59,7 +59,7 @@ read:
 	.globl	open
 open:
 	push	{lr}
-	ldr	r12, =0x03006400
+	ldr	r12, =0x03007E00
 	ldr	r12, [r12]
 	mov	lr, pc
 	bx	r12
@@ -77,7 +77,7 @@ open:
 	.globl	close
 close:
 	push	{lr}
-	ldr	r12, =0x03006400
+	ldr	r12, =0x03007E00
 	ldr	r12, [r12]
 	mov	lr, pc
 	bx	r12
@@ -95,7 +95,7 @@ close:
 	.globl	lseek
 lseek:
 	push	{lr}
-	ldr	r12, =0x03006400
+	ldr	r12, =0x03007E00
 	ldr	r12, [r12]
 	mov	lr, pc
 	bx	r12
@@ -114,7 +114,7 @@ lseek:
 	.globl	_brk
 _brk:
 	push	{lr}
-	ldr	r12, =0x03006400
+	ldr	r12, =0x03007E00
 	ldr	r12, [r12]
 	mov	lr, pc
 	bx	r12

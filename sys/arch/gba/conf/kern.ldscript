@@ -6,7 +6,7 @@ MEMORY {
     FLASH   (rx)   : ORIGIN = 0x08000000, LENGTH = 32M   /* 0x0800 0000 - 0x09FF FFFF */
 
     IWRAM   (rwx)  : ORIGIN = 0x03000000, LENGTH = 32K   /* 0x0300 0000 - 0x0300 7FFF */
-    SYSVEC  (rw!x) : ORIGIN = 0x03006400, LENGTH = 4     /* 0x0300 6400 - 0x0300 6403: syscall trampoline vector */
+    SYSVEC  (rw!x) : ORIGIN = 0x03007E00, LENGTH = 4     /* 0x0300 7E00 - 0x0300 7E03: syscall trampoline vector, high in IWRAM just under the BIOS IRQ stack (must match machparam.h SYSCALL_VECTOR_ADDR) */
 
     EWRAM   (rwx)  : ORIGIN = 0x02000000, LENGTH = 256K  /* 0x0200 0000 - 0x0203 FFFF */
     /*
@@ -144,13 +144,15 @@ SECTIONS {
 
     /*
      * dummy section to check free space of IWRAM - .data/.bss/.fast_text
-     * must not grow past SYSVEC (0x03006400); U0AREA/UAREA no longer sit
-     * past this boundary (moved to EWRAM, see MEMORY block above), so
-     * there's slack between here and IWRAM's actual end (0x03008000)
-     * now, this bound just protects SYSVEC specifically.
+     * must not grow past SYSVEC. SYSVEC now sits high in IWRAM (0x03007E00,
+     * just below the BIOS-convention IRQ stack at 0x03007F00..0x03007FA0),
+     * so kernel .data/.bss may fill IWRAM right up to it - ~6.5K more than
+     * the old 0x03006400 cap. The SYS/USR kernel stack lives in EWRAM
+     * (locore0.S), so nothing but the small IRQ stack is above SYSVEC.
+     * Bound tracks ORIGIN(SYSVEC) directly so the two can never drift.
      */
     .stack_check : {
         . = ALIGN(4);
-        ASSERT(. < (ORIGIN(IWRAM) + 25K), "Error: IWRAM overflowed into SYSVEC!");
+        ASSERT(. < ORIGIN(SYSVEC), "Error: IWRAM overflowed into SYSVEC!");
     } > IWRAM
 }
