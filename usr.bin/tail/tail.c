@@ -27,7 +27,20 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#ifdef pdp11
+/*
+ * The reverse/tail ring buffer `bin` is this program's entire memory
+ * footprint (its bss). On small-RAM ports the 32K default is a heavy
+ * tax - on the GBA it is by far the largest single userland bss (~32K
+ * of a 64K user window), which pushed multi-stage pipelines into
+ * out-of-swap. Halve it to 16K on the memory-constrained embedded
+ * ports (pdp11 historically; the GBA via -DGBA, set for MACHINE=gba in
+ * share/mk/sys.mk to match the kernel's PARAM=-DGBA), keeping the full
+ * 32K where RAM is plentiful (incl. the stm32 ARM port, which shares
+ * MACHINE_ARCH=arm but not the GBA's tiny user window). 16K still
+ * covers the default 10-line / typical tail window; only very large
+ * `tail -c`/`tail -r` spans are truncated.
+ */
+#if defined(pdp11) || defined(GBA)
 #define LBIN 16385
 #else
 #define LBIN 32769

@@ -100,7 +100,14 @@ LDWARN!=if [ x"${MACHINE_ARCH}" = x"arm" ] ; then \
 # survived until a full clean rebuild - see the sysctl wild-jump saga).
 # -MD (not -MMD) tracks system headers too; harmless in link-only
 # commands, which compile nothing and so emit no .d.
-CFLAGS=	${COPTS} -MD -MP
+# Per-board define for userland, mirroring the kernel's PARAM=-DGBA
+# (sys/arch/gba/compile/*/Makefile). gba and stm32 share MACHINE_ARCH=arm,
+# so a board-specific knob must key off MACHINE, not the arch. Lets a
+# memory-constrained board shrink its footprint in C (e.g. usr.bin/tail's
+# line buffer on the GBA's tiny 64K user window - see that file).
+MDDEF!=	if [ x"${MACHINE}" = x"gba" ] ; then echo "-DGBA" ; else echo "" ; fi
+
+CFLAGS=	${COPTS} ${MDDEF} -MD -MP
 
 AFLAGS=	${ASFLAGS}
 
