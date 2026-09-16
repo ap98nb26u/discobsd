@@ -56,27 +56,77 @@ static unsigned rd32(unsigned char*p){ return p[0]|p[1]<<8|p[2]<<16|(unsigned)p[
 static void wr32(unsigned char*p,unsigned v){ p[0]=v;p[1]=v>>8;p[2]=v>>16;p[3]=v>>24; }
 static void put4(FILE*f,unsigned v){ fputc(v&0xff,f);fputc((v>>8)&0xff,f);fputc((v>>16)&0xff,f);fputc((v>>24)&0xff,f); }
 
-static void load_obj(const char*fn)
+/* parse an a.out object from a memory buffer (which must stay alive) into o */
+static void parse_obj(struct obj*o, unsigned char*buf)
 {
-    FILE*f=fopen(fn,"rb"); if(!f){perror(fn);exit(1);}
-    fseek(f,0,SEEK_END); long n=ftell(f); fseek(f,0,SEEK_SET);
-    struct obj*o=&objs[nobj++];
-    o->buf=malloc(n); o->len=n; fread(o->buf,1,n,f); fclose(f);
-    unsigned*h=(unsigned*)o->buf;
-    o->magic=rd32(o->buf+0); o->textsz=rd32(o->buf+4); o->datasz=rd32(o->buf+8);
-    o->bsssz=rd32(o->buf+12); o->rtsz=rd32(o->buf+16); o->rdsz=rd32(o->buf+20);
-    o->symsz=rd32(o->buf+24); (void)h;
+    o->buf=buf;
+    o->magic=rd32(buf+0); o->textsz=rd32(buf+4); o->datasz=rd32(buf+8);
+    o->bsssz=rd32(buf+12); o->rtsz=rd32(buf+16); o->rdsz=rd32(buf+20);
+    o->symsz=rd32(buf+24);
     unsigned p=32;
-    o->text=o->buf+p; p+=o->textsz;
-    o->data=o->buf+p; p+=o->datasz;
-    o->treloc=o->buf+p; p+=o->rtsz;
-    o->dreloc=o->buf+p; p+=o->rdsz;
-    o->sym=o->buf+p; p+=o->symsz;
-    /* parse symtab: n_len(1) n_type(1) n_value(4) name */
+    o->text=buf+p; p+=o->textsz;
+    o->data=buf+p; p+=o->datasz;
+    o->treloc=buf+p; p+=o->rtsz;
+    o->dreloc=buf+p; p+=o->rdsz;
+    o->sym=buf+p; p+=o->symsz;
     { unsigned q=0; o->nsym=0;
       while(q<o->symsz){ int len=o->sym[q++]; int typ=o->sym[q++]; unsigned val=rd32(o->sym+q); q+=4;
         struct osym*s=&o->syms[o->nsym++]; memcpy(s->name,o->sym+q,len); s->name[len]=0; q+=len;
         s->type=typ; s->val=val; }
+    }
+}
+
+static void load_obj(const char*fn)
+{
+    FILE*f=fopen(fn,"rb"); if(!f){perror(fn);exit(1);}
+    fseek(f,0,SEEK_END); long n=ftell(f); fseek(f,0,SEEK_SET);
+    unsigned char*buf=malloc(n); fread(buf,1,n,f); fclose(f);
+    struct obj*o=&objs[nobj++]; o->len=n; parse_obj(o, buf);
+}
+
+/* is name defined (as a non-undefined global) by any already-loaded object? */
+static int sym_is_defined(const char*n){
+    int i,k; for(i=0;i<nobj;i++) for(k=0;k<objs[i].nsym;k++){ struct osym*s=&objs[i].syms[k];
+        if((s->type&N_EXT)&&(s->type&0x1f)!=N_UNDF && !strcmp(s->name,n)) return 1; }
+    return 0;
+}
+/* is name referenced (undefined) by a loaded object and not yet defined? */
+static int sym_is_wanted(const char*n){
+    int i,k; if(sym_is_defined(n)) return 0;
+    for(i=0;i<nobj;i++) for(k=0;k<objs[i].nsym;k++){ struct osym*s=&objs[i].syms[k];
+        if((s->type&0x1f)==N_UNDF && !strcmp(s->name,n)) return 1; }
+    return 0;
+}
+/* does an archive member (a.out at buf) define a currently-wanted symbol? */
+static int member_defines_wanted(unsigned char*buf){
+    unsigned textsz=rd32(buf+4),datasz=rd32(buf+8),rtsz=rd32(buf+16),rdsz=rd32(buf+20),symsz=rd32(buf+24);
+    unsigned char*sym=buf+32+textsz+datasz+rtsz+rdsz; unsigned q=0;
+    while(q<symsz){ int len=sym[q++]; int typ=sym[q++]; q+=4; char nm[64]; int L=len<63?len:63;
+        memcpy(nm,sym+q,L); nm[L]=0; q+=len;
+        if((typ&N_EXT)&&(typ&0x1f)!=N_UNDF && sym_is_wanted(nm)) return 1; }
+    return 0;
+}
+/* link a BSD ar archive: pull members that satisfy undefined symbols (iterate) */
+static void load_archive(const char*fn){
+    FILE*f=fopen(fn,"rb"); if(!f){perror(fn);exit(1);}
+    fseek(f,0,SEEK_END); long n=ftell(f); fseek(f,0,SEEK_SET);
+    unsigned char*ar=malloc(n); fread(ar,1,n,f); fclose(f);
+    if(n<8||memcmp(ar,"!<arch>\n",8)){ fprintf(stderr,"ld_arm: %s: not an archive\n",fn); exit(1); }
+    static unsigned char* md[1024]; static long ms[1024]; int nm=0;
+    long p=8;
+    while(p+60<=n){
+        unsigned char*hdr=ar+p; char sf[11]; memcpy(sf,hdr+48,10); sf[10]=0;
+        long size=atol(sf); char nmf[17]; memcpy(nmf,hdr,16); nmf[16]=0;
+        int special=(nmf[0]=='/'||nmf[0]==' '||!memcmp(nmf,"__.SYMDEF",9));
+        if(!special && nm<1024){ md[nm]=ar+p+60; ms[nm]=size; nm++; }
+        p += 60 + size + (size&1);
+    }
+    (void)ms;
+    int loaded[1024]; int i; for(i=0;i<nm;i++) loaded[i]=0;
+    int changed=1;
+    while(changed){ changed=0;
+        for(i=0;i<nm;i++){ if(loaded[i]) continue;
+            if(member_defines_wanted(md[i])){ parse_obj(&objs[nobj++], md[i]); loaded[i]=1; changed=1; } }
     }
 }
 
@@ -127,6 +177,8 @@ int main(int argc,char**argv)
 {
     unsigned Ttext=0x10000; const char*entry="_start"; const char*out="a.out";
     int i, verbose=0, omagic=1, tset=0;
+    const char* libdir[32]; int nld=0;
+    const char* larch[32]; int nla=0;
     for(i=1;i<argc;i++){
         if(!strncmp(argv[i],"-Ttext=",7)){ Ttext=strtoul(argv[i]+7,0,0); tset=1; }
         else if(!strcmp(argv[i],"-T")){ Ttext=strtoul(argv[++i],0,0); tset=1; }
@@ -135,9 +187,19 @@ int main(int argc,char**argv)
         else if(!strcmp(argv[i],"-v")) verbose=1;
         else if(!strcmp(argv[i],"-b")) omagic=0;          /* flat image (dev/Unicorn) */
         else if(!strcmp(argv[i],"-A")) omagic=1;          /* a.out OMAGIC executable */
+        else if(!strncmp(argv[i],"-L",2)){ libdir[nld++] = argv[i][2]?argv[i]+2:argv[++i]; }
+        else if(!strncmp(argv[i],"-l",2)){ larch[nla++]  = argv[i][2]?argv[i]+2:argv[++i]; }
         else if(argv[i][0]=='-') { /* ignore other flags (e.g. -X, -N from cc) */ }
         else load_obj(argv[i]);
     }
+    /* pull in -l archives after all explicit objects (on-demand member linking) */
+    { int j,d; for(j=0;j<nla;j++){
+        char path[512]; int found=0;
+        for(d=0;d<nld;d++){ FILE*t; snprintf(path,sizeof path,"%s/lib%s.a",libdir[d],larch[j]);
+            t=fopen(path,"rb"); if(t){ fclose(t); found=1; break; } }
+        if(!found) snprintf(path,sizeof path,"lib%s.a",larch[j]);
+        load_archive(path);
+    } }
     /* OMAGIC executables load at the GBA user base unless -T given */
     if(omagic && !tset) Ttext=0x02001800;
     /* layout: text region, then data, then bss */
