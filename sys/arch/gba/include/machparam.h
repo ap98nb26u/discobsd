@@ -136,19 +136,18 @@
  */
 #define USIZE           3072
 /*
- * Initial user stack size. This port has no MMU and no stack-fault growth: the
+ * Initial user stack size. This port has no MMU and no stack-fault growth (the
  * whole 64K USERRAM window is directly accessible, so a deep user stack never
- * faults and p_ssize is never grown past this value (it is set once at exec,
- * exec_subr.c). swapout()/swapin() (vm_swap.c) save/restore only p_ssize bytes
- * from the stack top, so a process whose stack outgrew p_ssize loses the excess
- * across a swap. A shell building a deep pipeline recurses one execute() level
- * per stage (~0x120 bytes each); at 2048 the ~6th stage's fork()'d frame fell
- * below the saved region, so that child resumed on a truncated/garbage stack and
- * silently produced 0 bytes (see project_gba_deep_pipeline_data_loss). 8K spans
- * the deepest pipeline the kernel tables allow (NFILE caps it near 16 stages,
- * ~6K of shell stack), so the initial stack always covers the live stack.
+ * faults), which once let p_ssize stay frozen at this value while a process's
+ * stack grew past it - swapout()/swapin() (vm_swap.c) save only p_ssize bytes
+ * from the top, so a deep stack was truncated across a swap and e.g. a shell
+ * building a >=6-stage pipeline silently produced 0 bytes (see
+ * project_gba_deep_pipeline_data_loss). That is now fixed by growing p_ssize
+ * (and p_saddr) from the live sp on every kernel entry, in gba/syscall.c,
+ * exactly as the pic32 port does in its exception.c - so this value is just the
+ * starting size, matching pic32.
  */
-#define SSIZE           8192            /* initial stack size (bytes) */
+#define SSIZE           2048            /* initial stack size (bytes) */
 
 /*
  * GBA has no writable SWI vector (0x00000018 is BIOS ROM), so syscalls

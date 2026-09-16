@@ -460,6 +460,36 @@ syscall_handler(int sys_num, struct trapframe *frame)
 	u.u_code = u.u_frame->tf_pc - INSN_SZ;	/* Syscall for sig handler. */
 	gba_exec_switched_stack = 0;
 
+	/*
+	 * Grow the user stack to cover the live stack pointer, mirroring the
+	 * pic32 port's exception.c (which does exactly this on every kernel
+	 * entry). GBA has no MMU and no stack-fault growth: the whole 64K
+	 * USERRAM window is directly accessible, so a deep user stack never
+	 * faults and, without this, p_ssize would stay frozen at the exec-time
+	 * SSIZE. swapout()/swapin() (vm_swap.c) then save/restore only p_ssize
+	 * bytes from the stack top, truncating a deeper stack across a swap - a
+	 * shell recursing to build a >=6-stage pipeline lost its deepest stage's
+	 * frame and silently produced 0 bytes (project_gba_deep_pipeline_data_loss).
+	 * This port only ever swaps a user process out from inside the kernel
+	 * (tsleep, or the runrun reschedule at trap return, kern_sig.c), and the
+	 * user sp is frozen for the duration of the trap, so refreshing p_ssize
+	 * here captures the true depth before any swapout. Keeping p_saddr = sp
+	 * is essential: swapout() writes p_ssize bytes starting at p_saddr, so a
+	 * grown p_ssize left with a stale p_saddr would save the wrong region.
+	 */
+	{
+		size_t sp = (size_t)u.u_frame->tf_sp;
+
+		if (sp < u.u_procp->p_daddr + u.u_dsize) {
+			/* Stack has run into the data segment: a real overflow. */
+			psignal(u.u_procp, SIGSEGV);
+		} else if (u.u_procp->p_ssize < USER_DATA_END - sp) {
+			u.u_procp->p_ssize = USER_DATA_END - sp;
+			u.u_procp->p_saddr = sp;
+			u.u_ssize = u.u_procp->p_ssize;
+		}
+	}
+
 	//led_control(LED_KERNEL, 1);
 
 	/*
