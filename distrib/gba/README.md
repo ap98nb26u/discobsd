@@ -1,97 +1,90 @@
-# DiscoBSD/stm32 - 2.11BSD-based OS for Arm Cortex-M4 MCUs
+# DiscoBSD/gba - 2.11BSD-based OS for the Nintendo Game Boy Advance
+
+DiscoBSD/gba is a port of DiscoBSD to the Game Boy Advance (ARM7TDMI).
+The port has two kernel builds:
+
+ * **GBA** - the plain build. The root file system is embedded in the ROM
+   image (a RAM/ROM memory disk), so the cartridge is self-contained. It
+   runs in an emulator such as [mGBA][1] or VBA-M, or from a flash cartridge.
+ * **GBAED** - the EverDrive build. The root and swap file systems live on
+   the flash cartridge's real SD card. It targets the EverDrive GBA X5.
+
+[1]: https://mgba.io/
 
 ## Currently supported hardware
 
- * [WeAct Studio STM32F405RGT6 Core board][1]
- * [STMicroelectronics NUCLEO-F411RE][2]
- * [STMicroelectronics STM32F412G-DISCO][3]
- * [WeAct Studio STM32F412RET6 Core board][1]
- * [STMicroelectronics STM32F413H-DISCO][4]
- * [STMicroelectronics NUCLEO-F446RE][5]
- * [WeAct Studio STM32F446RET6 Core board][1]
- * [STMicroelectronics STM32F469I-DISCO][6]
- * [STMicroelectronics STM32F4DISCOVERY][7]
- * [DevEBox STM32F407VET6 STM32F4VE][8]
+ * Game Boy Advance (ARM7TDMI), in the mGBA / VBA-M emulator or on real
+   hardware via a flash cartridge (GBA build).
+ * EverDrive GBA X5 flash cartridge with an SD card (GBAED build).
 
-[1]: https://github.com/WeActStudio/WeActStudio.STM32F4_64Pin_CoreBoard
-[2]: https://www.st.com/en/evaluation-tools/nucleo-f411re.html
-[3]: https://www.st.com/en/evaluation-tools/32f412gdiscovery.html
-[4]: https://www.st.com/en/evaluation-tools/32f413hdiscovery.html
-[5]: https://www.st.com/en/evaluation-tools/nucleo-f446re.html
-[6]: https://www.st.com/en/evaluation-tools/32f469idiscovery.html
-[7]: https://www.st.com/en/evaluation-tools/stm32f4discovery.html
-[8]: https://stm32-base.org/boards/STM32F407VET6-STM32-F4VE-V2.0.html
+## Kernel images
 
-## DiscoBSD/stm32 Up and Running
+Each kernel builds into its own directory under `sys/arch/gba/compile`:
 
-The file system image `sdcard.img` needs to be imaged onto an SD card.
+ * `GBA/`   - the plain (memory-disk) kernel.
+ * `GBAED/` - the EverDrive (SD-card) kernel.
 
-On Windows host systems use a disk imaging utility such as [Rufus][20].
+The build produces several formats of the kernel `unix` in each directory:
+ELF `unix.elf`, Intel HEX `unix.hex`, and a Game Boy Advance ROM binary
+`unix.bin`. Load `unix.bin` onto a flash cartridge, or run it directly in an
+emulator:
 
-On Unix-like host systems with `dd` run:
   ```sh
-    $ dd bs=1M if=sdcard.img of=/path/to/SD/card
+    $ mgba sys/arch/gba/compile/GBA/unix.bin
   ```
 
-The target `installfs` can be used to image the SD card on Unix-like systems.
-Provide the path to the SD card via the command line:
+## SD card layout (GBAED)
+
+The GBAED build reads its root and swap file systems from the SD card. The
+card uses an MBR partition table:
+
+ * Partition 1 - the EverDrive's own FAT32 boot partition (menu / firmware).
+ * Partition 2 - the DiscoBSD root file system.
+ * Partition 3 - swap space.
+
+Write the DiscoBSD root file system image `rootfs.img` (built by the top-level
+`make`, see below) onto partition 2 of the SD card, for example with `dd`:
+
   ```sh
-    $ make SDCARD=/path/to/SD/card installfs
+    $ dd bs=1M if=distrib/gba/rootfs.img of=/dev/<sd-card-partition-2>
   ```
 
-The board-specific kernel `unix` must be loaded into the MCU's flash memory.
-Formats are ELF `unix.elf`, binary `unix.bin`, and Intel HEX `unix.hex`.
+The plain GBA build needs no SD card: `rootfs.img` is the same bare file
+system, embedded directly in the ROM.
 
-On Windows host systems use [STM32CubeProgrammer][21] for flash programming.
+## Console and logging in
 
-On Unix-like host systems use `st-flash` from the [stlink-org project][22] to
-load the binary-formatted kernel `unix.bin` into flash memory at 0x08000000.
-  ```sh
-    $ st-flash --reset write unix.bin 0x08000000
-  ```
+The primary console is the on-screen LCD text console, with an on-screen
+software keyboard for input. No external hardware is required.
 
-[20]: https://github.com/pbatard/rufus
-[21]: https://www.st.com/en/development-tools/stm32cubeprog.html
-[22]: https://github.com/stlink-org/stlink
-
-## Logging in to DiscoBSD
-
-First, connect to the development board via the serial port.
-The STM32 Disco and Nucleo boards offer a USB VCP serial port.
-  ```sh
-    $ cu -l /dev/cuaU0 -s 115200
-  ```
-Other systems may use serial port utilities such as `screen`, `minicom`,
-`putty`, or `teraterm`.
+The GBAED build also supports an optional serial console over the link cable
+(115200 baud), which can be used with a link-cable-to-serial adapter and a
+terminal program such as `cu`, `screen`, `minicom`, or `putty`.
 
 Log in to DiscoBSD with user `root` and a blank password.
 
-Shutdown DiscoBSD with:
+Shut the system down with:
   ```sh
     $ shutdown -h now
   ```
 `halt` and `reboot` also bring down the system.
 
-## Building the DiscoBSD/stm32 kernel and operating system on a Unix-like host
+## Building DiscoBSD/gba on a Unix-like host
+
+Build both kernels (GBA and GBAED) and the root file system image with:
   ```sh
-    $ make distribution
+    $ make MACHINE=gba MACHINE_ARCH=arm all
   ```
 
-The kernel (for the F412GDISCO board) can be built independently by:
+This produces `distrib/gba/rootfs.img` and the `unix.bin` / `unix.hex` kernels
+in `sys/arch/gba/compile/GBA` and `sys/arch/gba/compile/GBAED`.
+
+A single kernel can be built independently, for example:
   ```sh
-    $ cd sys/arch/stm32/compile/F412GDISCO
+    $ cd sys/arch/gba/compile/GBA
     $ make
   ```
 Note: Building the kernel requires the `tools/config` config utility.
 
-## Debugging DiscoBSD/stm32 on a development board via OpenOCD and GDB
-  ```sh
-    $ make BOARD=F412GDISCO ocd
-  ```
-
-In a separate terminal, run `gdb` with:
-  ```sh
-    $ make BOARD=F412GDISCO gdb-ocd
-  ```
-
-Running `make help` lists targets to debug DiscoBSD/stm32 with OpenOCD and GDB.
+See `sys/arch/gba/NOTES.hardware` and `sys/arch/gba/NOTES.toolchain` for
+details of the port's hardware usage and native toolchain work.
