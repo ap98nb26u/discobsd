@@ -12,14 +12,18 @@
 #include <sys/vm.h>
 
 /*
- * The swap-integrity checksum below is GBA-only. It exists solely for the
+ * The swap-integrity checksum below is GBAED-only. It exists solely for the
  * EverDrive (GBAED) SD swap round trip, which has a rare read-back
  * corruption and no driver-level CRC on the read path (see the swapin/
- * swapout comments). Other ports (pic32, stm32) and the GBA mrams build
- * (EWRAM memcpy swap) have no such failure mode, so they compile a plain
- * swap with none of this machinery, its per-NPROC tables, or its printfs.
+ * swapout comments). Other ports (pic32, stm32) and the plain GBA mrams
+ * build (EWRAM memcpy swap) have no such failure mode, so they compile a
+ * plain swap with none of this machinery, its per-NPROC tables, or its
+ * printfs. (It used to be guarded by #ifdef GBA, which wrongly pulled it
+ * into the mrams build too - four byte-wide passes over the whole image
+ * through wait-stated EWRAM on every swap - so a fork's swap-out/swap-in
+ * cost ~40% more there for a check that build can never need.)
  */
-#ifdef GBA
+#ifdef GBAED
 /* Checksum a memory range, to verify an SD swap round trip (GBAED). */
 static unsigned
 dbg_cksum(size_t addr, size_t len)
@@ -90,7 +94,7 @@ swapin (p)
 
     if (p->p_dsize) {
         swap (p->p_daddr, daddr, p->p_dsize, B_READ);
-#ifdef GBA
+#ifdef GBAED
         /* Verify the data-segment SD swap round trip (see dbg_cksum). */
         {
             int slot = p - proc;
@@ -118,7 +122,7 @@ swapin (p)
     }
     if (p->p_ssize) {
         swap (p->p_saddr, saddr, p->p_ssize, B_READ);
-#ifdef GBA
+#ifdef GBAED
         /* Verify the stack-segment SD swap round trip (see dbg_cksum). */
         {
             int slot = p - proc;
@@ -193,14 +197,14 @@ swapout (p, freecore, odata, ostack)
         return -1;
     p->p_flag |= SLOCK;
     if (odata) {
-#ifdef GBA
+#ifdef GBAED
         /* Record the data checksum so swapin() can verify the SD round trip. */
         dcksum_tab[p - proc] = dbg_cksum(p->p_daddr, odata);
 #endif
         swap (a[0], p->p_daddr, odata, B_WRITE);
     }
     if (ostack) {
-#ifdef GBA
+#ifdef GBAED
         /* Record the stack checksum so swapin() can verify the SD round trip. */
         scksum_tab[p - proc] = dbg_cksum(p->p_saddr, ostack);
 #endif
