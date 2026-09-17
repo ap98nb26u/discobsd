@@ -43,6 +43,39 @@ void cpu_initclocks(void) {
     REG_TM1CNT_L = 0;
     REG_TM1CNT_H = 0x0083;
 
+    /*
+     * Timer2 + Timer3: an IME-independent hardware tick counter, so the
+     * software clock cannot lose time under load.
+     *
+     * A GBA timer interrupt has no pending count: every Timer0 overflow
+     * that happens while IME=0 (the whole of every syscall, and any
+     * splhigh/splbio region) collapses into the single interrupt serviced
+     * when IME is re-enabled, so hardclock() ran once for however many
+     * ticks really elapsed and the clock drifted long in proportion to
+     * load (`sleep`/`time`/itimers all overshot). To recover the lost
+     * ticks the Timer0 ISR needs to know how many overflows really
+     * happened; a free-running counter provides that.
+     *
+     * Timer2 is a second free-running timer clocked exactly like Timer0
+     * (same /1024 prescaler and reload), so it overflows at the same HZ
+     * rate in real hardware time, IRQ bit off. Timer3 is chained to it in
+     * count-up mode (increments once per Timer2 overflow): GBA count-up
+     * timers count the *preceding* timer's overflows, so Timer3 counts
+     * Timer2 (not Timer0 - Timer1 is the swkbd auto-repeat counter and is
+     * left alone). Timer3 therefore advances once per intended hardclock
+     * tick regardless of the IME mask; gba_do_schedule() reads its delta
+     * and replays exactly that many hardclock() calls. Timer3 wraps only
+     * every 65536 ticks (~11 min), far longer than any masked window.
+     *
+     * 0x0083 = enable | /1024 prescaler (no IRQ); 0x0084 = enable |
+     * count-up (prescaler ignored). Order matters: start Timer2 before the
+     * Timer3 that cascades off it.
+     */
+    REG_TM2CNT_L = 65536 - (16777216 / 1024 / HZ);
+    REG_TM2CNT_H = 0x0083;
+    REG_TM3CNT_L = 0;
+    REG_TM3CNT_H = 0x0084;
+
     // GBA全体の割り込み許可レジスタ
     REG_IE |= IRQ_TIMER0;
 #ifdef SERIAL_CONSOLE
