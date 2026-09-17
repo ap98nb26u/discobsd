@@ -44,6 +44,14 @@ char	cpu_model[64];
 int	hz = HZ;
 int	usechz = (1000000L + HZ - 1) / HZ;
 
+/*
+ * Upper bound on how many missed hardclock ticks the Timer0 ISR will
+ * replay in a single interrupt (see the catch-up code in
+ * gba_do_schedule()). ~5 s at HZ=100; a longer freeze's remainder is
+ * caught up over the following interrupts.
+ */
+#define CLOCK_MAXCATCHUP	512
+
 #ifdef TIMEZONE
 struct timezone		tz = { TIMEZONE, DST };
 #else
@@ -250,8 +258,36 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
          * timeout - e.g. select()'s ts argument - computed a valid
          * wakeup tick and then waited forever, since nothing ever
          * checked whether it had expired.)
+         *
+         * Catch-up: a GBA timer interrupt has no pending count, so every
+         * Timer0 overflow that happens while IME=0 (the whole of every
+         * syscall, plus any splhigh/splbio region) collapses into the one
+         * interrupt serviced when IME is re-enabled - one hardclock() for
+         * however many ticks really elapsed. That made the software clock
+         * run slow in proportion to system load (`sleep`, `time`, itimers
+         * all drifted long). Timer3 counts one per intended tick in real
+         * hardware time regardless of the IME mask (a count-up cascade off
+         * the free-running Timer2 - see cpu_initclocks()), so its delta
+         * since the last service is exactly how many ticks we owe. Call
+         * hardclock() that many times; the callout wheel and schedcpu()
+         * re-arm on their own periods, so each timeout fires at its correct
+         * caught-up tick rather than N times. Bounded so a one-off long
+         * freeze can't spin the ISR unreasonably (a residual above the cap
+         * is picked up on the following interrupts).
          */
-        hardclock((caddr_t)0, 0);
+        {
+            static uint16_t last_tm3;
+            uint16_t elapsed = (uint16_t)(REG_TM3CNT_L - last_tm3);
+
+            if (elapsed == 0)           /* we did take an interrupt */
+                elapsed = 1;
+            if (elapsed > CLOCK_MAXCATCHUP)
+                elapsed = CLOCK_MAXCATCHUP;
+            last_tm3 += elapsed;
+            do {
+                hardclock((caddr_t)0, 0);
+            } while (--elapsed);
+        }
 
         /*
          * Sample console input here too, not just in idle(), so ^C and
@@ -649,6 +685,8 @@ cpu_reboot(void)
 		*(volatile uint16_t *)(REG_BASE + 0x00BA + i * 12) = 0;
 	REG_TM0CNT_H = 0;		/* stop the timers */
 	REG_TM1CNT_H = 0;
+	REG_TM2CNT_H = 0;
+	REG_TM3CNT_H = 0;
 	REG_SOUNDCNT_X = 0;		/* master sound off */
 	REG_DISPCNT = 0x0080;		/* forced blank - clear stale video output */
 
