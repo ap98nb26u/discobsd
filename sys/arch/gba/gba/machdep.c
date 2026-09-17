@@ -32,7 +32,6 @@
 
 #include <gba/dev/mgbalog.h>
 #include <machine/gba_syscall.h>
-#include <machine/sched_test.h>
 
 int cpu_khz = 16777;
 int bus_khz = 16777;
@@ -159,7 +158,6 @@ SystemClock_Config(void)
 }
 #endif // 0
 
-extern ARM_CODE void proc1(void);
 void gba_do_schedule(void);
 volatile int need_resched;
 
