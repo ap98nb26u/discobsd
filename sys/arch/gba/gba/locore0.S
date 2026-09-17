@@ -256,48 +256,6 @@ gba_intr_handler:
 
     bx lr @ BIOS経由で帰還
 
-#if 0
-.align 4
-.arm
-.global gba_irq_sched_stub
-.extern lwp_current
-.extern gba_sched_pick
-
-gba_irq_sched_stub:
-    @ 1. IRQ Mode: save IRQ context
-    push {r0-r3, r12, lr}
-    mrs r0, spsr
-    push {r0}
-
-    @ 2. SYS Mode: save to process stack
-    msr cpsr_c, #0xDF
-    nop
-    push {r4-r11, lr} @ push callee-saved to process stack
-    
-    @ 3. save to u.u_rsav (label_t)
-    ldr r0, =u
-    @ save current SP to index 9 (offset 36) of label_t
-    str sp, [r0, #36] @ u.u_rsav.val[9] = sp
-
-    @ 4. execute scheduler
-    @bl gba_sched_pick @ to next process (u and curproc updated)
-
-    @ 5. restore next process
-    ldr r0, =u
-    ldr sp, [r0, #36] @ restore SP of new process
-
-    pop {r4-r11, lr} @ restore resisters
-
-    @ 6. return via IRQ
-    msr cpsr_c, #0xD2
-    nop
-    pop {r0}
-    msr spsr_cxsf, r0
-    nop
-    pop {r0-r3, r12, lr}
-    bx lr
-#endif
-
 .align 2
 .arm
 .global savectx
