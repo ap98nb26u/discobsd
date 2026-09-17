@@ -11,7 +11,8 @@
 architecture    "gba"
 cpu             "ARM7TDMI"                  # Processor variant
 board           "GBA"                       # Board type
-ldscript        "kern.ldscript"             # Kernel memory linker script
+options         "GBAED"                     # real EverDrive SD build (vs plain GBA/mrams); selects the large-USERRAM layout & real-SD paths
+ldscript        "kern_gbaed.ldscript"             # Kernel memory linker script
 
 makeoptions     DEBUG="-g"                  # Debug symbols
 

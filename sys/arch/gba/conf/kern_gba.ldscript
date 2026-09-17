@@ -1,5 +1,16 @@
 /*
- * Kernel common linker script for GBA.
+ * Kernel linker script for the plain GBA (mrams / mGBA) build.
+ *
+ * This build has NO real disk: the root filesystem is a bare UFS image
+ * (distrib/gba/rootfs.img, no MBR/partition table) embedded into cartridge
+ * ROM in the .fs section below, and served by the mrams memory-disk driver
+ * (dev/mrams.c) as /dev/mr0a. Swap (/dev/mr0b) is a separate EWRAM region
+ * (SWAP below), unrelated to the embedded image.
+ *
+ * The GBAED (real EverDrive SD) build uses kern_gbaed.ldscript instead; keep
+ * the two in sync by hand for anything that is not deliberately per-build
+ * (the USERRAM/SWAP split is where they are expected to diverge - GBAED can
+ * reclaim the EWRAM swap region to enlarge USERRAM, see machparam.h).
  */
 
 MEMORY {
@@ -115,7 +126,16 @@ SECTIONS {
     _rom_end = ALIGN(4);
 
     .fs : ALIGN(1024) {
-        __fs_start = . + 0x400; /* 1024 byte header */
+        /*
+         * The embedded image is now a BARE root filesystem (rootfs.img, no
+         * MBR/partition table), so the filesystem starts at offset 0 - mrams
+         * maps mr0a directly onto __fs_start. (Previously an MBR-partitioned
+         * sdcard.img was embedded and this skipped its 1024-byte MBR with
+         * "+ 0x400" to land on partition #1; that partitioning was never used
+         * by mrams - mr0a/mr0b are synthesized from __fs_start/__swap_start -
+         * so the MBR and the extra swap/home partitions were pure ROM bloat.)
+         */
+        __fs_start = .;
         *(.fs_image)
         . = ALIGN(4);
         __fs_end = .;

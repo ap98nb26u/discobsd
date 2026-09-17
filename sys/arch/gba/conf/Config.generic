@@ -12,7 +12,7 @@ architecture    "gba"
 cpu             "ARM7TDMI"                  # Processor variant
 board           "GBA"                       # Board type
 #ldscript        "GBA.ld"                    # Kernel memory linker script
-ldscript        "kern.ldscript"             # Kernel memory linker script
+ldscript        "kern_gba.ldscript"             # Kernel memory linker script
 
 makeoptions     DEBUG="-g"                  # Debug symbols
 

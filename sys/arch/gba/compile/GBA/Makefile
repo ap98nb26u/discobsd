@@ -14,7 +14,7 @@ PARAM += -DSCREEN_BLANK_SECS=60
 PARAM += -DHALTREBOOT
 PARAM += -DBUS_KHZ=16777
 PARAM += -DCPU_KHZ=16777
-LDSCRIPT = "kern.ldscript"
+LDSCRIPT = "kern_gba.ldscript"
 DEBUG = -g
 #
 # Makefile for DiscoBSD/gba
@@ -160,13 +160,20 @@ ioconf.o: ioconf.c
 
 # ED_ENABLED (GBAED) reads its root filesystem from the real SD card
 # at runtime (ed.c/sd.c), never from this ROM-embedded copy - that
-# path is mrams.c-only (MR_ENABLED, plain GBA/mGBA). Embedding the
-# full sdcard.img there just bloats cartridge ROM size for zero
-# functional benefit, so ED_ENABLED links a tiny placeholder instead.
+# path is mrams.c-only (MR_ENABLED, plain GBA/mGBA). The mrams build
+# embeds the BARE root filesystem (dev/rootfs.img) so its ROM is
+# self-contained; ED_ENABLED links a tiny placeholder instead.
 ifneq (,$(findstring -DED_ENABLED,$(PARAM)))
 SDCARD_IMG=	${_machdir}/dev/sdcard_ed_placeholder.img
 else
-SDCARD_IMG=	${_machdir}/dev/sdcard.img
+SDCARD_IMG=	${_machdir}/dev/rootfs.img
+# dev/rootfs.img is a .gitignored build artifact: the top-level `make fs`
+# builds distrib/gba/rootfs.img from the installed tree and copies it here,
+# then relinks. Seed a 1K placeholder if it is missing so a first kernel
+# link (before any `make fs`) still succeeds; `make fs` overwrites it with
+# the real filesystem afterwards. mrams build only (GBAED has its placeholder).
+${_machdir}/dev/rootfs.img:
+	dd if=/dev/zero of=$@ bs=1024 count=1 2>/dev/null
 endif
 sdcard.o: ${SDCARD_IMG}
 	${OBJCOPY} -I binary -O elf32-littlearm -B ${_arch} \
