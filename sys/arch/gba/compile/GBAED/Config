@@ -73,9 +73,8 @@ options         "UART_BAUD=115200"          # default speed
 # comes from the on-screen software keyboard (swkbd), same as the GBA
 # build. This real-hardware build ADDITIONALLY enables SERIAL_CONSOLE:
 # the SIO/UART link-cable console (gsio) mirrors output and takes input
-# over a serial cable, for interactive debugging on real hardware. (The
-# mGBA emulator debug log, MGBA_LOG, is intentionally NOT set here - it
-# is a no-op on real hardware.)
+# over a serial cable, for interactive debugging on real hardware. (No
+# emulator console log is compiled in - that lives in the GBALOG config.)
 options         "CONS_MAJOR=UART_MAJOR"     # console is the uart tty
 options         "CONS_MINOR=0"              # uart1 is /dev/tty0
 options         "SERIAL_CONSOLE"            # real UART console over the cable

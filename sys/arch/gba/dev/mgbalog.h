@@ -5,30 +5,19 @@
 
 #ifdef KERNEL
 
-#define MGBA_REG_DEBUG_ENABLE  (*(volatile unsigned short*)0x04FFF780)
-#define MGBA_REG_DEBUG_FLAGS   (*(volatile unsigned short*)0x04FFF700)
-#define MGBA_REG_DEBUG_BUFFER  ((volatile char*)0x04FFF600)
-
-#define MGBA_LOG_FATAL   0x00
-#define MGBA_LOG_ERROR   0x01
-#define MGBA_LOG_WARN    0x02
-#define MGBA_LOG_INFO    0x03
-#define MGBA_LOG_DEBUG   0x04
-
 /*
- * AGBPrint: the debug-print protocol VisualBoyAdvance captures with its
- * "--gdb"-independent AGBPrint support (Tools -> Log window, or run with
- * --agb-print). Unlike mGBA's flat 0x04FFFxxx registers, AGBPrint lives in
- * the high cartridge address space: a small context struct + a print buffer
- * that the emulator reads on flush. VBA validates the buffer bank (0xfd ->
- * 0x09FD0000), reads bytes get..put, prints them, and writes get:=put back.
+ * AGBPrint: the standard GBA debug-print that mGBA and VisualBoyAdvance
+ * capture (VBA 1.8.0 with --verbose=512 --agb-print). It lives in the high
+ * cartridge address space: a small context struct + a print buffer, flushed
+ * by a software interrupt (comment 0xFA). The emulator reads the buffer bank
+ * (0x1fd -> 0x09FD0000) over get..put, prints the bytes, then writes get:=put
+ * back.
  *
- * IMPORTANT: these are real cartridge-bus addresses. On the EverDrive
- * (GBAED build) that space overlaps the cartridge's own registers, so this
- * is only ever used on the plain GBA (mrams / emulator) build, and only when
- * NOT running under mGBA (which has its own MGBA_LOG path above) - see the
- * gating in mgba_uart.c. On real non-EverDrive flash carts the writes land
- * in inert ROM space and are harmless.
+ * IMPORTANT: these are real cartridge-bus addresses and the flush is a real
+ * svc (this port dispatches user syscalls through a simulated SWI and has no
+ * real svc handler). So AGBPrint is used ONLY in the emulator-only GBALOG
+ * build (options AGBPRINT); the plain GBA and GBAED kernels contain none of
+ * it and stay safe on real (non-EverDrive) hardware.
  */
 #define AGB_PRINT_PROTECT (*(volatile unsigned short*)0x09FE2FFE)
 #define AGB_PRINT_CTX     ((volatile unsigned short*)0x09FE20F8)  /* [0]=request [1]=bank [2]=get [3]=put */
