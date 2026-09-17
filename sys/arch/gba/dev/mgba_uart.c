@@ -22,26 +22,16 @@ void uart_poll_input(void);
 void console_activity(void);		/* machdep.c: console screen-saver */
 extern struct tty uartttys[];
 
-/*
- * Set nonzero when running under the mGBA emulator (detected at boot in
- * uartinit()). Gates the mGBA debug-log register writes in uartputc()/
- * uartputs() so the SAME GBA kernel drives the emulator log under mGBA but
- * stays silent on real hardware.
- */
-int mgba_present;
-
 void uartinit(int unit) {
     /*
-     * Two optional output sinks mirror the on-screen (gtxt) console,
-     * each selected by a kernel config option (see the GBA/GBAED Config
-     * files):
-     *   MGBA_LOG        - compile in the mGBA emulator debug-log mirror.
-     *                     Which is actually USED is decided at runtime:
-     *                     uartinit() probes for mGBA (below) and only then
-     *                     is the log written, so a MGBA_LOG kernel is
-     *                     correct on real hardware too (silent there). The
-     *                     GBAED build, which only ever runs on hardware,
-     *                     leaves it out entirely.
+     * Two optional output sinks mirror the on-screen (gtxt) console, each
+     * selected by a kernel config option (see the Config files):
+     *   AGBPRINT        - mirror the console to AGBPrint, the standard GBA
+     *                     debug-print that mGBA and VisualBoyAdvance capture
+     *                     (see agb_puts). Its flush is a real svc, so it is
+     *                     set ONLY in the emulator-only GBALOG config, never
+     *                     in the plain GBA/GBAED kernels that run on real
+     *                     hardware.
      *   SERIAL_CONSOLE  - real UART over the link cable (gsio), for
      *                     interactive debugging; the GBAED build enables
      *                     it, the cable-free GBA demo build does not (it
@@ -51,20 +41,13 @@ void uartinit(int unit) {
      */
     if (unit == CONS_MINOR) {
         gtxt_init(GTXT_WHITE, GTXT_BLACK); // console: white on black
-#ifdef MGBA_LOG
 #ifdef AGBPRINT
         /*
-         * Unified emulator console log via AGBPrint. BOTH mGBA and VBA 1.8.0
-         * capture AGBPrint (a software interrupt, comment 0xFA - see agb_puts),
-         * so this single mechanism logs in either emulator with exactly one
-         * copy per line (no separate mGBA debug-register path, which was the
-         * source of the double logging). Set the buffer bank to 0x1fd (the
-         * buffer at 0x09FD0000 = ROM offset 0x1FD0000, which the emulator
-         * reads); the 0x20/0x00 writes are the AGBPrint protect handshake.
-         * Compiled ONLY into the GBAVBAM config: the per-line flush is a real
-         * svc that would trap to the BIOS on hardware, so it is kept out of the
-         * plain GBA kernel that has to run on real non-EverDrive carts. (GBAED
-         * never gets here: it does not define MGBA_LOG.)
+         * Emulator console log via AGBPrint (GBALOG config). Both mGBA and
+         * VBA 1.8.0 capture it (flush = svc 0xFA, see agb_puts), one copy per
+         * line. Set the buffer bank to 0x1fd (buffer 0x09FD0000 = ROM offset
+         * 0x1FD0000, which the emulator reads); the 0x20/0x00 writes are the
+         * AGBPrint protect handshake.
          */
         AGB_PRINT_PROTECT = 0x20;
         AGB_PRINT_CTX[0] = 0;       /* request */
@@ -72,22 +55,6 @@ void uartinit(int unit) {
         AGB_PRINT_CTX[2] = 0;       /* get */
         AGB_PRINT_CTX[3] = 0;       /* put */
         AGB_PRINT_PROTECT = 0;
-#else
-        /*
-         * Detect mGBA at runtime rather than assuming it. Writing 0xC0DE to
-         * the debug-enable register and reading back 0x1DEA identifies the
-         * emulator (the write also arms mGBA's logging). On real hardware
-         * that address is open bus, so the readback is not 0x1DEA,
-         * mgba_present stays 0, and every later debug-register write is
-         * skipped. Announce a hit so a hardware-vs-emulator demo of the one
-         * GBA kernel shows the difference in the boot log. printf() is live
-         * by now: startup() calls us before it prints the version banner.
-         */
-        MGBA_REG_DEBUG_ENABLE = 0xC0DE;
-        mgba_present = (MGBA_REG_DEBUG_ENABLE == 0x1DEA);
-        if (mgba_present)
-            printf("mGBA detected.\n");
-#endif
 #endif
 #ifdef SERIAL_CONSOLE
         gsio_init(UART_BAUD);
@@ -387,16 +354,17 @@ char uartgetc(dev_t dev) {
 #endif
 }
 
-#ifdef MGBA_LOG
 #ifdef AGBPRINT
 /*
- * Emit one completed line to AGBPrint, which VisualBoyAdvance / VBA-M
- * captures (with AGBPrint enabled) and mGBA also understands. VBA reads the
- * buffer byte-by-byte over get..put, so pack two chars per 16-bit cartridge
- * word (little-endian: buffer[2k] is the low byte, [2k+1] the high). Protection
- * is unlocked (protect=0x20) so the emulator captures the context/buffer
- * writes; get=0/put=len; then the flush is a software interrupt (comment 0xFA).
- * Compiled only under the AGBPRINT build option - see the flush note below.
+ * Emit one completed console line to AGBPrint, which mGBA and VisualBoyAdvance
+ * capture. The reader pulls bytes over get..put, so pack two chars per 16-bit
+ * cartridge word (little-endian: buffer[2k] low, [2k+1] high); a trailing
+ * newline ends the line. protect=0x20 lets the emulator capture the
+ * buffer/context writes; the flush is a software interrupt, comment 0xFA. Only
+ * built into the GBALOG config: this is a REAL svc and the port has no real svc
+ * handler (user syscalls use a simulated SWI), so on hardware / a non-AGBPrint
+ * emulator it would trap to the BIOS - hence never in the plain GBA/GBAED
+ * kernels that run on real non-EverDrive carts.
  */
 static void agb_puts(const char *s) {
     volatile unsigned short *buf = AGB_PRINT_BUFFER;
@@ -421,36 +389,10 @@ static void agb_puts(const char *s) {
     AGB_PRINT_CTX[1] = 0x01fd;               /* bank: buffer 0x09FD0000 -> g_rom 0x1FD0000 */
     AGB_PRINT_CTX[2] = 0;                     /* get */
     AGB_PRINT_CTX[3] = (unsigned short)i;     /* put = byte count (incl. the newline) */
-    /*
-     * Flush: AGBPrint's flush is a software interrupt, comment 0xFA, which the
-     * emulator (VBA-M / mGBA) intercepts and turns into a log line. NB this is
-     * a REAL svc; on this port user syscalls use a *simulated* SWI, so the
-     * kernel has no real svc handler and executing this where nothing
-     * intercepts it (real GBA hardware, a non-AGBPrint emulator) traps to the
-     * BIOS. That is exactly why this whole path is compiled only under the
-     * AGBPRINT build option (the GBAVBAM config) and never in the plain GBA
-     * kernel, which has to run on real non-EverDrive hardware.
-     */
-    asm volatile("svc #0xfa" ::: "memory");
-    AGB_PRINT_PROTECT = 0;                   /* lock */
+    asm volatile("svc #0xfa" ::: "memory");  /* flush (mGBA/VBA intercept 0xFA) */
+    AGB_PRINT_PROTECT = 0;                    /* lock */
 }
 #endif /* AGBPRINT */
-
-/* Flush a completed console line to the emulator log. */
-static void emu_log_line(const char *s) {
-#ifdef AGBPRINT
-    /* single AGBPrint mechanism: one copy per line under both mGBA and VBA */
-    agb_puts(s);
-#else
-    if (mgba_present) {
-        int k = 0;
-        while (s[k] && k < 255) { MGBA_REG_DEBUG_BUFFER[k] = s[k]; k++; }
-        MGBA_REG_DEBUG_BUFFER[k] = '\0';
-        MGBA_REG_DEBUG_FLAGS = 0x100 | MGBA_LOG_INFO;
-    }
-#endif
-}
-#endif
 
 void uartputc(dev_t dev, char c) {
     gtxt_putc(c);
@@ -458,7 +400,7 @@ void uartputc(dev_t dev, char c) {
     gsio_putc((unsigned char)c);
 #endif
 
-#ifdef MGBA_LOG
+#ifdef AGBPRINT
     {
         static char line[256];
         static int i = 0;
@@ -466,7 +408,7 @@ void uartputc(dev_t dev, char c) {
             line[i++] = c;
         } else {
             line[i] = '\0';
-            emu_log_line(line);
+            agb_puts(line);
             i = 0;
         }
     }
@@ -481,7 +423,7 @@ void uartputc(dev_t dev, char c) {
  * kernel-message colour tints exactly the kernel's own printf output green
  * on the LCD, leaving login/shell/program output and the keyboard in the
  * normal console colour (roadmap #8). The green applies only on the gtxt
- * LCD console; the serial mirror and mGBA log are plain text.
+ * LCD console; the serial mirror and AGBPrint log are plain text.
  */
 void uartputc_kmsg(dev_t dev, char c) {
     gtxt_msgcolor(1);
@@ -490,8 +432,8 @@ void uartputc_kmsg(dev_t dev, char c) {
 }
 
 void uartputs(dev_t dev, const char *s) {
-#ifdef MGBA_LOG
-    emu_log_line(s);
+#ifdef AGBPRINT
+    agb_puts(s);
 #else
     (void)s;
 #endif
