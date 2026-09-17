@@ -82,8 +82,17 @@ MEMORY {
      * USERRAM, MAXMEM (param.h/machparam.h), and USER_DATA_SIZE
      * (machparam.h) all in sync by hand if this moves again.
      */
-    USERRAM (rw!x) : ORIGIN = 0x02001800, LENGTH = 64K   /* 0x0200 1800 - 0x0201 17FF */
-    SWAP    (rw!x) : ORIGIN = 0x02011800, LENGTH = 186K  /* 0x0201 1800 - 0x0203 FFFF */
+    /*
+     * GBAED LARGE-CAPACITY LAYOUT: unlike the plain GBA/mrams build, GBAED's
+     * swap lives on the real SD card (/dev/sd0c), so the EWRAM SWAP staging
+     * region that mrams needs is dead weight here. Reclaim it: USERRAM fills
+     * ALL of EWRAM after the u/u0 area (0x02001800..0x02040000 = 250K, vs the
+     * mrams build's 64K), so a single resident process can be up to 250K and
+     * far more can be parked in SD swap. kern_gba.ldscript keeps the 64K
+     * USERRAM + 186K EWRAM SWAP split. Keep LENGTH here in sync with
+     * machparam.h's -DGBAED USER_DATA_SIZE and MAXMEM (all 250K) by hand.
+     */
+    USERRAM (rw!x) : ORIGIN = 0x02001800, LENGTH = 250K  /* 0x0200 1800 - 0x0204 0000 (to EWRAM end) */
 }
 
 __kernel_flash_start	= ORIGIN(FLASH);
@@ -94,8 +103,13 @@ __iwram_start		= ORIGIN(IWRAM);
 __iwram_end		= ORIGIN(IWRAM) + LENGTH(IWRAM);
 __user_data_start	= ORIGIN(USERRAM);
 __user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
-__swap_start		= ORIGIN(SWAP);
-__swap_end		= ORIGIN(SWAP) + LENGTH(SWAP);
+/*
+ * GBAED has no EWRAM swap region (swap is on the SD), but machdep.c's
+ * check_irq_pc() still references these symbols. Point both at the end of
+ * USERRAM so the range is empty and the check is simply never true.
+ */
+__swap_start		= __user_data_end;
+__swap_end		= __user_data_end;
 
 syscall_vector		= ORIGIN(SYSVEC);
 u0			= ORIGIN(U0AREA);
