@@ -81,14 +81,6 @@ uartprobe(struct conf_device *config) {
     if (unit < 0 || unit >= NUART)
         return 0;
 
-#if 0
-    printf("uart%d:", unit+1);
-    if (is_console)
-        printf(", console");
-    printf("\n");
-#endif
-
-    //uartttys[unit].t_addr = (caddr_t) &uart[unit];
     if (! is_console)
         uartinit(unit);
 
