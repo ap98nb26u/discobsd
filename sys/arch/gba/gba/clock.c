@@ -48,17 +48,4 @@ void cpu_initclocks(void) {
 #ifdef SERIAL_CONSOLE
     REG_IE |= IRQ_SERIAL;	/* link-cable RX byte -> gsio_rx_isr() */
 #endif
-    //REG_IME = 1;
 }
-
-#if 0
-void timer_interrupt_handler(void) {
-    // 割り込み要因(REG_IF)の確認とクリア
-    if (REG_IF & IRQ_TIMER0) { // Timer 0 bit
-        REG_IF = IRQ_TIMER0; // クリア
-        
-        // カーネルの時計を更新
-        hardclock((caddr_t)0, 0);
-    }
-}
-#endif
