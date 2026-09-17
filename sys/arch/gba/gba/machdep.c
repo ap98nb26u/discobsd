@@ -525,6 +525,18 @@ gba_irq_block(void)
 void
 idle(void)
 {
+	/*
+	 * Let TIMER0 fire while we idle so a sleeper blocked with a real
+	 * timeout (e.g. select()) can eventually be woken by hardclock()/
+	 * softclock(); re-masked before returning (below), before swtch()
+	 * resumes any process, to restore the invariant the syscall
+	 * trampoline (gba/syscall.c) depends on. This bracketing used to
+	 * live in the MI swtch() (kern/kern_synch.c); moved here to keep
+	 * that file machine-independent. gba_irq_allow/block just toggle
+	 * REG_IME (see gba_irq_allow() above for the full rationale).
+	 */
+	gba_irq_allow();
+
 	/* Indicate that no process is running. */
 	noproc = 1;
 
@@ -607,6 +619,8 @@ idle(void)
 
 	/* Restore previous SPL. */
 	splx(x);
+
+	gba_irq_block();
 }
 
 void
