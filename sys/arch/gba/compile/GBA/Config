@@ -47,17 +47,10 @@ options         "UART_BAUD=115200"          # default speed
 
 # Console. Output always goes to the on-screen LCD text console (gtxt),
 # and input always comes from the on-screen software keyboard (swkbd);
-# those are unconditional. Two optional mirror/aux sinks are selected
-# here (see mgba_uart.c):
-#
-#   MGBA_LOG - compile in the mGBA emulator debug-log mirror. Whether it
-#              is actually used is decided AT RUNTIME: uartinit() probes for
-#              mGBA (writes 0xC0DE to the debug-enable register, expects
-#              0x1DEA back) and only mirrors to the log when the emulator is
-#              present, printing "mGBA detected." to the boot log. So this
-#              same GBA kernel is correct on real hardware too (silent on
-#              the log there) - handy for demoing the one ROM on both. The
-#              GBAED build only ever runs on hardware, so it omits this.
+# those are unconditional. This is the plain GBA kernel: no emulator log is
+# compiled in, so it stays fully self-contained on real (non-EverDrive)
+# hardware. For a headless emulator console log (mGBA / VisualBoyAdvance)
+# use the GBALOG config, which is this config plus options "AGBPRINT".
 #
 # SERIAL_CONSOLE is deliberately NOT set: this standalone build runs with
 # no serial cable, and the SIO/UART link-cable console (gsio) busy-waits
@@ -67,7 +60,6 @@ options         "UART_BAUD=115200"          # default speed
 # GBAED opts in to SERIAL_CONSOLE for interactive debugging over a cable.
 options         "CONS_MAJOR=UART_MAJOR"     # console is the uart tty
 options         "CONS_MINOR=0"              # uart1 is /dev/tty0
-options         "MGBA_LOG"                  # mirror console to mGBA log
 
 # SDIO port
 #controller      sdio0                       # SDIO port
