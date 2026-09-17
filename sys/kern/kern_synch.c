@@ -13,7 +13,6 @@
 #include <sys/kernel.h>
 #include <sys/systm.h>
 
-extern int sys_write(const char *);
 #define SQSIZE  16              /* Must be power of 2 */
 
 #define HASH(x) (((int)x >> 5) & (SQSIZE - 1))
@@ -192,16 +191,7 @@ tsleep (ident, priority, timo)
     if (p != &proc[0])
         wakeup((caddr_t) &runin);
     u.u_ru.ru_nvcsw++;
-#ifdef GBA
-//p->p_addr = (size_t)&u;
-//printf("before longjmp: cur u=%p target u=%p\n",&u,p->p_addr);
-//printf("target sp=%x lr=%x\n",
-//  ((struct user *)p->p_addr)->u_rsave.val[8],
-//  ((struct user *)p->p_addr)->u_rsave.val[9]);
-#endif
-    //printf("DBG: tsleep pid=%d before swtch, chan=%x\n", p->p_pid, (unsigned)ident);
     swtch();
-    //printf("DBG: tsleep pid=%d after swtch (resumed)\n", p->p_pid);
 resume:
     splx(s);
     p->p_flag &= ~P_SINTR;
@@ -258,7 +248,6 @@ sleep (chan, pri)
      * EINTR - put into u_error for trap.c to find (interrupted syscall)
      * ERESTART - system call to be restared
      */
-//sys_write("sleep:bfr longjmp\n");
     longjmp (u.u_procp->p_addr, &u.u_qsave);
     /*NOTREACHED*/
 }
@@ -410,23 +399,13 @@ setpri (pp)
  * called and will return in at most 1hz time, e.g. it's not worth putting an
  * spl() in.
  */
-//#ifdef GBA
-//__attribute__((target("arm")))
-//void
-//swtch()
-//#else
 void
 swtch()
-//#endif
 {
     register struct proc *p, *q;
     register int n;
     struct proc *pp, *pq;
     int s;
-//printf("swtch u=%p\n", &u);
-//register unsigned int cpsr asm("r0");
-//__asm__ volatile("mrs %0, cpsr" : "=r"(cpsr));
-//printf("swtch cpsr=%x\n", cpsr);
 #ifdef UCB_METER
     cnt.v_swtch++;
 #endif
@@ -488,24 +467,7 @@ loop:
      */
     p = pp;
     if (p == NULL) {
-#ifdef GBA
-        /*
-         * Nothing runnable: let TIMER0 fire while we idle so a sleeper
-         * blocked with a real timeout (e.g. select()) can eventually be
-         * woken by hardclock()/softclock(). Re-masked immediately below,
-         * before resuming any process, to restore the invariant the
-         * syscall trampoline (gba/syscall.c) depends on. See the comment
-         * on gba_irq_allow() in gba/machdep.c for why this can't just be
-         * done inside the trampoline itself.
-         */
-        extern void gba_irq_allow(void);
-        extern void gba_irq_block(void);
-        gba_irq_allow();
         idle();
-        gba_irq_block();
-#else
-        idle();
-#endif
         goto loop;
     }
     if (pq)
