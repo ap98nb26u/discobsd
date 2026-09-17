@@ -27,6 +27,10 @@ typedef unsigned short uint16_t;
 #define REG_TM0CNT_H	(*(volatile uint16_t *)(REG_BASE+0x0102))
 #define REG_TM1CNT_L	(*(volatile uint16_t *)(REG_BASE+0x0104))
 #define REG_TM1CNT_H	(*(volatile uint16_t *)(REG_BASE+0x0106))
+#define REG_TM2CNT_L	(*(volatile uint16_t *)(REG_BASE+0x0108))
+#define REG_TM2CNT_H	(*(volatile uint16_t *)(REG_BASE+0x010A))
+#define REG_TM3CNT_L	(*(volatile uint16_t *)(REG_BASE+0x010C))
+#define REG_TM3CNT_H	(*(volatile uint16_t *)(REG_BASE+0x010E))
 
 /* Sound. PSG channel 1 (square with sweep) + the master controls; used by
  * gba_sound.c for the console beep. DirectSound (DMA) FIFOs are not here. */
