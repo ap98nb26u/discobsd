@@ -31,6 +31,7 @@
 #include <machine/gba.h>
 
 #include <gba/dev/mgbalog.h>
+#include <gba/dev/gba_sio_uart.h>
 #include <machine/gba_syscall.h>
 
 int cpu_khz = 16777;
@@ -627,38 +628,45 @@ void
 cpu_reboot(void)
 {
 	/*
-	 * Was a raw jump to _start - a "warm jump" that leaves IWRAM,
-	 * CPU mode/register state, and peripheral registers exactly as
-	 * the crashed/previous session left them, only reinitialized by
-	 * whatever this port's own boot code happens to touch. The
-	 * mojibake glyph seen at the very start of every reboot's console
-	 * output (before "DiscoBSD..." banner) is consistent with stale
-	 * leftover state feeding into the console driver before it
-	 * re-inits.
+	 * Reboot WITHOUT any BIOS SWI, so it behaves identically on real
+	 * hardware and in the emulators. The undocumented HardReset (SWI 0x26)
+	 * rebooted real hardware but hangs mGBA (no HLE for it); the documented
+	 * SoftReset (0x00) leaves stale I/O and, even paired with RegisterRamReset
+	 * (0x01), left the next boot's init wild-jumping.
 	 *
-	 * Tried the BIOS's documented SoftReset (SWI 0x00) first: it
-	 * clears the reserved IWRAM area and CPU-mode stack pointers, but
-	 * -not- I/O register space (0x04000000+) - confirmed still leaving
-	 * an occasional early hang after a panic-triggered reboot,
-	 * consistent with some I/O register (REG_IME's stale value was
-	 * one candidate; explicitly zeroing it at the top of locore0.S's
-	 * reset: didn't fully fix it either, so something else in that
-	 * space is apparently also still stale) surviving into the next
-	 * boot in a state this port's init code doesn't expect. Now using
-	 * the undocumented HardReset (SWI 0x26) instead - per GBATEK
-	 * (problemkaputt.de/gbatek-bios-reset-functions.htm), it performs
-	 * a much more thorough reset closer to actual power-cycling.
-	 * Undocumented and known to vary across real hardware revisions,
-	 * but SoftReset's narrower reset demonstrably isn't sufficient
-	 * here, so trading that documented-but-insufficient guarantee for
-	 * this broader one. r0 selects the post-reset boot target; 0 is
-	 * the conventional "same as normal cold boot" value.
+	 * Instead: mask interrupts and quiet the peripherals whose leftover state
+	 * would otherwise feed the next boot before it re-inits (display, DMA,
+	 * timers, sound), then warm-jump to the cartridge ROM entry (0x08000000).
+	 * reset: in locore0.S re-initialises .data/.bss/.fast_text, the stack and
+	 * the IRQ vector exactly as on a cold boot.
 	 */
-	__asm__ volatile (
-	    "mov r0, #0\n\t"
-	    "swi 0x26"
-	    ::: "r0"
-	);
+	int i;
+
+	REG_IME = 0;			/* master interrupt disable */
+	REG_IE = 0;
+	REG_IF = 0xFFFF;		/* acknowledge anything pending */
+	for (i = 0; i < 4; i++)		/* stop all four DMA channels */
+		*(volatile uint16_t *)(REG_BASE + 0x00BA + i * 12) = 0;
+	REG_TM0CNT_H = 0;		/* stop the timers */
+	REG_TM1CNT_H = 0;
+	REG_SOUNDCNT_X = 0;		/* master sound off */
+	REG_DISPCNT = 0x0080;		/* forced blank - clear stale video output */
+
+	/*
+	 * Wipe EWRAM below our own stack so no stale RAM from the previous
+	 * session survives into the next boot: the u/u0 process-context area and
+	 * other fixed-address EWRAM are not covered by reset:'s .bss clear, and
+	 * stale contents there made the rebooted init wild-jump. (Leave the top
+	 * few KB - this function is running on the EWRAM stack at 0x0203FFF8.)
+	 */
+	{
+		volatile uint32_t *p = (volatile uint32_t *)0x02000000;
+		int n = (0x0203F000 - 0x02000000) / 4;
+		for (i = 0; i < n; i++)
+			p[i] = 0;
+	}
+
+	((void (*)(void))0x08000000)();	/* warm boot (ARM ROM entry); never returns */
 }
 
 void
@@ -744,9 +752,27 @@ boot(dev_t dev, int howto)
 
 #ifdef HALTREBOOT
 	printf("press any key to reboot...\n");
-	cngetc();
+	/*
+	 * Wait for any key, then reboot. cngetc() is serial-only on this port and
+	 * the software keyboard is dead once the scheduler has stopped, so poll
+	 * the raw keypad directly - a button press works the same on real
+	 * hardware (GBA/GBAED) and in the emulators. REG_KEYINPUT bits are
+	 * active-low (0 = pressed); wait until any of the ten keys is down.
+	 *
+	 * On a build with a serial console (GBAED), also accept a byte on the
+	 * serial link so a host at the other end of the cable can reboot without
+	 * touching the GBA - gsio_avail() is a side-effect-free peek at the
+	 * receive-data flag, so polling it here does not disturb anything.
+	 */
+	for (;;) {
+		if ((REG_KEYINPUT & 0x03ff) != 0x03ff)
+			break;
+#ifdef SERIAL_CONSOLE
+		if (gsio_avail())
+			break;
+#endif
+	}
 
-	/* Reset microcontroller. */
 	cpu_reboot();
 	/* NOTREACHED */
 #endif
