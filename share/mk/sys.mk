@@ -86,7 +86,7 @@ LDWARN!=if [ x"${MACHINE_ARCH}" = x"arm" ] ; then \
 			echo "-Wl,--no-warn-rwx-segments" ; \
 		fi \
 	else \
-		echo "-Wl,--no-warn-rwx-segments" ; \
+		echo "" ; \
 	fi
 
 # -MD -MP make every compile emit a ".d" of the headers it pulled in;
