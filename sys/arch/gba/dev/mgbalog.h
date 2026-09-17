@@ -15,6 +15,25 @@
 #define MGBA_LOG_INFO    0x03
 #define MGBA_LOG_DEBUG   0x04
 
+/*
+ * AGBPrint: the debug-print protocol VisualBoyAdvance captures with its
+ * "--gdb"-independent AGBPrint support (Tools -> Log window, or run with
+ * --agb-print). Unlike mGBA's flat 0x04FFFxxx registers, AGBPrint lives in
+ * the high cartridge address space: a small context struct + a print buffer
+ * that the emulator reads on flush. VBA validates the buffer bank (0xfd ->
+ * 0x09FD0000), reads bytes get..put, prints them, and writes get:=put back.
+ *
+ * IMPORTANT: these are real cartridge-bus addresses. On the EverDrive
+ * (GBAED build) that space overlaps the cartridge's own registers, so this
+ * is only ever used on the plain GBA (mrams / emulator) build, and only when
+ * NOT running under mGBA (which has its own MGBA_LOG path above) - see the
+ * gating in mgba_uart.c. On real non-EverDrive flash carts the writes land
+ * in inert ROM space and are harmless.
+ */
+#define AGB_PRINT_PROTECT (*(volatile unsigned short*)0x09FE2FFE)
+#define AGB_PRINT_CTX     ((volatile unsigned short*)0x09FE20F8)  /* [0]=request [1]=bank [2]=get [3]=put */
+#define AGB_PRINT_BUFFER  ((volatile unsigned short*)0x09FD0000)
+
 void            uartinit(int unit);
 int             uartopen(dev_t dev, int flag, int mode);
 int             uartclose(dev_t dev, int flag, int mode);
