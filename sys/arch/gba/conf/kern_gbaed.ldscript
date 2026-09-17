@@ -1,0 +1,175 @@
+/*
+ * Kernel linker script for the GBAED (real EverDrive SD) build.
+ *
+ * This build reads its root filesystem and swap from the real SD card at
+ * runtime (dev/ed.c + dev/sd.c): root on /dev/sd0b (2nd MBR partition),
+ * swap on /dev/sd0c (3rd). It does NOT use the mrams memory disk, so the
+ * embedded .fs image is only a tiny unused placeholder here (see
+ * conf/Makefile.gba: ED_ENABLED links dev/sdcard_ed_placeholder.img).
+ *
+ * The plain GBA (mrams / mGBA) build uses kern_gba.ldscript, which embeds
+ * the real bare root filesystem in .fs. Keep the two scripts in sync by hand
+ * except where they deliberately diverge: the USERRAM/SWAP split is where
+ * GBAED can reclaim the EWRAM swap region (mrams-only) to enlarge USERRAM -
+ * that large-capacity work edits THIS file (and machparam.h's -DGBAED path).
+ */
+
+MEMORY {
+    FLASH   (rx)   : ORIGIN = 0x08000000, LENGTH = 32M   /* 0x0800 0000 - 0x09FF FFFF */
+
+    IWRAM   (rwx)  : ORIGIN = 0x03000000, LENGTH = 32K   /* 0x0300 0000 - 0x0300 7FFF */
+    SYSVEC  (rw!x) : ORIGIN = 0x03007E00, LENGTH = 4     /* 0x0300 7E00 - 0x0300 7E03: syscall trampoline vector, high in IWRAM just under the BIOS IRQ stack (must match machparam.h SYSCALL_VECTOR_ADDR) */
+
+    EWRAM   (rwx)  : ORIGIN = 0x02000000, LENGTH = 256K  /* 0x0200 0000 - 0x0203 FFFF */
+    /*
+     * U0AREA/UAREA used to live in IWRAM, right up against IWRAM's very
+     * end (with a 4-byte shift to dodge the GBA BIOS's fixed user-IRQ-
+     * handler-pointer word at 0x03007FFC-0x03007FFF - every u/u0 context
+     * switch swaps the *entire* USIZE-byte contents of u and u0, see
+     * resume()/longjmp() in locore.S, so anything living right past
+     * UAREA's end got clobbered by whatever garbage sat at the matching
+     * offset in u0). That put two whole USIZE-byte process contexts -
+     * including every process's kernel-mode C stack, since this port has
+     * no separate always-resident kernel stack - into the last 6K of a
+     * 32K IWRAM already packed with .data/.bss/.fast_text right up to
+     * SYSVEC. A long-sleeping process's saved stack frame (proc 0's,
+     * blocked in tsleep() since early boot) was found corrupted when
+     * finally resumed after another process had been actively running
+     * for a while - root cause not fully nailed down, but GBA's IWRAM is
+     * far smaller than pic32/stm32 (which use this same two-slot u/u0
+     * design without incident), making any layout collision here far
+     * more likely. Moved both slots to EWRAM - not touching a fixed BIOS
+     * vector to worry about here - which also frees the 6K they occupied
+     * back to IWRAM for other use. Cost: process kernel-mode execution
+     * (every syscall body, and hardclock()/softclock() work done while
+     * "running as" a process) now stacks through EWRAM, which is slower
+     * than IWRAM to access - a correctness-over-speed tradeoff while this
+     * port is still getting to a stable interactive shell.
+     */
+    U0AREA  (rw!x) : ORIGIN = 0x02000000, LENGTH = 3K    /* 0x0200 0000 - 0x0200 0BFF */
+    UAREA   (rw!x) : ORIGIN = 0x02000C00, LENGTH = 3K    /* 0x0200 0C00 - 0x0200 17FF */
+    /*
+     * USERRAM is just the user process's own addressable data+stack
+     * window; SWAP is mrams.c's (GBA/mGBA-only) swap staging area, a
+     * *real* EWRAM range that mrams_write()/mrams_read() copy to/from
+     * directly (see __swap_start/__swap_end there) - it is NOT a disk
+     * partition on this config, unlike GBAED's real sd.c (which uses an
+     * 8MB SD partition instead and was never the bottleneck here).
+     *
+     * USERRAM used to sit right after UAREA's *old* IWRAM location, with
+     * SWAP filling the rest of EWRAM after it (68K) - once u0/uarea
+     * moved to EWRAM (see above), that left ~150K of EWRAM completely
+     * unused between UAREA's new end and USERRAM's old start. Moved
+     * USERRAM to directly follow UAREA and grew SWAP to fill everything
+     * else, reclaiming that dead space: with only one process fitting in
+     * USERRAM at a time, every other loaded-but-not-running process's
+     * data+stack+u-area sits parked in SWAP until sched() finds room to
+     * swap it in (see vm_sched.c).
+     *
+     * Raised from 32K to 64K after /bin/sh (data+bss ~46K, far bigger
+     * than /sbin/init's ~28K) silently overran USERRAM's old end into
+     * SWAP during exec: exec_estab()'s overflow check compared against
+     * MAXMEM (a stale 128K, unrelated to this port's actual physical
+     * window - see machparam.h) instead of the real USERRAM size, so it
+     * never caught the mismatch, and the too-large image was read
+     * straight over both the SWAP region and the fixed stack address
+     * exec_setupstack() computed from the old, too-small window - both
+     * mGBA and real GBAED hardware just went silent right after
+     * "reading a.out image", no crash. MAXMEM now matches USERRAM's
+     * length so this fails cleanly (ENOMEM) instead, for anything still
+     * too big (e.g. /sbin/fsck, ~67K). Every KB added here comes
+     * straight out of SWAP, which must keep shrinking to match - keep
+     * USERRAM, MAXMEM (param.h/machparam.h), and USER_DATA_SIZE
+     * (machparam.h) all in sync by hand if this moves again.
+     */
+    USERRAM (rw!x) : ORIGIN = 0x02001800, LENGTH = 64K   /* 0x0200 1800 - 0x0201 17FF */
+    SWAP    (rw!x) : ORIGIN = 0x02011800, LENGTH = 186K  /* 0x0201 1800 - 0x0203 FFFF */
+}
+
+__kernel_flash_start	= ORIGIN(FLASH);
+__kernel_flash_end	= ORIGIN(FLASH) + LENGTH(FLASH);
+__kernel_data_start	= ORIGIN(EWRAM);
+__kernel_data_end	= ORIGIN(USERRAM);
+__iwram_start		= ORIGIN(IWRAM);
+__iwram_end		= ORIGIN(IWRAM) + LENGTH(IWRAM);
+__user_data_start	= ORIGIN(USERRAM);
+__user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
+__swap_start		= ORIGIN(SWAP);
+__swap_end		= ORIGIN(SWAP) + LENGTH(SWAP);
+
+syscall_vector		= ORIGIN(SYSVEC);
+u0			= ORIGIN(U0AREA);
+u			= ORIGIN(UAREA);
+u_end			= ORIGIN(UAREA) + LENGTH(UAREA);
+_estack			= u_end;
+
+ENTRY(_start)
+
+SECTIONS {
+    .text : {
+        *(.text*)
+        *(.rodata*)
+        . = ALIGN(4);
+    } > FLASH
+
+    .fast_text : ALIGN(4) {
+        __fast_start = .;
+        *(.iwram_text)
+        *longjmp.o(.text)
+        *setjmp.o(.text)
+        . = ALIGN(4);
+        __fast_end = .;
+    } > IWRAM AT > FLASH
+
+    _sifast = LOADADDR(.fast_text);
+
+    __etext = .;
+    _rom_end = ALIGN(4);
+
+    .fs : ALIGN(1024) {
+        /*
+         * GBAED does not use the embedded image (root/swap come from the real
+         * SD card), so this holds only the small unused placeholder. Kept for
+         * layout parity with kern_gba.ldscript; __fs_start needs no MBR skip.
+         */
+        __fs_start = .;
+        *(.fs_image)
+        . = ALIGN(4);
+        __fs_end = .;
+    } > FLASH
+
+    .data : {
+        __data_start__ = .;
+        _sdata = .;
+        *(.data*)
+        . = ALIGN(4);
+        __data_end__ = .;
+        _edata = .;
+    } > IWRAM AT > FLASH
+
+    _sidata = LOADADDR(.data);
+
+    .bss : {
+        __bss_start__ = .;
+        _sbss = .;
+        *(.bss*)
+        *(COMMON)
+        . = ALIGN(4);
+        __bss_end__ = .;
+        _ebss = .;
+    } > IWRAM
+
+    /*
+     * dummy section to check free space of IWRAM - .data/.bss/.fast_text
+     * must not grow past SYSVEC. SYSVEC now sits high in IWRAM (0x03007E00,
+     * just below the BIOS-convention IRQ stack at 0x03007F00..0x03007FA0),
+     * so kernel .data/.bss may fill IWRAM right up to it - ~6.5K more than
+     * the old 0x03006400 cap. The SYS/USR kernel stack lives in EWRAM
+     * (locore0.S), so nothing but the small IRQ stack is above SYSVEC.
+     * Bound tracks ORIGIN(SYSVEC) directly so the two can never drift.
+     */
+    .stack_check : {
+        . = ALIGN(4);
+        ASSERT(. < ORIGIN(SYSVEC), "Error: IWRAM overflowed into SYSVEC!");
+    } > IWRAM
+}
