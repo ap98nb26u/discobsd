@@ -22,6 +22,15 @@ void uart_poll_input(void);
 void console_activity(void);		/* machdep.c: console screen-saver */
 extern struct tty uartttys[];
 
+#ifdef AGBPRINT
+/*
+ * Nonzero under mGBA (detected in uartinit). mGBA appends its own newline to
+ * each AGBPrint flush, VBA does not, so agb_puts uses this to decide whether
+ * to add a trailing '\n'. Detection only - logging is all AGBPrint.
+ */
+static int mgba_present;
+#endif
+
 void uartinit(int unit) {
     /*
      * Two optional output sinks mirror the on-screen (gtxt) console, each
@@ -55,6 +64,10 @@ void uartinit(int unit) {
         AGB_PRINT_CTX[2] = 0;       /* get */
         AGB_PRINT_CTX[3] = 0;       /* put */
         AGB_PRINT_PROTECT = 0;
+
+        /* Detect mGBA (vs VBA) for agb_puts's newline handling (see above). */
+        MGBA_REG_DEBUG_ENABLE = 0xC0DE;
+        mgba_present = (MGBA_REG_DEBUG_ENABLE == 0x1DEA);
 #endif
 #ifdef SERIAL_CONSOLE
         gsio_init(UART_BAUD);
@@ -369,13 +382,12 @@ char uartgetc(dev_t dev) {
 static void agb_puts(const char *s) {
     volatile unsigned short *buf = AGB_PRINT_BUFFER;
     unsigned short half = 0;
-    int i = 0, done = 0;
+    int i = 0;
 
     AGB_PRINT_PROTECT = 0x20;
-    /* pack the line plus a terminating newline, two bytes per 16-bit word */
-    while (!done && i < 510) {
+    /* Pack the line, two bytes per 16-bit cartridge word. */
+    while (s[i] && i < 509) {
         unsigned char c = (unsigned char)s[i];
-        if (c == 0) { c = '\n'; done = 1; }  /* newline ends the line for the reader */
         if (i & 1) {
             half |= (unsigned short)c << 8;
             buf[i >> 1] = half;
@@ -384,11 +396,23 @@ static void agb_puts(const char *s) {
         }
         i++;
     }
+    /*
+     * VBA has no per-flush newline and relies on one in the buffer to break
+     * lines, but mGBA adds its own, so an extra '\n' here double-spaces the
+     * mGBA log. Append the newline only when NOT running under mGBA.
+     */
+    if (!mgba_present) {
+        if (i & 1)
+            buf[i >> 1] = half | ((unsigned short)'\n' << 8);
+        else
+            half = '\n';
+        i++;
+    }
     if (i & 1)
         buf[i >> 1] = half;                 /* trailing odd byte (high byte 0) */
     AGB_PRINT_CTX[1] = 0x01fd;               /* bank: buffer 0x09FD0000 -> g_rom 0x1FD0000 */
     AGB_PRINT_CTX[2] = 0;                     /* get */
-    AGB_PRINT_CTX[3] = (unsigned short)i;     /* put = byte count (incl. the newline) */
+    AGB_PRINT_CTX[3] = (unsigned short)i;     /* put = byte count */
     asm volatile("svc #0xfa" ::: "memory");  /* flush (mGBA/VBA intercept 0xFA) */
     AGB_PRINT_PROTECT = 0;                    /* lock */
 }
