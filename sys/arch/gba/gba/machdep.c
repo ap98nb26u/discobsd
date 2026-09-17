@@ -26,8 +26,8 @@
 #include <sys/systm.h>
 #include <sys/config.h>
 #include <sys/tty.h>
+#include <sys/stdint.h>
 
-#include <machine/fault.h>
 #include <machine/gba.h>
 
 #include <gba/dev/mgbalog.h>
