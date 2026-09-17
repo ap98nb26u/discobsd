@@ -63,25 +63,6 @@ struct proc		proc[NPROC];
 struct file		file[NFILE];
 
 extern struct user u;
-void gba_init_context(void);
-
-void
-resume_point(void)
-{
-	printf("resume ok\n");
-	sched();
-}
-
-void
-gba_init_context(void)
-{
-//printf("init u=%p\n", &u);
-//	for (int i = 0; i < 8; i++) {
-//		u.u_rsave.val[i] = 0; // r4-r11
-//	}
-//	u.u_rsave.val[8] = (int)&u + 3072;    // SP
-//	u.u_rsave.val[9] = (int)resume_point; // LR
-}
 
 /*
  * Remove the ifdef/endif to run the kernel in unsecure mode even when in
@@ -117,46 +98,6 @@ int (*dump)(dev_t) = nodump;
 
 dev_t	pipedev;
 daddr_t	dumplo = (daddr_t)1024;
-
-#if 0
-static void
-SystemClock_Config(void)
-{
-	/* Enable HSE oscillator. */
-
-	LL_RCC_HSE_Enable();
-	while (LL_RCC_HSE_IsReady() != 1)
-		;
-
-	/* Set FLASH latency. */
-
-	/* Enable PWR clock. */
-	LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_PWR);
-
-	LL_PWR_SetRegulVoltageScaling(LL_PWR_REGU_VOLTAGE_SCALE1);
-
-
-	/* Main PLL configuration and activation. */
-
-	LL_RCC_PLL_Enable();
-	while (LL_RCC_PLL_IsReady() != 1)
-		;
-
-	/* SysClk activation on the main PLL. */
-	LL_RCC_SetAHBPrescaler(LL_RCC_SYSCLK_DIV_1);
-	LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_PLL);
-	while (LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_PLL)
-		;
-
-	/* Set APB1 & APB2 prescaler. */
-
-	/* Set SysTick to 1ms. */
-	SysTick_Config(CPU_KHZ);
-
-	/* Update CMSIS variable (or through SystemCoreClockUpdate()). */
-	SystemCoreClock = CPU_KHZ * 1000;
-}
-#endif // 0
 
 void gba_do_schedule(void);
 volatile int need_resched;
@@ -417,10 +358,6 @@ static void
 cpuidentify(void)
 {
 	physmem = (256 + 32) * 1024; /* EWRAM + IWRAM */
-//	printf("cpu: ARM7TDMI");
-//	printf(", %u MHz, bus %u MHz\n", CPU_KHZ/1000, BUS_KHZ/1000);
-//	printf("HZ: %u, hz: %u\n", HZ, hz);
-
 }
 
 /*
@@ -453,10 +390,6 @@ sleep_ticks(uint32_t t)
 }
 
 extern void cpu_initclocks(void);
-extern void gba_intr_stub(void);
-
-//extern uint32_t stack1[256], stack2[256];
-extern void syscall_gateway(int sys_num);
 
 /*
  * Configure all controllers and devices as specified
@@ -535,11 +468,6 @@ resettodr(void)
 void
 config(void)
 {
-
-    //*(void(**)())0x03007FF8 = syscall_gateway;
-
-//irq_enable();
-
 	struct conf_ctlr *ctlr;
 	struct conf_device *dev;
 
@@ -598,7 +526,6 @@ gba_irq_block(void)
 void
 idle(void)
 {
-#if 1
 	/* Indicate that no process is running. */
 	noproc = 1;
 
@@ -606,11 +533,6 @@ idle(void)
 	int x = spl0();
 
 	led_control(LED_KERNEL, 0);
-
-	/* Wait for something to happen. */
-	//__DSB();
-	//__ISB();
-	//__WFI();
 
 	/*
 	 * No RX interrupt exists on this port's UART (see the big comment
@@ -686,7 +608,6 @@ idle(void)
 
 	/* Restore previous SPL. */
 	splx(x);
-#endif // 0
 }
 
 void
@@ -818,11 +739,8 @@ boot(dev_t dev, int howto)
 #endif
 
 	printf("reboot failed; spinning\n");
-	for (;;) {
-		//__DSB();
-		//__ISB();
-		//__WFI();
-	}
+	for (;;)
+		;
 	/* NOTREACHED */
 }
 
@@ -835,7 +753,6 @@ boot(dev_t dev, int howto)
 void
 mdelay(u_int msec)
 {
-	//LL_mDelay(msec);
 }
 
 /*
