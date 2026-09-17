@@ -64,13 +64,11 @@ dev/swap.c				standard
 #
 arch/gba/gba/clock.c		standard
 arch/gba/gba/conf.c			standard
-arch/gba/gba/fault.c		standard
 arch/gba/gba/machdep.c		standard
 arch/gba/gba/mpu.c			standard
 arch/gba/gba/sig_machdep.c		standard
 arch/gba/gba/syscall.c		standard
 arch/gba/gba/sysctl.c		standard
-arch/gba/gba/systick.c		standard
 
 #
 # GBA drivers.
