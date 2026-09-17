@@ -1,5 +1,5 @@
 #
-# Machine dependent STM32 root file system manifest file.
+# Machine dependent GBA root file system manifest file.
 #
 default
 owner 0
