@@ -22,7 +22,15 @@ dir /tmp
 # The GBA machine headers, so the on-device native toolchain and anything
 # else building on target can find <machine/*.h>. /usr and /usr/bin come
 # from the shared (mi) manifest; the machine headers are per-port, so they
-# live here as on the other ports (see distrib/stm32/md.stm32).
+# live here as on the other ports (see distrib/stm32/md.stm32,
+# distrib/pic32/md.pic32).
+#
+# This list is the set both reference ports (pic32 AND stm32) ship - their
+# agreed common headers. Headers where the two ports diverge are left out
+# pending a separate decision: stm32-only fault.h/intr.h/mpuvar.h; the
+# per-port hardware-register header (pic32 ships pic32mx.h, the GBA analog
+# is gba.h); and the GBA-only gba_syscall.h/syscall.h/sched_test.h that
+# neither reference port has.
 #
 default
 filemode 0664
@@ -32,17 +40,10 @@ file /usr/include/machine/_float.h
 file /usr/include/machine/cpu.h
 file /usr/include/machine/debug.h
 file /usr/include/machine/elf_machdep.h
-file /usr/include/machine/fault.h
 file /usr/include/machine/frame.h
-file /usr/include/machine/gba.h
-file /usr/include/machine/gba_syscall.h
-file /usr/include/machine/intr.h
 file /usr/include/machine/io.h
 file /usr/include/machine/limits.h
 file /usr/include/machine/machparam.h
-file /usr/include/machine/mpuvar.h
-file /usr/include/machine/sched_test.h
 file /usr/include/machine/setjmp.h
 file /usr/include/machine/signal.h
-file /usr/include/machine/syscall.h
 file /usr/include/machine/types.h
