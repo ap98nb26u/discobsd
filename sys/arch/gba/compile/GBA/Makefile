@@ -104,7 +104,7 @@ CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 #	${SYSTEM_LD_HEAD}
 #	${SYSTEM_LD} swapxxx.o
 #	${SYSTEM_LD_TAIL}
-SYSTEM_OBJ=	locore0.o locore.o switch.o ${OBJS} ioconf.o
+SYSTEM_OBJ=	locore0.o locore.o ${OBJS} ioconf.o
 SYSTEM_OBJ+=	sdcard.o
 SYSTEM_DEP=	Makefile ioconf.c machine sys .deps ${SYSTEM_OBJ}
 SYSTEM_LD_HEAD=	sh $S/conf/newvers.sh > vers.c; ${CC} ${CFLAGS} -c vers.c; rm -f $@
@@ -149,9 +149,6 @@ locore.o: ${_machdir}/${_mach}/locore.S
 	${COMPILE_S}
 
 locore0.o: ${_machdir}/${_mach}/locore0.S
-	${COMPILE_S}
-
-switch.o: ${_machdir}/${_mach}/switch.S
 	${COMPILE_S}
 
 ioconf.o: ioconf.c
