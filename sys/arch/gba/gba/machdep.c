@@ -241,15 +241,14 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
         timer0_flag = 1;
         need_resched = 1;
         /*
-         * The code that was supposed to do this (clock.c's
-         * timer_interrupt_handler()) was left #if 0'd out, so TIMER0's
-         * interrupt fired (REG_IE has it enabled, cpu_initclocks()
-         * configures it) but hardclock() - which advances lbolt and
-         * processes the timeout/callout queue - was never actually
-         * called. tsleep() with a real timeout (e.g. select()'s ts
-         * argument, once that was reaching the kernel at all) would
-         * compute a valid wakeup tick but then wait forever, since
-         * nothing ever checked whether it had expired.
+         * Advance the kernel clock: this IS the Timer0 interrupt, so
+         * hardclock() - which advances lbolt and processes the
+         * timeout/callout queue - must be called here directly.
+         * (Earlier it was missing entirely: TIMER0's interrupt fired,
+         * but nothing called hardclock(), so a tsleep() with a real
+         * timeout - e.g. select()'s ts argument - computed a valid
+         * wakeup tick and then waited forever, since nothing ever
+         * checked whether it had expired.)
          */
         hardclock((caddr_t)0, 0);
 
