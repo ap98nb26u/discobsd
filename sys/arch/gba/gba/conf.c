@@ -24,7 +24,6 @@
 #ifdef MR_ENABLED
 #include <gba/dev/mrams.h>
 #endif
-#include <gba/dev/spi.h>
 #include <gba/dev/uart.h>
 
 #ifdef SD_ENABLED
@@ -33,10 +32,6 @@
 
 #ifdef PTY_ENABLED
 #include <sys/pty.h>
-#endif
-
-#ifdef SDIO_ENABLED
-#include <gba/dev/sdio.h>
 #endif
 
 #define __unused	__attribute__((__unused__))	/* XXX */
@@ -231,17 +226,8 @@ const struct cdevsw cdevsw[] = {
 	{	/* 11 - adc */
 		NOCDEV
 	},
-	{	/* 12 - spi */
-#if defined(SPI1_ENABLED) || defined(SPI2_ENABLED) || \
-    defined(SPI3_ENABLED) || defined(SPI4_ENABLED) || \
-    defined(SPI5_ENABLED) || defined(SPI6_ENABLED) || \
-    defined(SPI7_ENABLED) || defined(SPI8_ENABLED)
-		spi_open,	spi_close,	spi_read,	spi_write,
-		spi_ioctl,	nullstop,	0,		seltrue,
-		nostrategy,	0,		0,
-#else
+	{	/* 12 - spi (driver removed; slot kept to preserve major numbers) */
 		NOCDEV
-#endif
 	},
 	{	/* 13 - glcd */
 		NOCDEV
@@ -258,14 +244,8 @@ const struct cdevsw cdevsw[] = {
 	{	/* 17 - skel */
 		NOCDEV
 	},
-	{	/* 18 - sdio */
-#ifdef SDIO_ENABLED
-		sdio_open,	sdio_close,	sdio_read,	sdio_write,
-		sdio_ioctl,	nullstop,	0,		seltrue,
-		nostrategy,	0,		0,
-#else
+	{	/* 18 - sdio (driver removed; slot kept to preserve major numbers) */
 		NOCDEV
-#endif
 	},
 
 	/*
