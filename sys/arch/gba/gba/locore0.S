@@ -137,32 +137,6 @@ bss_loop:
 
 .ltorg @ put out data fo reteral pool
 
-.align 4
-.arm
-.global gba_intr_handler_mini
-gba_intr_handler_mini:
-    @ enter IRQ mode
-    @ these conditions are met by BIOS:
-    @ ARM mode, IRQ mode, r0-r3, r12, r14 are saved to SP_irq (r13)
-    @ lr_irq holds return address
-    @ save general register and lr or IRQ mode
-    @ sub lr, lr, #4
-    @ stmdb sp!, {r0-r3, r12, lr}
-
-    @ change to SYS mode to save LR of init (r14_usr)
-    @ mrs r0, cpsr
-    @ msr cpsr, #0xDF @ SYS mode
-    @ nop
-    @ stmdb sp!, {lr} @ save LR used by init to stack
-
-    @ call C function in kernel
-    bl gba_do_schedule
-
-    @ restore LR of init
-    ldmia sp!, {lr}
-    
-
-
 .section .iwram_text,"ax" @ put in .fast_text area
 .align 4
 .arm
