@@ -19,6 +19,15 @@
  * build (options AGBPRINT); the plain GBA and GBAED kernels contain none of
  * it and stay safe on real (non-EverDrive) hardware.
  */
+/*
+ * mGBA's debug-enable register - written/read ONLY to tell mGBA from VBA at
+ * boot (writing 0xC0DE reads back 0x1DEA under mGBA, open bus elsewhere). Not
+ * used for logging any more (that is all AGBPrint); it just decides whether
+ * agb_puts appends a newline, since mGBA adds its own per flush and VBA does
+ * not. AGBPRINT-only, so it is absent from the plain GBA/GBAED kernels.
+ */
+#define MGBA_REG_DEBUG_ENABLE (*(volatile unsigned short*)0x04FFF780)
+
 #define AGB_PRINT_PROTECT (*(volatile unsigned short*)0x09FE2FFE)
 #define AGB_PRINT_CTX     ((volatile unsigned short*)0x09FE20F8)  /* [0]=request [1]=bank [2]=get [3]=put */
 #define AGB_PRINT_BUFFER  ((volatile unsigned short*)0x09FD0000)
