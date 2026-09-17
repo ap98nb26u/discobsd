@@ -71,7 +71,6 @@ arch/gba/gba/sig_machdep.c		standard
 arch/gba/gba/syscall.c		standard
 arch/gba/gba/sysctl.c		standard
 arch/gba/gba/systick.c		standard
-arch/gba/gba/sched_test.c		standard
 
 #
 # GBA drivers.
