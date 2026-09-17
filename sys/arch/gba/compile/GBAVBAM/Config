@@ -1,0 +1,79 @@
+#
+# GameBoy Advance (GBA)
+# =====================================
+#
+# To build the kernel, use:
+#   cd sys/arch/gba/compile/GBA
+#   tools/bin/config Config
+#   make clean
+#   make
+#
+architecture    "gba"
+cpu             "ARM7TDMI"                  # Processor variant
+board           "GBA"                       # Board type
+#ldscript        "GBA.ld"                    # Kernel memory linker script
+ldscript        "kern_gba.ldscript"             # Kernel memory linker script
+
+makeoptions     DEBUG="-g"                  # Debug symbols
+
+# Standard system options
+options         "CPU_KHZ=16777"             # Oscillator frequency of CPU core
+options         "BUS_KHZ=16777"             # Frequency of peripheral bus
+options         "HALTREBOOT"                # If halted, press key to reboot
+
+# On-screen console screen-saver: blank the LCD after this many idle
+# seconds (no console input or output), restore on any activity. Blanking
+# just disables BG2 so a black backdrop shows -- VRAM is kept, so the text
+# returns intact; no BIOS SWI is used, so it behaves the same on real
+# hardware and under mGBA. 0 disables it. Tunable at runtime via the
+# machdep.console_blank sysctl.
+options         "SCREEN_BLANK_SECS=60"      # blank LCD after 60s idle
+options         "TTYEDIT"                   # cooked-mode command-line editing (cursor/insert/delete)
+options         "TTYEDIT_HISTORY=4"         # command-history lines (up/down)
+
+#options        "GLOBAL_DEBUG"              # Enable debugging
+options         "DIAGNOSTIC"                # Enable diagnostics
+
+device           mr0                        # read-only Memory disk in ROM
+
+# Root filesystem at /dev/mr0a, swap at /dev/mr0b
+config          unix    root on mr0a
+                        swap on mr0b
+
+# Serial UART ports
+device          uart1                       # USART1 as console
+device          uart2                       # USART2
+options         "UART_BAUD=115200"          # default speed
+
+# Console. Output always goes to the on-screen LCD text console (gtxt),
+# and input always comes from the on-screen software keyboard (swkbd);
+# those are unconditional. Two optional mirror/aux sinks are selected
+# here (see mgba_uart.c):
+#
+#   MGBA_LOG - compile in the mGBA emulator debug-log mirror. Whether it
+#              is actually used is decided AT RUNTIME: uartinit() probes for
+#              mGBA (writes 0xC0DE to the debug-enable register, expects
+#              0x1DEA back) and only mirrors to the log when the emulator is
+#              present, printing "mGBA detected." to the boot log. So this
+#              same GBA kernel is correct on real hardware too (silent on
+#              the log there) - handy for demoing the one ROM on both. The
+#              GBAED build only ever runs on hardware, so it omits this.
+#
+# SERIAL_CONSOLE is deliberately NOT set: this standalone build runs with
+# no serial cable, and the SIO/UART link-cable console (gsio) busy-waits
+# on CTS / a per-byte send-complete flag that never complete with nothing
+# wired up (~0.5s per character, and it would also mirror output to any
+# peer). Leaving it out keeps the LCD console full-speed and cable-free;
+# GBAED opts in to SERIAL_CONSOLE for interactive debugging over a cable.
+options         "CONS_MAJOR=UART_MAJOR"     # console is the uart tty
+options         "CONS_MINOR=0"              # uart1 is /dev/tty0
+options         "MGBA_LOG"                  # mirror console to mGBA log
+options         "AGBPRINT"                  # AGBPrint (swi 0xFA) console mirror for VBA-M testing ONLY
+
+# SDIO port
+#controller      sdio0                       # SDIO port
+#options         "SDIO_XFER_CLK_DIV=2"       # APB2 84MHz / (DIV + 2) < 25MHz
+
+# MicroSD card on underside of board
+#evice          sd0     at sdio0            # SD card uses SDIO port
+#ptions         "NSD=1"                     # One disk on SDIO.

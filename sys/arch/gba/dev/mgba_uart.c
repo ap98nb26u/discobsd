@@ -52,6 +52,27 @@ void uartinit(int unit) {
     if (unit == CONS_MINOR) {
         gtxt_init(GTXT_WHITE, GTXT_BLACK); // console: white on black
 #ifdef MGBA_LOG
+#ifdef AGBPRINT
+        /*
+         * Unified emulator console log via AGBPrint. BOTH mGBA and VBA 1.8.0
+         * capture AGBPrint (a software interrupt, comment 0xFA - see agb_puts),
+         * so this single mechanism logs in either emulator with exactly one
+         * copy per line (no separate mGBA debug-register path, which was the
+         * source of the double logging). Set the buffer bank to 0x1fd (the
+         * buffer at 0x09FD0000 = ROM offset 0x1FD0000, which the emulator
+         * reads); the 0x20/0x00 writes are the AGBPrint protect handshake.
+         * Compiled ONLY into the GBAVBAM config: the per-line flush is a real
+         * svc that would trap to the BIOS on hardware, so it is kept out of the
+         * plain GBA kernel that has to run on real non-EverDrive carts. (GBAED
+         * never gets here: it does not define MGBA_LOG.)
+         */
+        AGB_PRINT_PROTECT = 0x20;
+        AGB_PRINT_CTX[0] = 0;       /* request */
+        AGB_PRINT_CTX[1] = 0x01fd;  /* bank -> buffer at 0x09FD0000 */
+        AGB_PRINT_CTX[2] = 0;       /* get */
+        AGB_PRINT_CTX[3] = 0;       /* put */
+        AGB_PRINT_PROTECT = 0;
+#else
         /*
          * Detect mGBA at runtime rather than assuming it. Writing 0xC0DE to
          * the debug-enable register and reading back 0x1DEA identifies the
@@ -66,6 +87,7 @@ void uartinit(int unit) {
         mgba_present = (MGBA_REG_DEBUG_ENABLE == 0x1DEA);
         if (mgba_present)
             printf("mGBA detected.\n");
+#endif
 #endif
 #ifdef SERIAL_CONSOLE
         gsio_init(UART_BAUD);
@@ -365,6 +387,71 @@ char uartgetc(dev_t dev) {
 #endif
 }
 
+#ifdef MGBA_LOG
+#ifdef AGBPRINT
+/*
+ * Emit one completed line to AGBPrint, which VisualBoyAdvance / VBA-M
+ * captures (with AGBPrint enabled) and mGBA also understands. VBA reads the
+ * buffer byte-by-byte over get..put, so pack two chars per 16-bit cartridge
+ * word (little-endian: buffer[2k] is the low byte, [2k+1] the high). Protection
+ * is unlocked (protect=0x20) so the emulator captures the context/buffer
+ * writes; get=0/put=len; then the flush is a software interrupt (comment 0xFA).
+ * Compiled only under the AGBPRINT build option - see the flush note below.
+ */
+static void agb_puts(const char *s) {
+    volatile unsigned short *buf = AGB_PRINT_BUFFER;
+    unsigned short half = 0;
+    int i = 0, done = 0;
+
+    AGB_PRINT_PROTECT = 0x20;
+    /* pack the line plus a terminating newline, two bytes per 16-bit word */
+    while (!done && i < 510) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == 0) { c = '\n'; done = 1; }  /* newline ends the line for the reader */
+        if (i & 1) {
+            half |= (unsigned short)c << 8;
+            buf[i >> 1] = half;
+        } else {
+            half = c;
+        }
+        i++;
+    }
+    if (i & 1)
+        buf[i >> 1] = half;                 /* trailing odd byte (high byte 0) */
+    AGB_PRINT_CTX[1] = 0x01fd;               /* bank: buffer 0x09FD0000 -> g_rom 0x1FD0000 */
+    AGB_PRINT_CTX[2] = 0;                     /* get */
+    AGB_PRINT_CTX[3] = (unsigned short)i;     /* put = byte count (incl. the newline) */
+    /*
+     * Flush: AGBPrint's flush is a software interrupt, comment 0xFA, which the
+     * emulator (VBA-M / mGBA) intercepts and turns into a log line. NB this is
+     * a REAL svc; on this port user syscalls use a *simulated* SWI, so the
+     * kernel has no real svc handler and executing this where nothing
+     * intercepts it (real GBA hardware, a non-AGBPrint emulator) traps to the
+     * BIOS. That is exactly why this whole path is compiled only under the
+     * AGBPRINT build option (the GBAVBAM config) and never in the plain GBA
+     * kernel, which has to run on real non-EverDrive hardware.
+     */
+    asm volatile("svc #0xfa" ::: "memory");
+    AGB_PRINT_PROTECT = 0;                   /* lock */
+}
+#endif /* AGBPRINT */
+
+/* Flush a completed console line to the emulator log. */
+static void emu_log_line(const char *s) {
+#ifdef AGBPRINT
+    /* single AGBPrint mechanism: one copy per line under both mGBA and VBA */
+    agb_puts(s);
+#else
+    if (mgba_present) {
+        int k = 0;
+        while (s[k] && k < 255) { MGBA_REG_DEBUG_BUFFER[k] = s[k]; k++; }
+        MGBA_REG_DEBUG_BUFFER[k] = '\0';
+        MGBA_REG_DEBUG_FLAGS = 0x100 | MGBA_LOG_INFO;
+    }
+#endif
+}
+#endif
+
 void uartputc(dev_t dev, char c) {
     gtxt_putc(c);
 #ifdef SERIAL_CONSOLE
@@ -372,14 +459,14 @@ void uartputc(dev_t dev, char c) {
 #endif
 
 #ifdef MGBA_LOG
-    if (mgba_present) {
+    {
+        static char line[256];
         static int i = 0;
-        if ((c && i < 255) && c != '\n') {
-            MGBA_REG_DEBUG_BUFFER[i] = c;                // Buffer
-            i++;
+        if (c && c != '\n' && i < 255) {
+            line[i++] = c;
         } else {
-            MGBA_REG_DEBUG_BUFFER[i] = '\0';                // Buffer
-            MGBA_REG_DEBUG_FLAGS = 0x100|MGBA_LOG_INFO;  // Send Info Log
+            line[i] = '\0';
+            emu_log_line(line);
             i = 0;
         }
     }
@@ -404,15 +491,7 @@ void uartputc_kmsg(dev_t dev, char c) {
 
 void uartputs(dev_t dev, const char *s) {
 #ifdef MGBA_LOG
-    if (mgba_present) {
-        int i = 0;
-        while (s[i] && i < 255) {
-            MGBA_REG_DEBUG_BUFFER[i] = s[i];                // Buffer
-            i++;
-        }
-        MGBA_REG_DEBUG_BUFFER[i] = '\0';                // Buffer
-        MGBA_REG_DEBUG_FLAGS = 0x100|MGBA_LOG_INFO;  // Send Info Log
-    }
+    emu_log_line(s);
 #else
     (void)s;
 #endif
