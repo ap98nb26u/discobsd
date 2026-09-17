@@ -23,18 +23,6 @@ _start:
     .arm
 reset:
     @ arrive here in ARM mode, SYS mode, with IRQ and FIQ disabled
-    @ SVC mode
-    @ BIOS default stack at 0x03007FE0 (64 bytes, from 0x03007FA0)
-    @@ldr, sp, =0x03007FE0
-    @ IRQ mode
-    @ BIOS default stack at 0x03007FA0 (160 bytes, from 0x03007F00)
-    @ IRQ disable, FIQ disable
-    @msr cpsr_c, #0xD2 @ cpsr: current psr, _c: control field mask (bit 3)
-    @nop
-    @@ldr sp, =0x03007FA0
-    @ SYS mode (same as USR mode)
-    @ BIOS default stack at 0x03007F00
-    @@ldr sp, =0x03007F00
     ldr sp, =0x0203FFF8 @ do not use last 8 bytes
 
     @ Force REG_IME off before anything else. The GBA BIOS's SoftReset
@@ -139,8 +127,6 @@ bss_loop:
     ldr r0, =u
     add sp, r0, #3072 @ USIZE
 
-@.global gba_init_context
-    @bl gba_init_context
 .global main @Thumb
     bl main
     @ main() only ever returns here for the newly-forked process 1
@@ -174,13 +160,6 @@ gba_intr_handler_mini:
 
     @ restore LR of init
     ldmia sp!, {lr}
-
-    @ return to IRQ mode
-    @ msr cpsr_c, #0xD2 @ IRQ mode
-    @ nop
-
-    @ restore general register and PC, then return
-    @ldmia sp!, {r0-r3, r12, pc}^
     
 
 
@@ -198,11 +177,6 @@ gba_intr_handler:
     mov r2, #0
     strh r2, [r1]
 
-    @ (B) GBA割り込みフラグクリア
-    @ldr r1, =0x04000202 @ REG_IF
-    @ldrh r2, [r1]
-    @strh r2, [r1]
- 
     @ save registers (full)
     push {r0-r3, r4-r11, r12, lr}
 
@@ -235,7 +209,6 @@ gba_intr_handler:
 
     @ call prep
 .global gba_do_schedule
-    @ldr r0, =gba_do_schedule
     bl gba_do_schedule
 
     pop {lr}
