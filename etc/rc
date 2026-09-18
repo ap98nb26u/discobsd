@@ -39,7 +39,8 @@ else
     echo "Automatic boot in progress: starting file system checks."
 
     fsck -p
-    case $? in
+    fsckstatus=$?
+    case $fsckstatus in
     0)
         # Filesystems are clean
         ;;
@@ -57,7 +58,13 @@ else
         echo "--- Interrupted by user"
         exit 1 ;;
     *)
-        echo "--- Unknown error in fsck"
+        # fsck only exits 0/4/8, so any other status is unexpected. In
+        # particular a status >= 128 means fsck was KILLED BY A SIGNAL
+        # (status - 128), i.e. it crashed rather than exiting - a transient
+        # fault (e.g. an SD read error), not an exit-code the case is
+        # missing. Print the raw number so the cause is diagnosable.
+        echo "--- fsck exited with unexpected status $fsckstatus"
+        echo "--- (status >= 128 means fsck was killed by signal status-128)"
         exit 1 ;;
     esac
 
