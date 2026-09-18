@@ -76,13 +76,12 @@ major 19
 minor 4
 
 #
-# Time zone database: ship the full compiled zoneinfo tree so any
-# zone works at runtime via the TZ env var or by re-linking
-# /etc/localtime; date() otherwise reads /etc/localtime (-> Japan)
-# and the GBAED kernel's TIMEZONE=-540 remains the last-resort
-# fallback. Timezone is a locale (not machine-dependent) so this
-# ideally belongs in the shared MI manifest once the other ports
-# adopt it; kept here (per-port MD) only because none ship it yet.
+# Time zone database: ship the full compiled zoneinfo tree so any zone
+# works at runtime via the TZ env var or by re-linking /etc/localtime;
+# date() otherwise reads /etc/localtime (-> Japan) and the GBAED kernel's
+# TIMEZONE=-540 remains the last-resort fallback. Upstream base/mi ships
+# zoneinfo too, but this port builds its image from the GBA-specific base
+# (distrib/gba/mi.gba), not distrib/base/mi, so it is listed here.
 #
 default
 filemode 0644
