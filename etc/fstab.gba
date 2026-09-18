@@ -1,0 +1,19 @@
+# GBA per-port fstab (installed over /etc/fstab by etc/Makefile when
+# MACHINE=gba). This is the SD variant, for the EverDrive (GBAED)
+# kernel: its root filesystem lives on sd0b because the EverDrive's own
+# FAT32 loader partition owns MBR slot "a" (sd0a) and swap is on sd0c
+# (see sys/arch/gba/conf/GBAED). GBAED runs a real boot-time fsck, so
+# this must name the actual root device.
+#
+# The plain GBA (mrams) kernel instead roots on the ROM memory disk
+# mr0a and is read-only (romroot: it skips the boot fsck/mount). The
+# top-level Makefile therefore swaps this file for distrib/gba/fstab.mrams
+# (/dev/mr0a) in the ROM-embedded copy of the image only; the SD image
+# keeps this sd0b version. There is no separate /home partition in
+# either layout - /home is just a directory on the root filesystem.
+# NOTE: lib/libc/gen/fstab.c's fstabscan() mis-parses a bare "#" or a
+# fully blank line (it falls into the colon-separated "old style" path
+# and returns EFTYPE / "Inappropriate file type or format"), so every
+# comment line must have a space after '#' and there must be no blank
+# lines at all.
+/dev/sd0b	/	ufs	rw,async	1	1
