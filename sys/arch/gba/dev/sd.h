@@ -32,9 +32,18 @@ struct disk sddrives[NSD];      /* Table of units */
 #ifdef KERNEL
 extern int      sdopen(dev_t dev, int flag, int mode);
 extern int      sdclose(dev_t dev, int flag, int mode);
+extern int      sdread(dev_t dev, struct uio *uio, int flag);
+extern int      sdwrite(dev_t dev, struct uio *uio, int flag);
 extern void     sdstrategy(struct buf *bp);
 extern daddr_t  sdsize(dev_t dev);
 extern int      sdioctl(dev_t dev, u_int cmd, caddr_t addr, int flag);
+
+/*
+ * Character (raw) device major for the sd disks - the /dev/rsd* nodes.
+ * The block sd major is 0; this is the cdevsw slot added in gba/conf.c
+ * so fsck can reach the disk through the raw device (physio -> sdstrategy).
+ */
+#define SD_CMAJOR       19
 #endif /* KERNEL */
 
 #endif /* _SD_H */

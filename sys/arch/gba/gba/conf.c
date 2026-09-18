@@ -247,6 +247,18 @@ const struct cdevsw cdevsw[] = {
 	{	/* 18 - sdio (driver removed; slot kept to preserve major numbers) */
 		NOCDEV
 	},
+	{	/* 19 - rsd: raw (character) sd disk, /dev/rsd* */
+#ifdef SD_ENABLED
+#if SD_CMAJOR != 19
+#error Wrong SD_CMAJOR value!
+#endif
+		sdopen,		sdclose,	sdread,		sdwrite,
+		sdioctl,	nullstop,	0,		seltrue,
+		sdstrategy,	0,		0,
+#else
+		NOCDEV
+#endif
+	},
 
 	/*
 	 * End the list with a blank entry.
@@ -278,6 +290,15 @@ iskmemdev(dev_t dev)
 int
 isdisk(dev_t dev, int type)
 {
+	if (type == IFCHR) {
+		/* Raw disk: the /dev/rsd* character nodes. */
+#ifdef SD_ENABLED
+		if (major(dev) == SD_CMAJOR)
+			return 1;
+#endif
+		return 0;
+	}
+
 	if (type != IFBLK)
 		return 0;
 
@@ -296,10 +317,19 @@ isdisk(dev_t dev, int type)
 
 /*
  * Routine to convert from character to block device number.
- * A minimal stub routine can always return NODEV.
+ *
+ * Maps the raw sd disk (character major SD_CMAJOR, /dev/rsd*) to its block
+ * sd disk (major 0, /dev/sd*) at the same minor. openi() (sys_inode.c)
+ * uses this so a *writable* open of a raw disk node whose block device is
+ * mounted is still refused - only the read-only raw open a live `fsck -n`
+ * needs is allowed through.
  */
 int
-chrtoblk(dev_t dev __unused)
+chrtoblk(dev_t dev)
 {
+#ifdef SD_ENABLED
+	if (major(dev) == SD_CMAJOR)
+		return makedev(0, minor(dev));	/* block sd major is 0 */
+#endif
 	return NODEV;
 }

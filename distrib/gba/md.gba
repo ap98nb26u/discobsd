@@ -47,3 +47,30 @@ file /usr/include/machine/machparam.h
 file /usr/include/machine/setjmp.h
 file /usr/include/machine/signal.h
 file /usr/include/machine/types.h
+
+#
+# Raw (character) sd disks - GBA-specific (char major 19 = SD_CMAJOR in
+# sys/arch/gba/gba/conf.c; only this port has that cdevsw slot). Same minor
+# encoding as the shared block sd* nodes (unit<<3 | partition). They let
+# fsck reach the disk through physio()/sdstrategy(); in particular
+# `fsck -n /dev/rsd0b` checks the mounted root read-only without unmounting
+# (an O_RDONLY raw-disk open is allowed while the block device is mounted;
+# a writable open is still refused - see chrtoblk() in conf.c). Root-only.
+#
+default
+filemode 0600
+cdev /dev/rsd0
+major 19
+minor 0
+cdev /dev/rsd0a
+major 19
+minor 1
+cdev /dev/rsd0b
+major 19
+minor 2
+cdev /dev/rsd0c
+major 19
+minor 3
+cdev /dev/rsd0d
+major 19
+minor 4
