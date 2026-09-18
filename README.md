@@ -15,6 +15,13 @@ This microcontroller-focused operating system is an independent continuation
 of RetroBSD, a 2.11BSD-based OS targeting the MIPS-based PIC32MX7.
 DiscoBSD is multi-platform, as it also supports Arm Cortex-M4 STM32F4 devices.
 
+This fork adds a `DiscoBSD/gba` port to the Arm7TDMI Game Boy Advance: a
+handheld with a fixed 256 Kbytes of RAM and no MMU. It runs on GBA emulators
+and on EverDrive GBA X5 flash cartridges, driving an on-screen soft keyboard
+and an LCD text console in place of a serial terminal (a real serial console
+is also available on the EverDrive). Prebuilt images to try it without a
+toolchain are on the [`gba-2.7-prebuilt`][28] branch.
+
 Source code to the system is freely available under a BSD-like license.
 
 History
@@ -37,6 +44,7 @@ And work continues...
 [3]: https://github.com/chettrick/CSC490
 [4]: https://RetroBSD.org
 [5]: https://github.com/chettrick/CSC490/raw/master/project_outputs/Porting_the_Unix_Kernel-CSC490-Christopher_Hettrick.pdf
+[28]: https://github.com/ap98nb26u/discobsd/tree/gba-2.7-prebuilt
 
 DiscoBSD Resource Requirements
 ------------------------------
@@ -92,10 +100,34 @@ Shutdown DiscoBSD with the `halt`, `shutdown`, or `reboot` commands.
 
 Manual pages on DiscoBSD are available through the `man` command.
 
+#### Running the `DiscoBSD/gba` port:
+
+The GBA port runs as a Game Boy Advance ROM rather than MCU flash firmware.
+Prebuilt images are on the [`gba-2.7-prebuilt`][28] branch; see also
+[`dist/gba/README.md`][29].
+
+In an emulator (the easiest way), load `discobsd-gba.gba` in [mGBA][30] or
+VisualBoyAdvance. The root filesystem is embedded in the ROM, so the image is
+self-contained and boots straight to a login prompt. Instead of a serial
+terminal, the bottom of the screen is an on-screen soft keyboard driven with
+the D-pad and buttons.
+
+On EverDrive GBA X5 hardware, launch the `discobsd-gbaed.gba` kernel and write
+`rootfs.img` onto the DiscoBSD root partition of the SD card, MBR partition
+`#2` (`sd0b`), NOT sector 0:
+
+    $ dd bs=1M if=rootfs.img of=/path/to/SD/card/partition/2
+
+Writing to sector 0 would destroy the EverDrive's own FAT32 boot partition.
+
+Log in as `root` with a blank password, the same as the other ports.
+
 [6]: https://github.com/pbatard/rufus
 [7]: https://www.st.com/en/development-tools/stm32cubeprog.html
 [8]: https://github.com/stlink-org/stlink
 [9]: https://github.com/majenkotech/pic32prog-autotools
+[29]: dist/gba/README.md
+[30]: https://mgba.io
 
 Building
 --------
@@ -137,6 +169,20 @@ to generate a file system image in the file `distrib/pic32/sdcard.img`
 for imaging to an SD card, `sys/arch/pic32/compile/${BOARD}/unix`
 ELF-formatted kernels, and `sys/arch/pic32/compile/${BOARD}/unix.hex`
 Intel HEX-formatted kernels.
+
+`DiscoBSD/gba` may be built via:
+
+    $ make clean
+    $ make MACHINE=gba MACHINE_ARCH=arm all
+
+which builds the userland, a bare root file system `distrib/gba/rootfs.img`,
+and the GBA kernel `sys/arch/gba/compile/GBA/unix.bin` with the root file
+system embedded in the ROM. The EverDrive and AGBPrint-logging kernels are
+built with `make -C sys/arch/gba/compile/GBAED all` and
+`make -C sys/arch/gba/compile/GBALOG all`. Unlike the other ports, the GBA
+port does not produce an `sdcard.img`. A `make clean` is required when
+switching `MACHINE` between builds, because `lib/libc.a` is shared across
+architectures.
 
 Put the generated file system image `sdcard.img` onto an SD card.
 
@@ -218,14 +264,22 @@ in one terminal, and:
 
 in another terminal.
 
+`DiscoBSD/gba`, having no external debug port, is debugged through an
+emulator's built-in GDB stub. Run `make MACHINE=gba mgba` (mGBA) or
+`make MACHINE=gba vba` (VisualBoyAdvance) in one terminal to start the
+emulator halted, and `make MACHINE=gba gdb-mgba` or `make MACHINE=gba gdb-vba`
+in another to attach GDB with the kernel symbols. Use `BOARD=GBAED` to debug
+the EverDrive kernel.
+
 Additional Information
 ----------------------
 
 Port-specific information can be found in `distrib/${MACHINE}/README.md`
-for [DiscoBSD/stm32][12] and [DiscoBSD/pic32][13].
+for [DiscoBSD/stm32][12], [DiscoBSD/pic32][13], and [DiscoBSD/gba][31].
 
 [12]: distrib/stm32/README.md
 [13]: distrib/pic32/README.md
+[31]: distrib/gba/README.md
 
 References and Resources
 ------------------------
@@ -366,3 +420,46 @@ Welcome to DiscoBSD.
 erase ^?, kill ^U, intr ^C
 # 
 ```
+
+`DiscoBSD/gba` dmesg
+--------------------
+
+On EverDrive GBA X5 hardware (`BOARD=GBAED`), reading its root file system
+from the SD card:
+
+```
+DiscoBSD 2.7-current (GBAED) #1 909: Fri Sep 18 17:25:01 2026
+     ap98nb26u@myhost.mydomain:/sys/arch/gba/compile/GBAED
+ed0: EverDrive GBA (FPGA v259)
+sd0: port ed0
+rtc0 on ed0: 2026-09-18 17:32:36
+sd0: type SDHC, size 30228480 kbytes
+sd0a: partition type 0c, sector 2048, size 29911040 kbytes
+sd0b: partition type 06, sector 59824128, size 307200 kbytes
+sd0c: partition type 06, sector 60438528, size 8192 kbytes
+phys mem  = 288 kbytes
+user mem  = 250 kbytes
+root dev  = (0,2)
+swap dev  = (0,3)
+root size = 20480 kbytes
+swap size = 8192 kbytes
+Automatic boot in progress: starting file system checks.
+/dev/sd0b: 415 files, 3898 used, 16501 free
+Updating motd... done
+Starting daemons:  update  cron
+Fri Sep 18 17:34:40 JST 2026
+
+
+2.11 BSD UNIX (discobsd) (console)
+
+login: root
+
+Welcome to DiscoBSD.
+
+erase ^?, kill ^U, intr ^C
+# 
+```
+
+The plain GBA build instead uses a read-only root file system embedded in the
+ROM (`root dev = (3,1)`, device `mr0a`) and swap in EWRAM, so it skips the boot
+file system check and needs no SD card.
