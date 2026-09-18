@@ -126,7 +126,7 @@ Log in as `root` with a blank password, the same as the other ports.
 [7]: https://www.st.com/en/development-tools/stm32cubeprog.html
 [8]: https://github.com/stlink-org/stlink
 [9]: https://github.com/majenkotech/pic32prog-autotools
-[29]: dist/gba/README.md
+[29]: https://github.com/ap98nb26u/discobsd/blob/gba-2.7-prebuilt/dist/gba/README.md
 [30]: https://mgba.io
 
 Building
