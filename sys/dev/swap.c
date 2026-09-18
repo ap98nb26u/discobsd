@@ -213,8 +213,22 @@ swcioctl(dev_t dev, u_int cmd, caddr_t addr, int flag)
 
 	switch (cmd) {
 	case TFALLOC:
-		if (tdstart[unit] > 0)
+		/*
+		 * Free any previous scratch allocation, and ALWAYS clear
+		 * tdstart/tdsize afterwards. These are static (per unit) and
+		 * outlive the process that opened the device, so a release
+		 * (offtval <= 0) that freed the blocks but left tdstart set
+		 * caused the next TFALLOC to mfree() the same blocks again -
+		 * by then handed to live processes - double-freeing swap and
+		 * corrupting the map (panic "mfree overlap" or a hang). fsck is
+		 * the only user and does exactly this: allocate at start,
+		 * release at end, allocate again on the next run.
+		 */
+		if (tdstart[unit] > 0) {
 			mfree(swapmap, tdsize[unit], tdstart[unit]);
+			tdstart[unit] = 0;
+			tdsize[unit] = 0;
+		}
 
 		if (*offtval > 0) {
 			tdstart[unit] = malloc(swapmap, *offtval);
@@ -225,9 +239,9 @@ swcioctl(dev_t dev, u_int cmd, caddr_t addr, int flag)
 
 				return 0;
 			}
-			*offtval = 0;
 			printf("temp%d: failed to allocate %lu blocks\n",
-			    tdsize[unit]);
+			    unit, (unsigned long)*offtval);
+			*offtval = 0;
 
 			return 0;
 		} else {
