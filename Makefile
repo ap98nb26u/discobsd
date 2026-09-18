@@ -87,7 +87,7 @@ build:		symlinks tools
 			${MAKE} -C $$dir DESTDIR=${DESTDIR} install ; done
 
 distribution:	build
-		${MAKE} -C etc DESTDIR=${DESTDIR} LOCALTIME=${LOCALTIME} distribution
+		${MAKE} -C etc MACHINE=${MACHINE} DESTDIR=${DESTDIR} LOCALTIME=${LOCALTIME} distribution
 		$(MAKE) fs
 
 tools:
