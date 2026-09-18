@@ -114,13 +114,20 @@ else
 # kernel reads the SD at runtime and needs no relink - it just consumes this
 # same rootfs.img, written to the card's DiscoBSD root partition.
 #
+# GBA uses its OWN base manifest (distrib/gba/mi.gba), not the shared
+# distrib/base/mi. The shared mi lists the full userland (games, man pages,
+# the MIPS-targeted toolchain, all headers), which neither fits this port's
+# small inode-limited image nor makes sense on Arm; mi.gba is the curated
+# common core (devices + /bin + the common /usr/bin utilities + /etc +
+# /var/log). base/mi stays machine-independent for pic32/stm32.
+#
 # The image ships the sd0b /etc/fstab (etc/fstab.gba, for GBAED which roots
 # on sd0b and runs a boot fsck). The plain GBA kernel instead roots on the
 # ROM memory disk mr0a, so its EMBEDDED copy gets /etc/fstab swapped to
 # distrib/gba/fstab.mrams; the SD image ($@) keeps sd0b.
-${FSIMG}:	distrib/gba/md.gba distrib/base/mi
+${FSIMG}:	distrib/gba/md.gba distrib/gba/mi.gba
 		rm -f $@ distrib/gba/_manifest
-		cat distrib/base/mi distrib/gba/md.gba > distrib/gba/_manifest
+		cat distrib/gba/mi.gba distrib/gba/md.gba > distrib/gba/_manifest
 		$(FSUTIL) --new --size=`expr $(FS_MBYTES) \* 1024` --manifest=distrib/gba/_manifest $@ ${DESTDIR}
 		cp $@ $(GBA_DEV_ROOTFS)
 		d=`mktemp -d`; mkdir -p $$d/etc; \
