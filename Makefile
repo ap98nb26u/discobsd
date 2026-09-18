@@ -113,11 +113,20 @@ else
 # relink the GBA kernel so its ROM carries the fresh filesystem. The GBAED
 # kernel reads the SD at runtime and needs no relink - it just consumes this
 # same rootfs.img, written to the card's DiscoBSD root partition.
+#
+# The image ships the sd0b /etc/fstab (etc/fstab.gba, for GBAED which roots
+# on sd0b and runs a boot fsck). The plain GBA kernel instead roots on the
+# ROM memory disk mr0a, so its EMBEDDED copy gets /etc/fstab swapped to
+# distrib/gba/fstab.mrams; the SD image ($@) keeps sd0b.
 ${FSIMG}:	distrib/gba/md.gba distrib/base/mi
 		rm -f $@ distrib/gba/_manifest
 		cat distrib/base/mi distrib/gba/md.gba > distrib/gba/_manifest
 		$(FSUTIL) --new --size=`expr $(FS_MBYTES) \* 1024` --manifest=distrib/gba/_manifest $@ ${DESTDIR}
 		cp $@ $(GBA_DEV_ROOTFS)
+		d=`mktemp -d`; mkdir -p $$d/etc; \
+			cp ${TOPSRC}/distrib/gba/fstab.mrams $$d/etc/fstab; \
+			( cd $$d && $(FSUTIL) --add $(GBA_DEV_ROOTFS) etc/fstab ); \
+			rm -rf $$d
 		$(MAKE) -C sys/arch/gba/compile/GBA all
 endif
 
