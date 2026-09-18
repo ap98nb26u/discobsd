@@ -74,3 +74,104 @@ minor 3
 cdev /dev/rsd0d
 major 19
 minor 4
+
+#
+# Time zone database: ship the full compiled zoneinfo tree so any
+# zone works at runtime via the TZ env var or by re-linking
+# /etc/localtime; date() otherwise reads /etc/localtime (-> Japan)
+# and the GBAED kernel's TIMEZONE=-540 remains the last-resort
+# fallback. Timezone is a locale (not machine-dependent) so this
+# ideally belongs in the shared MI manifest once the other ports
+# adopt it; kept here (per-port MD) only because none ship it yet.
+#
+default
+filemode 0644
+dir /usr/share
+dir /usr/share/zoneinfo
+dir /usr/share/zoneinfo/Australia
+dir /usr/share/zoneinfo/Canada
+dir /usr/share/zoneinfo/SystemV
+dir /usr/share/zoneinfo/US
+file /usr/share/zoneinfo/Australia/NSW
+file /usr/share/zoneinfo/Australia/North
+file /usr/share/zoneinfo/Australia/Queensland
+file /usr/share/zoneinfo/Australia/South
+file /usr/share/zoneinfo/Australia/Tasmania
+file /usr/share/zoneinfo/Australia/Victoria
+file /usr/share/zoneinfo/Australia/West
+file /usr/share/zoneinfo/CET
+file /usr/share/zoneinfo/CST6CDT
+file /usr/share/zoneinfo/Canada/Atlantic
+file /usr/share/zoneinfo/Canada/Central
+file /usr/share/zoneinfo/Canada/Eastern
+file /usr/share/zoneinfo/Canada/Mountain
+file /usr/share/zoneinfo/Canada/Newfoundland
+file /usr/share/zoneinfo/Canada/Pacific
+file /usr/share/zoneinfo/Canada/Yukon
+file /usr/share/zoneinfo/EET
+file /usr/share/zoneinfo/EST
+file /usr/share/zoneinfo/EST5EDT
+file /usr/share/zoneinfo/GMT
+file /usr/share/zoneinfo/GMT+1
+file /usr/share/zoneinfo/GMT+10
+file /usr/share/zoneinfo/GMT+11
+file /usr/share/zoneinfo/GMT+12
+file /usr/share/zoneinfo/GMT+13
+file /usr/share/zoneinfo/GMT+2
+file /usr/share/zoneinfo/GMT+3
+file /usr/share/zoneinfo/GMT+4
+file /usr/share/zoneinfo/GMT+5
+file /usr/share/zoneinfo/GMT+6
+file /usr/share/zoneinfo/GMT+7
+file /usr/share/zoneinfo/GMT+8
+file /usr/share/zoneinfo/GMT+9
+file /usr/share/zoneinfo/GMT-1
+file /usr/share/zoneinfo/GMT-10
+file /usr/share/zoneinfo/GMT-11
+file /usr/share/zoneinfo/GMT-12
+file /usr/share/zoneinfo/GMT-2
+file /usr/share/zoneinfo/GMT-3
+file /usr/share/zoneinfo/GMT-4
+file /usr/share/zoneinfo/GMT-5
+file /usr/share/zoneinfo/GMT-6
+file /usr/share/zoneinfo/GMT-7
+file /usr/share/zoneinfo/GMT-8
+file /usr/share/zoneinfo/GMT-9
+file /usr/share/zoneinfo/Greenwich
+file /usr/share/zoneinfo/HST
+file /usr/share/zoneinfo/Japan
+file /usr/share/zoneinfo/MST
+file /usr/share/zoneinfo/MST7MDT
+file /usr/share/zoneinfo/NZ
+file /usr/share/zoneinfo/PST8PDT
+file /usr/share/zoneinfo/Singapore
+file /usr/share/zoneinfo/SystemV/AST4
+file /usr/share/zoneinfo/SystemV/AST4ADT
+file /usr/share/zoneinfo/SystemV/CST6
+file /usr/share/zoneinfo/SystemV/CST6CDT
+file /usr/share/zoneinfo/SystemV/EST5
+file /usr/share/zoneinfo/SystemV/EST5EDT
+file /usr/share/zoneinfo/SystemV/HST10
+file /usr/share/zoneinfo/SystemV/MST7
+file /usr/share/zoneinfo/SystemV/MST7MDT
+file /usr/share/zoneinfo/SystemV/PST8
+file /usr/share/zoneinfo/SystemV/PST8PDT
+file /usr/share/zoneinfo/SystemV/YST9
+file /usr/share/zoneinfo/SystemV/YST9YDT
+file /usr/share/zoneinfo/Turkey
+file /usr/share/zoneinfo/UCT
+file /usr/share/zoneinfo/US/Arizona
+file /usr/share/zoneinfo/US/Central
+file /usr/share/zoneinfo/US/East-Indiana
+file /usr/share/zoneinfo/US/Eastern
+file /usr/share/zoneinfo/US/Hawaii
+file /usr/share/zoneinfo/US/Mountain
+file /usr/share/zoneinfo/US/Pacific
+file /usr/share/zoneinfo/US/Pacific-New
+file /usr/share/zoneinfo/US/Yukon
+file /usr/share/zoneinfo/UTC
+file /usr/share/zoneinfo/Universal
+file /usr/share/zoneinfo/W-SU
+file /usr/share/zoneinfo/WET
+symlink /etc/localtime
+target /usr/share/zoneinfo/Japan
