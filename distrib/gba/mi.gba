@@ -1,0 +1,677 @@
+#
+# Machine independent root file system manifest file.
+#
+default
+owner 0
+group 0
+dirmode 0775
+filemode 0664
+
+#
+# Directories.
+#
+dir /bin
+dir /dev
+dir /etc
+dir /sbin
+dir /tmp
+dir /usr
+dir /usr/bin
+dir /usr/sbin
+dir /usr/libexec
+dir /home
+dir /var
+dir /var/cron
+dir /var/cron/tabs
+dir /var/lock
+dir /var/log
+dir /var/run
+
+#
+# Block devices.
+#
+# Major Minor Name  Device
+# -------------------------
+#   0     0   sd0   Main SD card
+#   0     1   sd0a  Partition 1: root file system
+#   0     2   sd0b  Partition 2: swap space
+#   0     3   sd0c  Partition 3
+#   0     4   sd0d  Partition 4
+#   0     8   sd1   Second SD card
+#   0     9   sd1a  Partition 1
+#   0     10  sd1b  Partition 2
+#   0     11  sd1c  Partition 3
+#   0     12  sd1d  Partition 4
+#   1     0   rc0   Volatile disk - SRAM connected via CPLD (sramc)
+#   1     1   rc0a  Partition 1: filesystem
+#   1     2   rc0b  Partition 2: swap space
+#   2     0   dr0   Volatile disk - SDRAM on external memory bus (sdramp)
+#   2     1   dr0a  Partition 1: filesystem
+#   2     2   dr0b  Partition 2: swap space
+#   3     0   mr0   Volatile disk - MRAM on SPI port (mrams)
+#   4     64  swap  Virtual swap device, mapped to real swap partition
+#   4     0   swap0 Virtual i/o area, allocated from swap space
+#   4     1   swap1 Virtual i/o area, allocated from swap space
+#   4     2   swap2 Virtual i/o area, allocated from swap space
+#   5     0   sr0   Volatile disk - serial RAM on SPI port (spirams)
+#
+bdev /dev/sd0
+major 0             # Main SD card
+minor 0
+bdev /dev/sd0a
+major 0
+minor 1
+bdev /dev/sd0b
+major 0
+minor 2
+bdev /dev/sd0c
+major 0
+minor 3
+bdev /dev/sd0d
+major 0
+minor 4
+bdev /dev/sd1
+major 0             # Second SD card
+minor 8
+bdev /dev/sd1a
+major 0
+minor 9
+bdev /dev/sd1b
+major 0
+minor 10
+bdev /dev/sd1c
+major 0
+minor 11
+bdev /dev/sd1d
+major 0
+minor 12
+bdev /dev/rc0
+major 1             # Volatile disk - SRAM connected via CPLD (sramc)
+minor 0
+bdev /dev/rc0a
+major 1
+minor 1
+bdev /dev/rc0b
+major 1
+minor 2
+bdev /dev/dr0
+major 2             # Volatile disk - SDRAM on external memory bus (sdramp)
+minor 0
+bdev /dev/dr0a
+major 2
+minor 1
+bdev /dev/dr0b
+major 2
+minor 2
+bdev /dev/mr0
+major 3             # Volatile disk - MRAM on SPI port (mrams)
+minor 0
+bdev /dev/swap
+major 4             # Virtual swap device, mapped to real swap partition
+minor 64
+bdev /dev/swap0
+major 4
+minor 0
+bdev /dev/swap1
+major 4
+minor 1
+bdev /dev/swap2
+major 4
+minor 2
+bdev /dev/sr0
+major 5             # Volatile disk - serial RAM on SPI port (spirams)
+minor 0
+
+#
+# Character devices.
+#
+cdev /dev/console
+major 0
+minor 0
+cdev /dev/mem
+major 1
+minor 0
+cdev /dev/kmem
+major 1
+minor 1
+cdev /dev/null
+major 1
+minor 2
+mode 666
+cdev /dev/zero
+major 1
+minor 3
+mode 666
+cdev /dev/tty
+major 2
+minor 0
+mode 666
+cdev /dev/stdin
+major 3
+minor 0
+cdev /dev/stdout
+major 3
+minor 1
+cdev /dev/stderr
+major 3
+minor 2
+cdev /dev/temp0
+major 4
+minor 0
+cdev /dev/temp1
+major 4
+minor 1
+cdev /dev/temp2
+major 4
+minor 2
+cdev /dev/klog
+major 5
+minor 0
+
+#
+# UART driver.
+#
+cdev /dev/tty0
+major 6
+minor 0
+cdev /dev/tty1
+major 6
+minor 1
+cdev /dev/tty2
+major 6
+minor 2
+cdev /dev/tty3
+major 6
+minor 3
+cdev /dev/tty4
+major 6
+minor 4
+cdev /dev/tty5
+major 6
+minor 5
+
+#
+# USB serial driver.
+#
+cdev /dev/ttyUSB0
+major 7
+minor 0
+
+#
+# Pseudo-terminals.
+#
+cdev /dev/ttyp0
+major 8
+minor 0
+cdev /dev/ttyp1
+major 8
+minor 1
+cdev /dev/ttyp2
+major 8
+minor 2
+cdev /dev/ttyp3
+major 8
+minor 3
+cdev /dev/ptyp0
+major 9
+minor 0
+cdev /dev/ptyp1
+major 9
+minor 1
+cdev /dev/ptyp2
+major 9
+minor 2
+cdev /dev/ptyp3
+major 9
+minor 3
+
+#
+# GPIO driver.
+#
+cdev /dev/porta
+major 10
+minor 0
+cdev /dev/portb
+major 10
+minor 1
+cdev /dev/portc
+major 10
+minor 2
+cdev /dev/portd
+major 10
+minor 3
+cdev /dev/porte
+major 10
+minor 4
+cdev /dev/portf
+major 10
+minor 5
+cdev /dev/portg
+major 10
+minor 6
+cdev /dev/confa
+major 10
+minor 64
+cdev /dev/confb
+major 10
+minor 65
+cdev /dev/confc
+major 10
+minor 66
+cdev /dev/confd
+major 10
+minor 67
+cdev /dev/confe
+major 10
+minor 68
+cdev /dev/conff
+major 10
+minor 69
+cdev /dev/confg
+major 10
+minor 70
+
+#
+# ADC driver.
+#
+cdev /dev/adc0
+major 11
+minor 0
+cdev /dev/adc1
+major 11
+minor 1
+cdev /dev/adc2
+major 11
+minor 2
+cdev /dev/adc3
+major 11
+minor 3
+cdev /dev/adc4
+major 11
+minor 4
+cdev /dev/adc5
+major 11
+minor 5
+cdev /dev/adc6
+major 11
+minor 6
+cdev /dev/adc7
+major 11
+minor 7
+cdev /dev/adc8
+major 11
+minor 8
+cdev /dev/adc9
+major 11
+minor 9
+cdev /dev/adc10
+major 11
+minor 10
+cdev /dev/adc11
+major 11
+minor 11
+cdev /dev/adc12
+major 11
+minor 12
+cdev /dev/adc13
+major 11
+minor 13
+cdev /dev/adc14
+major 11
+minor 14
+cdev /dev/adc15
+major 11
+minor 15
+
+#
+# SPI driver.
+#
+cdev /dev/spi1
+major 12
+minor 0
+cdev /dev/spi2
+major 12
+minor 1
+cdev /dev/spi3
+major 12
+minor 2
+cdev /dev/spi4
+major 12
+minor 3
+
+#
+# GLCD driver.
+#
+cdev /dev/glcd0
+major 13
+minor 0
+
+#
+# PWM driver.
+#
+cdev /dev/pwm1
+major 14
+minor 0
+cdev /dev/pwm2
+major 14
+minor 1
+cdev /dev/pwm3
+major 14
+minor 2
+cdev /dev/pwm4
+major 14
+minor 3
+cdev /dev/pwm5
+major 14
+minor 4
+
+#
+# PICGA driver.
+#
+cdev /dev/picga0
+major 15
+minor 0
+
+#
+# TFT display driver.
+#
+cdev /dev/tft0
+major 16
+minor 0
+cdev /dev/tftin0
+major 16
+minor 1
+
+#
+# Skeleton driver.
+#
+cdev /dev/skel1
+major 17
+minor 0
+cdev /dev/skel2
+major 17
+minor 1
+cdev /dev/skel3
+major 17
+minor 2
+cdev /dev/skel4
+major 17
+minor 3
+cdev /dev/skel5
+major 17
+minor 4
+
+#
+# Files: /root
+#
+dir /root
+file /root/.profile
+
+symlink /.profile
+target root/.profile
+
+#
+# Files: /etc
+#
+file /etc/fstab
+file /etc/gettytab
+file /etc/group
+file /etc/MAKEDEV
+mode 0775
+file /etc/motd
+file /etc/passwd
+file /etc/phones
+file /etc/rc
+mode 0775
+file /etc/rc.local
+mode 0775
+file /etc/remote
+file /etc/shadow
+file /etc/shells
+file /etc/termcap
+mode 0444
+file /etc/ttys
+
+#
+# Files: /var/log -- created empty, but must pre-exist so date(1) and
+# login can open them O_APPEND (they do not O_CREAT).
+#
+mode 0644
+file /var/log/wtmp
+mode 0644
+file /var/log/messages
+mode 0600
+file /var/log/aculog
+
+#
+# Files: /bin
+#
+default
+filemode 0775
+file /usr/bin/aout
+file /usr/bin/apropos
+file /usr/bin/arch
+file /usr/bin/awk
+file /usr/bin/basename
+file /usr/bin/basic
+file /usr/bin/bc
+file /usr/bin/cal
+file /usr/bin/calendar
+file /bin/cat
+file /usr/bin/chat-server
+file /usr/bin/chflags
+file /bin/chgrp
+file /bin/chmod
+file /usr/bin/chpass
+mode 04755
+file /usr/bin/cmp
+file /usr/bin/col
+file /usr/bin/comm
+file /usr/bin/compress
+file /bin/cp
+file /usr/bin/crontab
+file /bin/date
+file /usr/bin/dc
+file /bin/dd
+file /bin/df
+mode 02755
+file /usr/bin/diff
+file /usr/bin/diskspeed
+file /usr/bin/du
+file /bin/echo
+file /bin/ed
+file /usr/bin/egrep
+file /usr/bin/emg
+file /usr/bin/env
+file /bin/expr
+file /usr/bin/false
+file /usr/bin/fgrep
+file /usr/bin/file
+file /usr/bin/find
+file /usr/bin/fold
+file /usr/bin/forth
+file /usr/bin/fstat
+mode 02755
+file /usr/bin/glcdtest
+file /usr/bin/globdump
+file /usr/bin/globread
+file /usr/bin/globwrite
+file /usr/bin/grep
+file /usr/bin/groups
+file /usr/bin/head
+file /usr/bin/hostid
+file /bin/hostname
+file /usr/bin/id
+file /usr/bin/install
+file /usr/sbin/iostat
+mode 02755
+file /usr/bin/join
+file /bin/kill
+file /usr/bin/la
+file /usr/bin/last
+file /bin/ln
+file /usr/bin/login
+mode 04755
+file /usr/bin/lol
+file /bin/ls
+file /usr/bin/mail
+mode 04755
+file /usr/bin/man
+file /bin/md5
+file /usr/bin/med
+file /usr/bin/mesg
+file /bin/mkdir
+file /usr/bin/more
+file /usr/bin/msec
+file /bin/mv
+file /usr/bin/nice
+file /usr/bin/nohup
+file /usr/bin/ntpdate
+file /usr/bin/od
+file /usr/bin/pagesize
+file /usr/bin/passwd
+mode 04755
+file /usr/bin/picoc
+file /usr/bin/portio
+file /usr/bin/pr
+file /usr/bin/printenv
+file /usr/bin/printf
+file /bin/ps
+mode 02755
+file /bin/pwd
+file /usr/bin/pwm
+file /usr/bin/re
+file /usr/bin/renice
+file /usr/bin/renumber
+file /usr/bin/retroforth
+file /usr/bin/rev
+file /bin/rm
+file /bin/rmail
+file /bin/rmdir
+file /usr/bin/rz
+file /usr/bin/scc
+file /usr/bin/scm
+file /usr/bin/sed
+file /usr/bin/setty
+file /bin/sh
+file /usr/bin/sl
+file /bin/sleep
+file /usr/bin/smux
+file /usr/bin/sort
+file /usr/bin/split
+file /bin/stty
+file /usr/bin/su
+mode 04755
+file /usr/bin/sum
+file /bin/sync
+file /sbin/sysctl
+file /usr/bin/sz
+file /usr/bin/tail
+file /bin/tar
+file /usr/bin/tclsh
+file /usr/bin/tee
+file /usr/bin/telnet
+file /bin/test
+file /usr/bin/time
+file /usr/bin/tip
+file /usr/bin/touch
+file /usr/bin/tr
+file /usr/bin/true
+file /usr/bin/tsort
+file /usr/bin/tty
+file /usr/bin/uname
+file /usr/bin/uncompress
+file /usr/bin/uniq
+file /usr/bin/uucico
+file /usr/bin/uuclean
+file /usr/bin/uucp
+file /usr/bin/uudecode
+file /usr/bin/uuencode
+file /usr/bin/uulog
+file /usr/bin/uuname
+file /usr/bin/uupoll
+file /usr/bin/uuq
+file /usr/bin/uusend
+file /usr/bin/uusnap
+file /usr/bin/uux
+file /usr/bin/uuxqt
+file /usr/bin/vi
+file /usr/bin/vmstat
+mode 02755
+file /usr/bin/w
+file /usr/bin/wall
+mode 02755
+file /usr/bin/wc
+file /usr/bin/web-client
+file /usr/bin/web-server
+file /usr/bin/whereis
+file /usr/bin/who
+file /usr/bin/whoami
+file /usr/bin/write
+mode 02755
+file /usr/bin/xargs
+file /usr/bin/zcat
+
+link /bin/[
+target /bin/test
+
+link /usr/bin/whatis
+target /usr/bin/apropos
+
+link /usr/bin/chfn
+target /usr/bin/chpass
+link /usr/bin/chsh
+target /usr/bin/chpass
+
+link /usr/bin/rb
+target /usr/bin/rz
+link /usr/bin/rx
+target /usr/bin/rz
+
+link /usr/bin/sb
+target /usr/bin/sz
+link /usr/bin/sx
+target /usr/bin/sz
+
+link /usr/bin/machine
+target /usr/bin/arch
+
+link /usr/bin/uptime
+target /usr/bin/w
+
+#
+# Files: /sbin
+#
+file /sbin/chown
+file /usr/sbin/chroot
+mode 04755
+file /usr/sbin/cron
+file /usr/sbin/disktool
+file /sbin/fdisk
+file /sbin/fsck
+file /sbin/init
+mode 0700
+file /sbin/mkfs
+file /sbin/mknod
+file /usr/sbin/mkpasswd
+file /sbin/mount
+file /usr/sbin/pstat
+mode 02755
+file /sbin/reboot
+file /sbin/shutdown
+mode 04750
+file /usr/sbin/talloc
+file /sbin/umount
+file /usr/sbin/update
+file /usr/libexec/getty
+file /usr/libexec/updatedb
+file /usr/sbin/vipw
+
+link /sbin/bootloader
+target /sbin/reboot
+link /sbin/fastboot
+target /sbin/reboot
+link /sbin/halt
+target /sbin/reboot
+link /sbin/poweroff
+target /sbin/reboot
