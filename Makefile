@@ -24,35 +24,28 @@ RELEASEDIR?=	${TOPSRC}/distrib/obj/releasedir
 # unset it keeps the historical default so existing builds are unchanged.
 LOCALTIME?=	Canada/Mountain
 
-# Filesystem and swap sizes.
-ifneq ($(MACHINE),gba)
-FS_MBYTES       = 200
-U_MBYTES        = 200
-SWAP_MBYTES     = 2
-else
-FS_MBYTES       = 20
-U_MBYTES        = 1
-SWAP_MBYTES     = 1
-endif
+# Per-port build configuration and debug/load targets live in the port's
+# own include (sys/arch/${MACHINE}/conf/Makefile.inc). It is read HERE,
+# near the top, so a port can override the generic filesystem knobs below
+# (and define its own ${FSIMG}: rule) before anything lists $(FSIMG) as a
+# prerequisite. A port that supplies its own root-image rule and installfs
+# sets PORT_CUSTOM_FSIMAGE (see gba). Keep `all' the default goal even
+# though the include may define other targets (help, mgba, ...) first.
+.DEFAULT_GOAL := all
+-include sys/arch/${MACHINE}/conf/Makefile.inc
 
-# Root filesystem image for ${MACHINE}.
-ifneq ($(MACHINE),gba)
-# Generic ports: a full disk image WITH an MBR partition table
-# (root=#1, swap=#2, optional /home=#3), written to the SD card from
-# sector 0.
-FSIMG=		${TOPSRC}/distrib/${MACHINE}/sdcard.img
-else
-# GBA: a BARE root filesystem image (no MBR/partition table). The plain
-# GBA (mrams/mGBA) kernel embeds it in ROM (sys/arch/gba/dev/rootfs.img);
-# on real EverDrive hardware the same image is written onto the DiscoBSD
-# root partition (sd0b, MBR #2), leaving the EverDrive's own FAT32 boot
-# partition (#1) intact. There is deliberately no full-disk image for the
-# GBA: swap is a separate region (EWRAM for mrams, MBR #3 for GBAED) and
-# the build has no FAT32 tooling to populate the EverDrive boot partition,
-# so a sector-0 image would not be directly usable anyway.
-FSIMG=		${TOPSRC}/distrib/gba/rootfs.img
-GBA_DEV_ROOTFS=	${TOPSRC}/sys/arch/gba/dev/rootfs.img
-endif
+# Filesystem and swap sizes (generic default; a port may override these
+# in its conf/Makefile.inc).
+FS_MBYTES	?= 200
+U_MBYTES	?= 200
+SWAP_MBYTES	?= 2
+
+# Root filesystem image. Generic ports build a full disk image WITH an MBR
+# partition table (root=#1, swap=#2, optional /home=#3), written to the SD
+# card from sector 0. A port needing a different layout sets FSIMG and
+# PORT_CUSTOM_FSIMAGE and provides its own ${FSIMG}: rule in its
+# conf/Makefile.inc (e.g. gba's bare, ROM-embedded image).
+FSIMG		?= ${TOPSRC}/distrib/${MACHINE}/sdcard.img
 
 # Set this to the device name for your SD card.  With this
 # enabled you can use "make installfs" to copy the sdcard.img
@@ -73,9 +66,7 @@ FSUTIL=		${TOPSRC}/tools/bin/fsutil
 SUBDIR=		share lib bin sbin libexec usr.bin usr.sbin games
 
 all:		build
-ifeq ($(MACHINE),gba)
-		$(MAKE) fs
-endif
+		$(POST_ALL)
 
 build:		symlinks tools
 		$(MAKE) kernel
@@ -98,7 +89,10 @@ kernel:		tools
 
 fs:		$(FSIMG)
 
-ifneq ($(MACHINE),gba)
+# Generic (MBR full-disk) root filesystem image. A port with its own image
+# layout defines ${FSIMG}: in its conf/Makefile.inc and sets
+# PORT_CUSTOM_FSIMAGE, which switches this generic rule off.
+ifndef PORT_CUSTOM_FSIMAGE
 ${FSIMG}:	distrib/${MACHINE}/md.${MACHINE} distrib/base/mi.home
 		rm -f $@ distrib/$(MACHINE)/_manifest
 		cat distrib/base/mi distrib/$(MACHINE)/md.$(MACHINE) > distrib/$(MACHINE)/_manifest
@@ -107,34 +101,6 @@ ${FSIMG}:	distrib/${MACHINE}/md.${MACHINE} distrib/base/mi.home
 # In case you need a separate /home partition,
 # uncomment the following line.
 		$(FSUTIL) --new --partition=3 --manifest=distrib/base/mi.home $@ distrib/home
-else
-# GBA: build the bare root FS from the installed tree (single partition, no
-# MBR, no separate /home), copy it to where the mrams kernel embeds it, and
-# relink the GBA kernel so its ROM carries the fresh filesystem. The GBAED
-# kernel reads the SD at runtime and needs no relink - it just consumes this
-# same rootfs.img, written to the card's DiscoBSD root partition.
-#
-# GBA uses its OWN base manifest (distrib/gba/mi.gba), not the shared
-# distrib/base/mi. The shared mi lists the full userland (games, man pages,
-# the MIPS-targeted toolchain, all headers), which neither fits this port's
-# small inode-limited image nor makes sense on Arm; mi.gba is the curated
-# common core (devices + /bin + the common /usr/bin utilities + /etc +
-# /var/log). base/mi stays machine-independent for pic32/stm32.
-#
-# The image ships the sd0b /etc/fstab (etc/fstab.gba, for GBAED which roots
-# on sd0b and runs a boot fsck). The plain GBA kernel instead roots on the
-# ROM memory disk mr0a, so its EMBEDDED copy gets /etc/fstab swapped to
-# distrib/gba/fstab.mrams; the SD image ($@) keeps sd0b.
-${FSIMG}:	distrib/gba/md.gba distrib/gba/mi.gba
-		rm -f $@ distrib/gba/_manifest
-		cat distrib/gba/mi.gba distrib/gba/md.gba > distrib/gba/_manifest
-		$(FSUTIL) --new --size=`expr $(FS_MBYTES) \* 1024` --manifest=distrib/gba/_manifest $@ ${DESTDIR}
-		cp $@ $(GBA_DEV_ROOTFS)
-		d=`mktemp -d`; mkdir -p $$d/etc; \
-			cp ${TOPSRC}/distrib/gba/fstab.mrams $$d/etc/fstab; \
-			( cd $$d && $(FSUTIL) --add $(GBA_DEV_ROOTFS) etc/fstab ); \
-			rm -rf $$d
-		$(MAKE) -C sys/arch/gba/compile/GBA all
 endif
 
 release:
@@ -155,9 +121,7 @@ cleankernel:
 cleanfs:
 		rm -f distrib/$(MACHINE)/_manifest
 		rm -f $(FSIMG)
-ifeq ($(MACHINE),gba)
-		rm -f $(GBA_DEV_ROOTFS)
-endif
+		$(POST_CLEANFS)
 
 cleanall:	cleantools clean cleankernel
 
@@ -165,14 +129,11 @@ symlinks:
 		rm -f include/machine
 		ln -s $(MACHINE) include/machine
 
+# Generic installfs (dd a full-disk image to the SD card). A port without a
+# full-disk image overrides installfs in its conf/Makefile.inc and sets
+# PORT_CUSTOM_FSIMAGE, which switches this generic rule off.
+ifndef PORT_CUSTOM_FSIMAGE
 installfs:
-ifeq ($(MACHINE),gba)
-		@echo "installfs is not supported for gba: rootfs.img is a bare"
-		@echo "root filesystem, not a full-disk image. Write it onto the"
-		@echo "DiscoBSD root partition (EverDrive MBR #2 / sd0b), NOT sector 0,"
-		@echo "or the EverDrive FAT32 boot partition is destroyed."
-		@exit 1
-else
 		@[ -n "${SDCARD}" ] || (echo "SDCARD not defined." && exit 1)
 		@[ -f $(FSIMG) ] || $(MAKE) $(FSIMG)
 		sudo dd bs=1M if=${FSIMG} of=${SDCARD}
@@ -181,6 +142,3 @@ endif
 .PHONY:		all build distribution release tools kernel symlinks \
 		${FSIMG} fs installfs \
 		clean cleantools cleanfs cleanall
-
-# Architecture-specific debugging and loading.
--include sys/arch/${MACHINE}/conf/Makefile.inc
