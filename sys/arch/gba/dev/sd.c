@@ -47,6 +47,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
+#include <sys/uio.h>
 #include <sys/errno.h>
 #include <sys/dk.h>
 #include <sys/disk.h>
@@ -1290,6 +1291,33 @@ sdioctl(dev_t dev, u_int cmd, caddr_t addr, int flag)
         break;
     }
     return error;
+}
+
+/*
+ * Raw (character-device) read and write, via physio() straight to
+ * sdstrategy(). These back the raw disk nodes /dev/rsd0*: they are what
+ * let `fsck -n` check the mounted root live. An O_RDONLY open of a
+ * character disk device is permitted even while the block device is
+ * mounted (openi() in sys_inode.c only refuses *writable* char opens of a
+ * mounted device, and *any* block open of one), so a read-only check can
+ * run without unmounting. A writable raw open of the mounted root is still
+ * refused, because chrtoblk() (conf.c) maps rsd -> sd so the mountedon()
+ * check still fires - matching standard BSD, where live repair needs the
+ * raw device at securelevel 0 (single-user).
+ */
+extern int physio(void (*)(struct buf *), struct buf *, dev_t, int,
+    struct uio *);
+
+int
+sdread(dev_t dev, struct uio *uio, int flag)
+{
+    return physio(sdstrategy, (struct buf *)0, dev, B_READ, uio);
+}
+
+int
+sdwrite(dev_t dev, struct uio *uio, int flag)
+{
+    return physio(sdstrategy, (struct buf *)0, dev, B_WRITE, uio);
 }
 
 /*
