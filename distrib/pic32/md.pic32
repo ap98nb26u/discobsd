@@ -28,35 +28,6 @@ file /usr/bin/adb
 # XXX file /usr/bin/adc-demo
 
 #
-# Self-hosting C toolchain (compiler/assembler/linker/binutils/build
-# tools) - moved here from the shared mi manifest since it's PIC32/MIPS32
-# specific: usr.bin/as/as.c and usr.bin/ld/ld.c are both hardcoded
-# "for MIPS32 architecture" (real opcodes, no other target), and cc.c
-# is built around that same as/ld pair (#ifdef __mips__). None of it can
-# produce working code for an ARM target like GBA or stm32, and GBA in
-# particular has nowhere near enough IWRAM/EWRAM to self-host a compiler
-# anyway. The rest of this cluster (make/yacc/m4/binutils/alternate
-# compiler variants) exists to support the same on-device development
-# workflow, which only pic32 boards are set up for (see /usr/bin/adb and
-# /usr/libexec/smlrc above/below).
-file /usr/bin/ar
-file /usr/bin/as
-file /usr/bin/cb
-file /usr/bin/cc
-file /usr/bin/cpp
-file /usr/bin/lcc
-file /usr/bin/lcpp
-file /usr/bin/ld
-file /usr/bin/m4
-file /usr/bin/make
-file /usr/bin/nm
-file /usr/bin/pdc
-file /usr/bin/ranlib
-file /usr/bin/size
-file /usr/bin/strip
-file /usr/bin/yacc
-
-#
 # Files: /usr/include
 #
 default
