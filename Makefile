@@ -19,6 +19,11 @@ MACHINE_ARCH	?= arm
 DESTDIR?=	${TOPSRC}/distrib/obj/destdir.${MACHINE}
 RELEASEDIR?=	${TOPSRC}/distrib/obj/releasedir
 
+# /etc/localtime target: which zone the etc distribution symlinks it to,
+# under /usr/share/zoneinfo. Override at make time, e.g. LOCALTIME=Japan;
+# unset it keeps the historical default so existing builds are unchanged.
+LOCALTIME?=	Canada/Mountain
+
 # Filesystem and swap sizes.
 ifneq ($(MACHINE),gba)
 FS_MBYTES       = 200
@@ -82,7 +87,7 @@ build:		symlinks tools
 			${MAKE} -C $$dir DESTDIR=${DESTDIR} install ; done
 
 distribution:	build
-		${MAKE} -C etc DESTDIR=${DESTDIR} distribution
+		${MAKE} -C etc DESTDIR=${DESTDIR} LOCALTIME=${LOCALTIME} distribution
 		$(MAKE) fs
 
 tools:
