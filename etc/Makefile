@@ -37,6 +37,15 @@ distribution-etc-root-var: distrib-dirs
 
 	${INSTALL} -c -o ${OWN} -g ${GRP} -m 644 ${FILES} ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 shadow ${DESTDIR}/etc
+# Per-port fstab: the shared fstab above assumes the root filesystem on
+# sd0a. A port whose root lives elsewhere ships etc/fstab.${MACHINE},
+# which is installed over /etc/fstab here (e.g. gba: root on sd0b, as
+# the EverDrive FAT32 loader owns sd0a). Ports without such a file
+# (pic32, stm32) keep the shared fstab unchanged.
+	if [ -f fstab.${MACHINE} ]; then \
+		${INSTALL} -c -o ${OWN} -g ${GRP} -m 644 fstab.${MACHINE} \
+		    ${DESTDIR}/etc/fstab; \
+	fi
 #	${INSTALL} -c -o root -g wheel -m 600 master.passwd ${DESTDIR}/etc
 #	${INSTALL} -c -o ${OWN} -g ${GRP} -m 555 MAKEDEV.local MAKEDEV \
 #	    ${DESTDIR}/dev
