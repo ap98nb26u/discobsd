@@ -6,6 +6,28 @@
 #include	"awk.h"
 #include	"awk.def.h"
 #define YY_NO_INPUT	/* defeat lex */
+/*
+ * flex reads through YY_INPUT, not the char-at-a-time input() below (that is
+ * an AT&T lex convention flex ignores). Feed the scanner the command-line
+ * program string (lexprog) when there is one, otherwise the -f source file
+ * (yyin). The test is "lexprog != NULL", NOT "yyin == NULL": flex forces
+ * yyin to stdin when it is null, so a yyin test would make the scanner read
+ * the data instead of the program - awk would then run an empty program and
+ * default to printing $0 for every record.
+ */
+#define YY_INPUT(buf, result, max_size) { \
+		int yyc; extern char *lexprog; \
+		if (lexprog != (char *)0) \
+			yyc = (*lexprog ? *lexprog++ : EOF); \
+		else \
+			yyc = getc(yyin); \
+		if (yyc == EOF) \
+			(result) = YY_NULL; \
+		else { \
+			(buf)[0] = (char)yyc; \
+			(result) = 1; \
+		} \
+	}
 extern int	yylval;
 extern int	mustfld;
 
@@ -22,15 +44,20 @@ D	[0-9]
 WS	[ \t]
 
 %%
-        /* witchcraft */
-        /* switch (yybgin-yysvec-1) {
-	case 0:
+	/*
+	 * Run at the top of every yylex() call (the old lex "witchcraft",
+	 * revived for flex). All of awk's rules are in the <A> start state,
+	 * but flex begins in INITIAL, so enter <A> on the first call. A '}'
+	 * is lexed in two steps: the "}" rule returns ';' and switches to
+	 * <sc>; on the next call, while still in <sc>, hand back the '}' and
+	 * return to <A>.
+	 */
+	if (YY_START == INITIAL)
 		BEGIN A;
-		break;
-	case sc:
+	else if (YY_START == sc) {
 		BEGIN A;
 		return('}');
-	} */
+	}
 
 <A>^\n		lineno++;
 <A>^{WS}*#.*\n	lineno++;	/* strip comment lines */

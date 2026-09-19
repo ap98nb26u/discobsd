@@ -54,7 +54,13 @@ node *p;
 	setvec[0] = 1;		/* for initial DOT STAR */
 	cfoll(p1);	/* set up follow sets */
 	fap = cgotofn();
-	freetr(p1);	/* add this when alloc works */
+	/*
+	 * freetr(p1) once lived here but double-frees the parse tree: penter()
+	 * turns it into a DAG (shared leaves/follow sets), so freetr()'s plain
+	 * recursive descent frees some nodes twice and corrupts the heap (a
+	 * crash on the first regexp). The tree is small and each distinct
+	 * regexp is compiled once, so leave it, as the original awk did.
+	 */
 	return(fap);
 }
 
