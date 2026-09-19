@@ -1,7 +1,18 @@
 /*	awk.def	4.3	83/12/09	*/
 
 #define hack            int
-#define	AWKFLOAT	float
+/*
+ * awk's numeric type. This is double (as in the original awk), NOT float:
+ * with float, awk's number-to-string path passes a float through a K&R/
+ * varargs call to sprintf("%g", vp->fval), and on this Arm soft-float
+ * toolchain (-Os) the float is not always promoted to double there, so
+ * printf reads 8 bytes where a 4-byte float sits and prints garbage
+ * (e.g. `awk 'BEGIN{print 2+3}'` -> 5.67e-299). double needs no promotion
+ * and also matches every other awk. (Latent until the lexer was fixed to
+ * actually run programs - before that awk never formatted a computed
+ * number.)
+ */
+#define	AWKFLOAT	double
 #define	xfree(a)	{ if(a!=NULL) { yfree(a); a=NULL;} }
 #define	strfree(a)	{ if(a!=NULL && a!=EMPTY) { yfree(a);} a=EMPTY; }
 #define yfree           free
