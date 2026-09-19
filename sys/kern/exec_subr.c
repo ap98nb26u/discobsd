@@ -115,7 +115,18 @@ DEBUG("\texec_setupstack(): writing to argp = %p, ucp = %p\n", argp, ucp);
     u.u_frame->tf_r5 = (int)argp;               /* $a1 := argp */
     u.u_frame->tf_r6 = (int)envp;               /* $a2 := env */
 #elif __thumb2__ || __thumb__ || __arm__
-    u.u_frame->tf_sp = (int)(argp-0x40);        /* 0x40 for svc trap frame. */
+    /*
+     * Round the initial user SP down to an 8-byte boundary. AAPCS requires
+     * the stack to be 8-byte aligned at a public interface, and the C
+     * varargs code relies on it: va_arg(ap, double) aligns ap up to 8 bytes
+     * before reading, so on a merely 4-byte-aligned stack it reads a double
+     * argument 4 bytes too high - the low word becomes the high word and an
+     * adjacent stack slot (often a pointer) becomes the high word, so e.g.
+     * printf("%g", 5.0) prints garbage like 5e-299. Real ARM7TDMI shows this;
+     * emulators that ignore stack alignment do not. The argp math above is
+     * all in NBPW(=4)-byte units, so argp - 0x40 was only 4-byte aligned.
+     */
+    u.u_frame->tf_sp = ((int)(argp-0x40)) & ~7;  /* 0x40 for svc trap frame; 8-byte aligned. */
     u.u_frame->tf_r0 = epp->argc;               /* $a1 := argc */
     u.u_rval         = epp->argc;               /* $a1 := argc via syscall() */
     u.u_frame->tf_r1 = (int)argp;               /* $a2 := argp */
