@@ -8,17 +8,30 @@
  */
 #include <math.h>
 
-/* Get two 32 bit ints from a double.  */
+/*
+ * This is the real IEEE-754 64-bit modf.  On targets where the compiler
+ * makes "double" the same size as "float" (e.g. PIC32/mips), modf is
+ * instead aliased to modff() in modff.c and this file compiles to nothing;
+ * building both is harmless because exactly one provides the modf symbol.
+ */
+#if __SIZEOF_DOUBLE__ != __SIZEOF_FLOAT__
+
+/* Get two 32 bit ints from a double.  "high" is the word holding the sign
+ * and exponent (the most-significant 32 bits), "low" the mantissa tail. */
 
 #define EXTRACT_WORDS(high,low,d) \
-        high = *(unsigned long long*) &d; \
-        low  = (*(unsigned long long*) &d) >> 32
+        (high) = (long) (unsigned long) ((*(unsigned long long*) &(d)) >> 32); \
+        (low)  = (long) (unsigned long) (*(unsigned long long*) &(d))
 
 
-/* Set a double from two 32 bit ints.  */
+/* Set a double from two 32 bit ints.  Writes into the named double "d"
+ * (masking each half so a negative "long" argument is not sign-extended
+ * across the whole 64-bit word). */
 
 #define INSERT_WORDS(d,high,low) \
-        *(unsigned long long*) &(x) = (unsigned long long) (high) << 32 | (low)
+        *(unsigned long long*) &(d) = \
+            ((unsigned long long) (unsigned long) (high) << 32) | \
+            (unsigned long long) (unsigned long) (low)
 
 /*
  * modf(double x, double *iptr)
@@ -77,3 +90,5 @@ double modf (double x, double *iptr)
 		}
 	}
 }
+
+#endif /* __SIZEOF_DOUBLE__ != __SIZEOF_FLOAT__ */
