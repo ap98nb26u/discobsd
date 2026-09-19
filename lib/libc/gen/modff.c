@@ -48,6 +48,12 @@ float modff (float fx, float *iptr)
 }
 
 /*
- * For PIC32, double is the same as float.
+ * Where the compiler makes "double" the same size as "float" (e.g. PIC32),
+ * double modf() is just modff().  On targets with a genuine 64-bit double
+ * (arm: gba/stm32) this alias would be an ABI mismatch - a real double
+ * passed to a float-signature function - so there modf comes from the true
+ * 64-bit modf.c instead and this alias is omitted.
  */
+#if __SIZEOF_DOUBLE__ == __SIZEOF_FLOAT__
 double modf (double x, double *iptr) __attribute__((alias ("modff")));
+#endif
