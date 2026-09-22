@@ -8,11 +8,8 @@ DiscoBSD is a 2.11BSD-derived UNIX for microcontrollers. This is the Arm
 GBA (ARM7TDMI) port: a multi-user kernel with an on-screen soft keyboard,
 an LCD text console, `sh`, `vi`, and the usual small userland.
 
-A short demo, recorded in mGBA:
-
-<video src="https://github.com/ap98nb26u/discobsd/releases/download/gba-2.7-prebuilt-2026-09-22/DiscoBSD_GBA_Demo.mp4" controls width="480"></video>
-
-(If it does not play inline, [download the video](https://github.com/ap98nb26u/discobsd/releases/download/gba-2.7-prebuilt-2026-09-22/DiscoBSD_GBA_Demo.mp4).)
+A short demo, recorded in mGBA —
+[watch/download the video](https://github.com/ap98nb26u/discobsd/releases/download/gba-2.7-prebuilt-2026-09-22/DiscoBSD_GBA_Demo.mp4).
 The prebuilt images below are also attached to the
 [release](https://github.com/ap98nb26u/discobsd/releases/tag/gba-2.7-prebuilt-2026-09-22).
 
