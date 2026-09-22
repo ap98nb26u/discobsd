@@ -102,6 +102,10 @@ Manual pages on DiscoBSD are available through the `man` command.
 
 #### Running the `DiscoBSD/gba` port:
 
+A short demo, recorded in mGBA:
+
+https://github.com/user-attachments/assets/de7e6b4d-3066-4683-97d2-ca4a127a9263
+
 The GBA port runs as a Game Boy Advance ROM rather than MCU flash firmware.
 Prebuilt images are on the [`gba-2.7-prebuilt`][28] branch; see also
 [`dist/gba/README.md`][29].
