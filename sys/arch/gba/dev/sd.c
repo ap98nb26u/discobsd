@@ -922,15 +922,35 @@ card_read(int unit, unsigned int offset, char *data, unsigned int bcount)
      * Settle-retries exhausted: the controller/card is in a state a
      * fresh CMD18 can't clear at all (see project_gba_sh_fault_sigreturn_hang.md
      * and project_gba_sd_driver_plan.md). Fall back to the heavy
-     * recovery - a full card_init() reinit - then one more try before
-     * reporting failure up to the caller's own retry loop (exec_aout.c/
-     * vm_swp.c). Expensive (card_init() busy-waits with interrupts
-     * blocked) but should now be genuinely rare.
+     * recovery - a full card_init() reinit - then retry before reporting
+     * failure up to the caller's own retry loop (exec_aout.c/vm_swp.c).
+     * Expensive (card_init() busy-waits with interrupts blocked) but
+     * should now be genuinely rare.
+     *
+     * The verification read after card_init() MUST itself use the settle
+     * (sd_open_settle), for the same reason the loop above does: card_init()
+     * leaves the card freshly reset, so this read issues a fresh CMD18 -
+     * exactly the case that intermittently ACKs then stalls the data stream.
+     * Doing a single settle-less read here (as this once did) let the
+     * recovery's own last step fail to the very stall it exists to clear:
+     * observed on real GBAED hardware as exec retrying a sticky image-read
+     * block four times and getting four identical EIOs, then killing the
+     * process ("exec: image read failed (5)"). Give the post-reinit read
+     * the settle and the same handful of tries as the pre-reinit loop.
      */
     printf("sd: sec=%u stalled, reinitializing card and retrying\n", sd_addr);
     (void)card_init(unit);
-    if (sd_read_sectors(sd_addr, data, slen) == 0)
-        return 1;
+    sd_open_settle = 1;
+    {
+        int tries;
+        for (tries = 0; tries < SD_OPEN_SETTLE_RETRIES; tries++) {
+            if (sd_read_sectors(sd_addr, data, slen) == 0) {
+                sd_open_settle = 0;
+                return 1;
+            }
+        }
+    }
+    sd_open_settle = 0;
 
     printf("sd: sec=%u read failed after reinit\n", sd_addr);
     return 0;
