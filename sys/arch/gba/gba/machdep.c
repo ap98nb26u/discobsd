@@ -349,6 +349,21 @@ startup(void)
 {
 
 	/*
+	 * Enable the GBA ROM prefetch buffer (WAITCNT bit 14). The cartridge
+	 * bus powers up at its slowest setting (WAITCNT=0x0000: WS0 4/2
+	 * cycles, prefetch off - confirmed on real GBAED hardware), and this
+	 * port runs entirely from ROM yet never configured it, so every
+	 * instruction fetch paid the full waitstate. Prefetch speeds up
+	 * sequential opcode fetch from ROM with no effect on the timing of
+	 * data accesses (LDR/STR to the EverDrive FPGA registers and SD DMA),
+	 * so it does not disturb the reliability-critical cart/SD transfer
+	 * timing that the EverDrive OS itself is careful about. The WS0
+	 * waitstate bits are left at their slowest (0) for that same reason;
+	 * sram.c later ORs in the SRAM-wait bits, preserving bit 14.
+	 */
+	REG_WAITCNT = 0x4000;
+
+	/*
 	 * Publish the syscall trampoline at the fixed address userland's
 	 * SYS.h dereferences (userland is linked separately from the
 	 * kernel and cannot reference simulate_swi_via_inline_data as a
