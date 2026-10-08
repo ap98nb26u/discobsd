@@ -364,6 +364,21 @@ startup(void)
 	REG_WAITCNT = 0x4000;
 
 	/*
+	 * EXPERIMENT (branch gba-sd-speedup, stage 2b): overclock EWRAM from
+	 * its default 2 waitstates to 1, via the undocumented internal memory
+	 * control register at 0x04000800 (bits 24-27 = EWRAM wait: 0xD = 2
+	 * waits (power-on default 0x0D000020), 0xE = 1 wait, 0xF = lockup).
+	 * Unlike the ROM prefetch above, this speeds up EWRAM - where every
+	 * userland process actually executes (the kernel runs from ROM, but
+	 * user code is swapped into EWRAM), plus kernel stacks/buffers in
+	 * EWRAM and SD DMA landing there. It is a long-established, widely
+	 * used GBA overclock (safe on retail hardware; 0xF would lock up).
+	 * Must be set in software each boot; re-applied here on warm reboot
+	 * too since startup() runs again.
+	 */
+	*(volatile uint32_t *)0x04000800 = 0x0E000020;
+
+	/*
 	 * Publish the syscall trampoline at the fixed address userland's
 	 * SYS.h dereferences (userland is linked separately from the
 	 * kernel and cannot reference simulate_swi_via_inline_data as a
