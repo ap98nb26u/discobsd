@@ -237,15 +237,16 @@ int uartioctl(dev_t dev, u_int cmd, caddr_t addr, int flag)
     int error;
 
     /*
-     * The on-screen (LCD) console has a fixed 30x15 geometry, so pin its
-     * window size on every ioctl - in particular so TIOCGWINSZ always
-     * reports 30x15 to full-screen apps (vi). login(1) deliberately clears
+     * The on-screen (LCD) console has a fixed 40x15 geometry (6x8 font,
+     * 240/6 = 40 cols; 15 text rows above the 5-row soft keyboard), so pin
+     * its window size on every ioctl - in particular so TIOCGWINSZ always
+     * reports 40x15 to full-screen apps (vi). login(1) deliberately clears
      * the window size to 0x0 on local login (login.c, "if (!hflag)"), and
      * nothing on a hardwired console re-establishes it; re-asserting it
      * here, just before ttioctl() reads or writes it, keeps it authoritative.
      */
     if (minor(dev) == CONS_MINOR) {
-        tp->t_winsize.ws_col = 30;
+        tp->t_winsize.ws_col = 40;
         tp->t_winsize.ws_row = 15;
     }
 

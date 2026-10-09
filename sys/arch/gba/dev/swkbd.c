@@ -45,8 +45,8 @@ extern struct tty uartttys[];
 /*
  * One key. For an ordinary key `label` is 0 and the glyph drawn is the
  * character itself (`n` normally, `s` when shifted), which is also what
- * is sent. For a special key `label` is a 2-char string drawn in the
- * key's two cells and `n` (== `s`) is the control character sent.
+ * is sent. For a special key `label` is a 3-char string drawn across
+ * the key's three cells and `n` (== `s`) is the control character sent.
  */
 /* kind values: an ordinary character, a sticky modifier toggle, or Del. */
 #define K_CHAR	0
@@ -62,8 +62,12 @@ struct swkey {
 };
 
 /* Every key is drawn KEY_CELLS text cells wide, so key i sits at
- * screen column i*KEY_CELLS - trivial cursor math. */
-#define KEY_CELLS	2
+ * screen column i*KEY_CELLS - trivial cursor math. With the 6x8 font the
+ * console is 40 columns, so 3 cells/key spreads the widest rows (13 keys)
+ * across 39 columns instead of bunching them into 26 at the left. A
+ * special key's 3-char label fills all three cells; an ordinary key shows
+ * its single character centred (blank - char - blank). */
+#define KEY_CELLS	3
 
 static const struct swkey row0[] = {
 	{'`','~',0},{'1','!',0},{'2','@',0},{'3','#',0},{'4','$',0},
@@ -96,9 +100,9 @@ static const struct swkey row3[] = {
  * as a literal 0x7f glyph on the LCD.
  */
 static const struct swkey row4[] = {
-	{'\t','\t',"Tb"},{' ',' ',"Sp"},{'\b','\b',"Bs"},{0,0,"De",K_DEL},
-	{'\r','\r',"En"},{0x1b,0x1b,"Es"},
-	{0,0,"Sh",K_SHIFT},{0,0,"Ct",K_CTRL},
+	{'\t','\t',"Tab"},{' ',' ',"Spc"},{'\b','\b',"Bsp"},{0,0,"Del",K_DEL},
+	{'\r','\r',"Ent"},{0x1b,0x1b,"Esc"},
+	{0,0,"Sft",K_SHIFT},{0,0,"Ctl",K_CTRL},
 };
 
 static const struct swkey *const rows[] = { row0, row1, row2, row3, row4 };
@@ -127,7 +131,8 @@ swkbd_drawkey(int row, int col, int hilite)
 	int scol = col * KEY_CELLS;
 	int srow = (gtxt_rows() - NROWS) + row;
 	unsigned short fg, bg;
-	char c0, c1;
+	char cells[KEY_CELLS];
+	int i;
 
 	/* A modifier key stays lit while its mode is active, so its state
 	 * is visible even when the cursor is elsewhere. */
@@ -137,15 +142,22 @@ swkbd_drawkey(int row, int col, int hilite)
 	fg = hilite ? KB_BG : KB_FG;
 	bg = hilite ? KB_FG : KB_BG;
 
+	/*
+	 * A special key fills all three cells with its 3-char label (e.g.
+	 * "Tab", "Ent"); an ordinary key shows its single character centred,
+	 * blank - char - blank, so a row reads " `  1  2  3 ...".
+	 */
 	if (k->label) {
-		c0 = k->label[0];
-		c1 = k->label[1];
+		cells[0] = k->label[0];
+		cells[1] = k->label[1];
+		cells[2] = k->label[2];
 	} else {
-		c0 = swkbd_shift ? k->s : k->n;
-		c1 = ' ';
+		cells[0] = ' ';
+		cells[1] = swkbd_shift ? k->s : k->n;
+		cells[2] = ' ';
 	}
-	gtxt_draw_cell(c0, scol, srow, fg, bg);
-	gtxt_draw_cell(c1, scol + 1, srow, fg, bg);
+	for (i = 0; i < KEY_CELLS; i++)
+		gtxt_draw_cell(cells[i], scol + i, srow, fg, bg);
 }
 
 static void
