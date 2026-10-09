@@ -1,6 +1,8 @@
 /*
  * Minimal on-screen text console for the GBA, using video Mode 3
- * (240x160 16bpp bitmap) and an 8x8 pixel bitmap font (gba_font.c).
+ * (240x160 16bpp bitmap) and a 6x8 pixel bitmap font (gba_font.c): a
+ * 6px-wide cell gives 240/6 = 40 columns. The font bytes are 8 wide
+ * (MSB-left); only the top GTXT_CHAR_W (6) bits of each row are drawn.
  * Ported from Adrian O'Grady's fivemouse.com GBA text demo/library
  * (http://www.fivemouse.com/gba/).
  *
@@ -21,7 +23,7 @@ extern const unsigned char gtxt_font[2048];
 
 #define GTXT_SCREEN_W   240
 #define GTXT_SCREEN_H   160
-#define GTXT_CHAR_W     8
+#define GTXT_CHAR_W     6	/* 6px-wide cell -> 240/6 = 40 columns */
 #define GTXT_CHAR_H     8
 #define GTXT_COLS       (GTXT_SCREEN_W / GTXT_CHAR_W)
 #define GTXT_ROW_PIXELS (GTXT_SCREEN_W * GTXT_CHAR_H)
@@ -238,7 +240,7 @@ gtxt_init(unsigned short fg, unsigned short bg)
     gtxt_bg = bg;
     /*
      * Permanently reserve the bottom 5 rows for the on-screen keyboard so
-     * the console is a fixed 30x15 (roadmap: vi/terminal support, "Option
+     * the console is a fixed 40x15 (roadmap: vi/terminal support, "Option
      * 2"). This matches the window size reported over TIOCGWINSZ, so a
      * full-screen app addresses exactly the visible grid whether or not the
      * keyboard happens to be drawn (swkbd.c paints/blanks that band but no
