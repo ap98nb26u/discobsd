@@ -7,6 +7,7 @@ extern struct driver uartdriver;
 extern struct driver uartdriver;
 extern struct driver eddriver;
 extern struct driver sddriver;
+extern struct driver rtcdriver;
 
 struct conf_ctlr conf_ctlr_init[] = {
 	/* driver,	unit,	addr,		pri,	flags,	alive */
@@ -19,6 +20,7 @@ struct conf_device conf_device_init[] = {
 	{ &uartdriver,	0,		1,	0,	-2,	0x0,	{0},	0 },
 	{ &uartdriver,	0,		2,	0,	-2,	0x0,	{0},	0 },
 	{ &sddriver,	&eddriver,	0,	0,	-2,	0x0,	{0},	0 },
+	{ &rtcdriver,	&eddriver,	0,	0,	-2,	0x0,	{0},	0 },
 	{ 0 }
 };
 
