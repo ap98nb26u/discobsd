@@ -30,6 +30,8 @@
 #include <gba/dev/sd.h>
 #endif
 
+#include <gba/dev/gba_audio.h>
+
 #ifdef PTY_ENABLED
 #include <sys/pty.h>
 #endif
@@ -241,8 +243,13 @@ const struct cdevsw cdevsw[] = {
 	{	/* 16 - hxtft, gpanel, sgpanel */
 		NOCDEV
 	},
-	{	/* 17 - skel */
-		NOCDEV
+	{	/* 17 - audio: DirectSound PCM, /dev/audio */
+#if AUDIO_MAJOR != 17
+#error Wrong AUDIO_MAJOR value!
+#endif
+		audioopen,	audioclose,	norw,		audiowrite,
+		audioioctl,	nullstop,	0,		seltrue,
+		nostrategy,	0,		0,
 	},
 	{	/* 18 - sdio (driver removed; slot kept to preserve major numbers) */
 		NOCDEV
