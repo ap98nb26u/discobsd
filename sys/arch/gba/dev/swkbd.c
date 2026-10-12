@@ -292,8 +292,17 @@ swkbd_move(int dx, int dy)
  * Auto-repeat timing is runtime-tunable via the machdep sysctls
  * kbd_repeat_delay / kbd_repeat_rate (milliseconds), and persisted per build
  * (cart SRAM on mrams, /etc/rc.local on the SD-root GBAED build; see sram.c). The ms values are the canonical setting; swkbd_set_repeat()
- * clamps them and derives the Timer1 (16384Hz) tick counts actually compared
- * against below. Defaults ~0.4s delay / ~0.1s interval.
+ * clamps them and derives the Timer3 (HZ ~= 100 Hz) tick counts actually
+ * compared against below. Defaults ~0.4s delay / ~0.1s interval.
+ *
+ * The time base is Timer3, the free-running count-up counter the kernel
+ * clock's catch-up uses (cpu_initclocks()/gba_do_schedule()), read here
+ * read-only - NOT Timer1, which is now left free for PCM sound DMA (the
+ * GBA can clock the sound FIFO only off Timer0 or Timer1). Timer3 advances
+ * at HZ in real hardware time regardless of the IME mask (it counts
+ * Timer2's hardware overflows), which is exactly the IME-independence the
+ * auto-repeat needs while a command's scrolling output holds IME=0. Its
+ * ~100 Hz (10 ms) granularity is plenty for key-repeat timing.
  */
 #define SWKBD_DEF_DELAY_MS	400
 #define SWKBD_DEF_RATE_MS	100
@@ -304,8 +313,8 @@ swkbd_move(int dx, int dy)
 
 int swkbd_repeat_delay_ms = SWKBD_DEF_DELAY_MS;	/* sysctl/SRAM-visible (ms) */
 int swkbd_repeat_rate_ms  = SWKBD_DEF_RATE_MS;
-static int swkbd_delay_ticks = (SWKBD_DEF_DELAY_MS * 16384) / 1000;
-static int swkbd_rate_ticks  = (SWKBD_DEF_RATE_MS  * 16384) / 1000;
+static int swkbd_delay_ticks = (SWKBD_DEF_DELAY_MS * HZ) / 1000;
+static int swkbd_rate_ticks  = (SWKBD_DEF_RATE_MS  * HZ) / 1000;
 
 void
 swkbd_set_repeat(int delay_ms, int rate_ms)
@@ -316,8 +325,11 @@ swkbd_set_repeat(int delay_ms, int rate_ms)
 	if (rate_ms  > SWKBD_MAX_RATE_MS)	rate_ms  = SWKBD_MAX_RATE_MS;
 	swkbd_repeat_delay_ms = delay_ms;
 	swkbd_repeat_rate_ms  = rate_ms;
-	swkbd_delay_ticks = (int)(((long)delay_ms * 16384) / 1000);
-	swkbd_rate_ticks  = (int)(((long)rate_ms  * 16384) / 1000);
+	swkbd_delay_ticks = (int)(((long)delay_ms * HZ) / 1000);
+	swkbd_rate_ticks  = (int)(((long)rate_ms  * HZ) / 1000);
+	/* Timer3 is coarse (~10 ms/tick); never let a clamp round to 0 ticks. */
+	if (swkbd_delay_ticks < 1) swkbd_delay_ticks = 1;
+	if (swkbd_rate_ticks  < 1) swkbd_rate_ticks  = 1;
 }
 
 #define SWKBD_REPEAT_KEYS	(KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT | KEY_A)
@@ -331,8 +343,8 @@ swkbd_poll(void)
 {
 	static uint16_t last_vc;
 	static uint16_t held_prev;	/* repeatable keys held last frame */
-	static uint16_t held_since;	/* Timer1 value when this held run began */
-	static uint16_t last_rep;	/* Timer1 value at the last repeat fire */
+	static uint16_t held_since;	/* Timer3 value when this held run began */
+	static uint16_t last_rep;	/* Timer3 value at the last repeat fire */
 	static int repeating;		/* past the initial delay for held_prev */
 	uint16_t vc, raw, down, fresh, rep, act;
 
@@ -369,21 +381,22 @@ swkbd_poll(void)
 
 	/*
 	 * Auto-repeat: while exactly the same repeatable key(s) stay held,
-	 * measure elapsed time with the free-running Timer1 (REG_TM1CNT_L,
-	 * 16384Hz, IME-independent - see irq_enable() in machdep.c). Wait
-	 * SWKBD_REPEAT_DELAY for the first repeat, then fire every
-	 * SWKBD_REPEAT_RATE. Using real hardware time rather than a count of
-	 * processed frames keeps the cadence correct even while a command's
-	 * scrolling output starves this poll (the interrupt-driven clocks
-	 * stall under IME=0, but Timer1 does not). All deltas are sub-second,
-	 * far under Timer1's 4s 16-bit wrap, so 16-bit unsigned math is fine;
-	 * the delay is checked only until `repeating` latches, so an
-	 * indefinitely-held key never trips the wrap.
+	 * measure elapsed time with the free-running Timer3 (REG_TM3CNT_L,
+	 * ~HZ=100 Hz, IME-independent - it counts Timer2's hardware overflows,
+	 * see cpu_initclocks()). Wait SWKBD_REPEAT_DELAY for the first repeat,
+	 * then fire every SWKBD_REPEAT_RATE. Using real hardware time rather
+	 * than a count of processed frames keeps the cadence correct even while
+	 * a command's scrolling output starves this poll (the interrupt-driven
+	 * clocks stall under IME=0, but Timer3 does not). All deltas are
+	 * sub-second, far under Timer3's ~655 s 16-bit wrap, so 16-bit unsigned
+	 * math is fine; the delay is checked only until `repeating` latches, so
+	 * an indefinitely-held key never trips the wrap. (Was Timer1, moved
+	 * here to free Timer1 for PCM sound DMA.)
 	 */
 	rep = 0;
 	{
 		uint16_t r = (uint16_t)(down & SWKBD_REPEAT_KEYS);
-		uint16_t t = REG_TM1CNT_L;
+		uint16_t t = REG_TM3CNT_L;
 
 		if (r != 0 && r == held_prev) {
 			if (! repeating) {
