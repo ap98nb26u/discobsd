@@ -1,8 +1,16 @@
 /*
  * GBA DirectSound PCM playback driver - /dev/audio.
  *
- * Plays raw 8-bit SIGNED mono PCM.  The hard parts of GBA PCM are all about
- * who keeps the sound FIFO fed, because the sound DMA has no "wrap" and no
+ * Plays raw 8-bit SIGNED PCM, mono or stereo.  Mono (/dev/audio[16]) feeds
+ * DirectSound A to both speakers from one ring.  Stereo (/dev/audiost[16])
+ * takes interleaved L,R,L,R... samples, deinterleaves them into a left and a
+ * right ring (each half the mono length, so the same total RAM), and plays
+ * them through DirectSound A (left) via DMA1 and DirectSound B (right) via
+ * DMA2, both clocked by the same Timer1.  NB the GBA's built-in speaker is
+ * mono; stereo separation is only heard on headphones / an emulator.
+ *
+ * The hard parts of GBA PCM are all about who keeps the sound FIFO fed,
+ * because the sound DMA has no "wrap" and no
  * completion interrupt (in FIFO mode the word count is forced to 4 and the
  * channel repeats forever, advancing its source), and this port has no
  * hardware timer free to count samples (Timer0=hardclock, Timer1=the sample
@@ -27,9 +35,13 @@
  * Re-enabling the sound DMA at each wrap is itself a tiny audio discontinuity
  * on this hardware/emulator, independent of the source address, so the only
  * lever on the resulting click is how OFTEN we wrap.  The ring is therefore
- * sized as large as the kernel's IWRAM .bss headroom allows (1.125 s), which
- * costs no swap.  Two things were tried to do better and did NOT pan out,
- * recorded here so they are not re-attempted blindly:
+ * sized as large as the kernel's IWRAM .bss headroom allows (1.125 s mono),
+ * which costs no swap.  Stereo halves the per-channel ring to keep the same
+ * total RAM, so it wraps twice as often and is audibly clicker than mono -
+ * stereo is the lower-fi mode, worth it only for the L/R separation (which,
+ * again, only a headphone jack or an emulator can reproduce; the console
+ * speaker is mono).  Two things were tried to wrap less often and did NOT pan
+ * out, recorded here so they are not re-attempted blindly:
  *   - A 32 KB EWRAM ring (short clips wrap-free): it permanently shrank the
  *     mrams swap area enough to OOM 4-stage pipelines, and the kernel stack
  *     lives at the top of EWRAM so the buffer had to dodge it - reverted.
@@ -53,15 +65,24 @@
 #include <machine/gba.h>
 #include <gba/dev/gba_audio.h>
 
-/* DMA channel 1 (sound FIFO A).  SAD/DAD are 32-bit, CNT split 16+16. */
+/*
+ * DMA channels 1 and 2 (sound FIFO A and B).  SAD/DAD are 32-bit, CNT 16+16.
+ * DMA1 feeds FIFO A (left in stereo / both in mono), DMA2 feeds FIFO B (right
+ * in stereo).  DMA2 is otherwise unused here (the SD driver uses DMA3).
+ */
 #define REG_DMA1SAD	(*(volatile uint32_t *)(REG_BASE+0x00BC))
 #define REG_DMA1DAD	(*(volatile uint32_t *)(REG_BASE+0x00C0))
 #define REG_DMA1CNT_L	(*(volatile uint16_t *)(REG_BASE+0x00C4))
 #define REG_DMA1CNT_H	(*(volatile uint16_t *)(REG_BASE+0x00C6))
+#define REG_DMA2SAD	(*(volatile uint32_t *)(REG_BASE+0x00C8))
+#define REG_DMA2DAD	(*(volatile uint32_t *)(REG_BASE+0x00CC))
+#define REG_DMA2CNT_L	(*(volatile uint16_t *)(REG_BASE+0x00D0))
+#define REG_DMA2CNT_H	(*(volatile uint16_t *)(REG_BASE+0x00D2))
 #define FIFO_A		(REG_BASE+0x00A0)
+#define FIFO_B		(REG_BASE+0x00A4)
 
 /*
- * DMA1 control for a sound FIFO channel:
+ * DMA control for a sound FIFO channel:
  *   0x8000 enable | 0x3000 start-timing = special (sound FIFO)
  * | 0x0400 32-bit units | 0x0200 repeat.
  * Destination control is forced to the FIFO in this mode; source increments.
@@ -69,36 +90,49 @@
 #define DMA1_SOUND	0xB600
 
 /*
- * SOUNDCNT_H bits to route DirectSound A to the FIFO on Timer1:
- *   0x0004 DSound A volume 100% | 0x0100 enable R | 0x0200 enable L
- * | 0x0400 timer select = Timer1 | 0x0002 PSG mix 100% (keep the beep alive).
- * 0x0800 is the FIFO-A reset, pulsed only when (re)starting.
+ * SOUNDCNT_H routings (all on Timer1).  Bits: 0x0002 PSG mix 100%; 0x0004/8
+ * DSound A/B volume 100%; 0x0100/0200 A enable R/L; 0x1000/2000 B enable R/L;
+ * 0x0400/4000 A/B timer-select = Timer1; 0x0800/8000 A/B FIFO reset.
+ *   SNDH_MONO:   A to both L+R (mono).
+ *   SNDH_STEREO: A to L only, B to R only.
  */
-#define SNDH_DSA	(0x0004 | 0x0100 | 0x0200 | 0x0400 | 0x0002)
-#define SNDH_FIFO_RESET	0x0800
+#define SNDH_MONO	(0x0002 | 0x0004 | 0x0100 | 0x0200 | 0x0400)
+#define SNDH_STEREO	(0x0002 | 0x0004 | 0x0200 | 0x0400 \
+			         | 0x0008 | 0x1000 | 0x4000)
+#define SNDH_FIFO_RESET_A	0x0800
+#define SNDH_FIFO_RESET_B	0x8000
 
 /*
- * The ring.  ASAMPLES must be a multiple of 16 (the DMA moves 32-bit units =
- * 4 samples, and the wrap math rounds to the 16-sample FIFO refill).  Sized
- * as large as the GBAED build's IWRAM .bss headroom allows (~2.5 KB spare):
- * 9216 samples = 1.125 s at 8192 Hz.  AGUARD is a mirror of the ring's first
- * AGUARD samples (the producer mirrors writes that land there) covering the
- * DMA's over-read past the ring end before audio_tick's Timer0-driven wrap
- * rewind is serviced (an IME=0 window can delay it); 1024 = 125 ms.
+ * Ring storage.  ASAMPLES must be a multiple of 16 (the DMA moves 32-bit
+ * units = 4 samples, and the wrap math rounds to the 16-sample FIFO refill).
+ * MONO uses the whole buffer as one 1.125 s ring (sized to the GBAED build's
+ * ~2.5 KB IWRAM .bss headroom).  STEREO splits the SAME buffer in half - a
+ * left ring in [0,HALF) and a right ring in [HALF,2*HALF) - so two channels
+ * cost the same total RAM as mono, at half the per-channel length.  AGUARD is
+ * a mirror of each ring's first AGUARD samples (the producer mirrors writes
+ * that land there) covering the DMA's over-read past the ring end before
+ * audio_tick's Timer0-driven wrap rewind is serviced.
  */
-#define ASAMPLES	9216		/* 1.125 s at 8192 Hz; multiple of 16 */
-#define AGUARD		1024		/* 125 ms over-read mirror */
-#define APREBUF		(ASAMPLES / 2)	/* fill this far before starting */
+#define ASAMPLES	9216		/* mono: 1.125 s at 8192 Hz; mult of 16 */
+#define AGUARD		1024		/* mono guard, 125 ms */
+#define HALF		((ASAMPLES + AGUARD) / 2)	/* 5120 */
+#define ASAMPLES_ST	4608		/* stereo per-channel ring; mult of 16 */
+#define AGUARD_ST	(HALF - ASAMPLES_ST)		/* 512 */
 
 static signed char abuf[ASAMPLES + AGUARD];
+#define RBASE		(&abuf[HALF])	/* stereo right-channel ring base */
 
 static int	audio_rate = AUDIO_RATE_DEF;
 static int	audio_open;		/* single-opener guard */
+static int	audio_stereo;		/* 2 DMA channels, deinterleaved */
+static unsigned	a_rsize;		/* ring length (per channel) */
+static unsigned	a_gsize;		/* guard length (per channel) */
 
-/* Ring state.  Shared with audio_tick() (interrupt); guard with splhigh(). */
+/* Ring state.  Shared with audio_tick() (interrupt); guard with splhigh().
+ * Indices and counts are PER CHANNEL (mono = the one channel). */
 static volatile int audio_playing;	/* DMA/Timer1 running */
-static volatile unsigned a_wr;		/* producer index into abuf[0..ASAMPLES) */
-static volatile unsigned a_play;	/* play index  into abuf[0..ASAMPLES) */
+static volatile unsigned a_wr;		/* producer index into [0..a_rsize) */
+static volatile unsigned a_play;	/* play index  into [0..a_rsize) */
 static volatile unsigned a_used;	/* samples written, not yet played */
 
 /* Fractional play-position accumulator (see audio_tick). */
@@ -118,7 +152,10 @@ audio_init(void)
 {
 	audio_rate = AUDIO_RATE_DEF;
 	audio_open = 0;
+	audio_stereo = 0;
 	audio_playing = 0;
+	a_rsize = ASAMPLES;
+	a_gsize = AGUARD;
 	a_wr = a_play = a_used = 0;
 	a_acc = 0;
 	/* SOUNDCNT_X master-enable is set by gba_sound_init() at boot. */
@@ -149,13 +186,26 @@ audio_hw_start(void)
 	unsigned off = a_play & ~3u;		/* DMA source must be 32-bit aligned */
 
 	REG_TM1CNT_H = 0;			/* sample clock stopped while we set up */
-	REG_DMA1CNT_H = 0;			/* make sure channel is off */
-	REG_SOUNDCNT_H = SNDH_DSA | SNDH_FIFO_RESET;	/* enable DSA, clear FIFO A */
+	REG_DMA1CNT_H = 0;			/* make sure the channel(s) are off */
+	REG_DMA2CNT_H = 0;
 
-	REG_DMA1SAD = (uint32_t)&abuf[off];
-	REG_DMA1DAD = (uint32_t)FIFO_A;
-	REG_DMA1CNT_L = 0;			/* ignored in FIFO mode */
-	REG_DMA1CNT_H = DMA1_SOUND;		/* enable: primes the FIFO now */
+	if (audio_stereo) {
+		REG_SOUNDCNT_H = SNDH_STEREO | SNDH_FIFO_RESET_A | SNDH_FIFO_RESET_B;
+		REG_DMA1SAD = (uint32_t)&abuf[off];	/* left */
+		REG_DMA1DAD = (uint32_t)FIFO_A;
+		REG_DMA1CNT_L = 0;
+		REG_DMA2SAD = (uint32_t)&RBASE[off];	/* right */
+		REG_DMA2DAD = (uint32_t)FIFO_B;
+		REG_DMA2CNT_L = 0;
+		REG_DMA1CNT_H = DMA1_SOUND;
+		REG_DMA2CNT_H = DMA1_SOUND;		/* both prime now */
+	} else {
+		REG_SOUNDCNT_H = SNDH_MONO | SNDH_FIFO_RESET_A;
+		REG_DMA1SAD = (uint32_t)&abuf[off];
+		REG_DMA1DAD = (uint32_t)FIFO_A;
+		REG_DMA1CNT_L = 0;
+		REG_DMA1CNT_H = DMA1_SOUND;		/* enable: primes the FIFO now */
+	}
 
 	a_acc = 0;
 	a_last_tm3 = REG_TM3CNT_L;
@@ -174,8 +224,9 @@ static void
 audio_hw_stop(void)
 {
 	REG_TM1CNT_H = 0;			/* stop the sample clock first */
-	REG_DMA1CNT_H = 0;			/* disable sound DMA */
-	REG_SOUNDCNT_H = SNDH_FIFO_RESET;	/* clear FIFO A, DSound A off */
+	REG_DMA1CNT_H = 0;			/* disable sound DMA(s) */
+	REG_DMA2CNT_H = 0;
+	REG_SOUNDCNT_H = SNDH_FIFO_RESET_A | SNDH_FIFO_RESET_B;	/* clear FIFOs */
 	REG_SOUNDCNT_H = 0x0002;		/* back to PSG-only (beep) */
 	audio_playing = 0;
 }
@@ -199,12 +250,17 @@ audio_dma_rewind(void)
 {
 	unsigned off = (a_play & ~15u) + 32;	/* a_play + FIFO occupancy, 4-aligned */
 
-	if (off >= ASAMPLES)			/* keep the source inside the ring */
-		off -= ASAMPLES;
+	if (off >= a_rsize)			/* keep the source inside the ring */
+		off -= a_rsize;
 
 	REG_DMA1CNT_H = 0;
 	REG_DMA1SAD = (uint32_t)&abuf[off];
 	REG_DMA1CNT_H = DMA1_SOUND;
+	if (audio_stereo) {			/* the right channel wraps in step */
+		REG_DMA2CNT_H = 0;
+		REG_DMA2SAD = (uint32_t)&RBASE[off];
+		REG_DMA2CNT_H = DMA1_SOUND;
+	}
 }
 
 /*
@@ -247,8 +303,8 @@ audio_tick(void)
 
 	a_used -= nsamp;
 	a_play += nsamp;
-	if (a_play >= ASAMPLES) {		/* one wrap: repoint the DMA */
-		a_play -= ASAMPLES;
+	if (a_play >= a_rsize) {			/* one wrap: repoint the DMA(s) */
+		a_play -= a_rsize;
 		audio_dma_rewind();
 	}
 	wakeup((caddr_t)&a_used);		/* room freed for the writer */
@@ -258,21 +314,29 @@ int
 audioopen(dev_t dev, int flag, int mode)
 {
 	/*
-	 * minor 0 = default 8192 Hz (/dev/audio), minor 1 = 16384 Hz
-	 * (/dev/audio16): a convenience so a plain `cat file > dev` can pick a
-	 * rate without a tool. AUDIO_SETRATE still overrides either one.  Both
-	 * rates divide the 16.78 MHz timer clock exactly (reload 0xF800 / 0xFC00),
-	 * and 16384 is exactly twice the default and half the GBA's native
-	 * 32768 Hz output - unlike a round 16000, which the timer cannot hit.
+	 * The minor selects rate and channel count without needing a tool:
+	 *   0 /dev/audio      mono   8192 Hz
+	 *   1 /dev/audio16    mono  16384 Hz
+	 *   2 /dev/audiost    stereo 8192 Hz   (interleaved L,R,L,R...)
+	 *   3 /dev/audiost16  stereo 16384 Hz
+	 * Both rates divide the 16.78 MHz timer clock exactly (reload 0xF800 /
+	 * 0xFC00); 16384 is twice the default and half the GBA's native 32768 Hz
+	 * output, unlike a round 16000 which the timer cannot hit.  AUDIO_SETRATE
+	 * still overrides the rate.  Stereo halves the per-channel ring so two
+	 * channels cost the same RAM as mono.
 	 */
 	switch (minor(dev)) {
-	case 0: audio_rate = AUDIO_RATE_DEF; break;
-	case 1: audio_rate = 16384; break;
+	case 0: audio_rate = AUDIO_RATE_DEF; audio_stereo = 0; break;
+	case 1: audio_rate = 16384;          audio_stereo = 0; break;
+	case 2: audio_rate = AUDIO_RATE_DEF; audio_stereo = 1; break;
+	case 3: audio_rate = 16384;          audio_stereo = 1; break;
 	default: return ENXIO;
 	}
 	if (audio_open)
 		return EBUSY;
 	audio_open = 1;
+	a_rsize = audio_stereo ? ASAMPLES_ST : ASAMPLES;
+	a_gsize = audio_stereo ? AGUARD_ST : AGUARD;
 	a_wr = a_play = a_used = 0;
 	a_acc = 0;
 	audio_playing = 0;
@@ -296,55 +360,102 @@ audioclose(dev_t dev, int flag, int mode)
 	return 0;
 }
 
+/*
+ * Mirror the part of a just-written run [wr, wr+n) that lands in the ring's
+ * first a_gsize samples into the guard copy at base[a_rsize..], so the DMA's
+ * over-read past the ring end (before audio_tick's wrap rewind lands) reads
+ * this lap's real data rather than garbage.
+ */
+static void
+audio_mirror(signed char *base, unsigned wr, unsigned n)
+{
+	if (wr < a_gsize) {
+		unsigned m = a_gsize - wr;
+		if (m > n)
+			m = n;
+		bcopy((caddr_t)&base[wr], (caddr_t)&base[a_rsize + wr], m);
+	}
+}
+
 int
 audiowrite(dev_t dev, struct uio *uio, int flag)
 {
 	int s, error = 0;
 	unsigned free, n;
+	signed char tmp[128];			/* deinterleave staging (stereo) */
+	/*
+	 * How full to fill the ring before playback starts, = the steady-state
+	 * lead the producer keeps ahead of the play point.  Stereo's ring is half
+	 * mono's, so start it fuller (3/4) to keep enough slack that a wrap never
+	 * repoints the DMA onto not-yet-refilled samples (a ~0.5 s stale echo).
+	 */
+	unsigned prebuf = audio_stereo ? (a_rsize - a_rsize / 4) : (a_rsize / 2);
 
-	while (uio->uio_resid > 0) {
+	for (;;) {
+		if (audio_stereo) {
+			if (uio->uio_resid < 2) {	/* need a whole L,R pair */
+				if (uio->uio_resid == 1)
+					(void)uiomove((caddr_t)tmp, 1, uio);
+				break;
+			}
+		} else if (uio->uio_resid == 0)
+			break;
+
 		s = splhigh();
-		while (a_used >= ASAMPLES) {		/* ring full: wait for drain */
+		while (a_used >= a_rsize) {		/* ring full: wait for drain */
 			if (!audio_playing && a_used > 0)
 				audio_hw_start();
 			sleep((caddr_t)&a_used, PPIPE);
 		}
-		free = ASAMPLES - a_used;
+		free = a_rsize - a_used;
 		splx(s);
 
-		/* Copy a contiguous run up to the ring end or the free space. */
+		/* n = per-channel samples to add this pass, bounded by the free
+		 * space, the contiguous run to the ring end, and the input. */
 		n = free;
-		if (n > uio->uio_resid)
-			n = uio->uio_resid;
-		if (n > ASAMPLES - a_wr)
-			n = ASAMPLES - a_wr;
+		if (n > a_rsize - a_wr)
+			n = a_rsize - a_wr;
 
-		error = uiomove((caddr_t)&abuf[a_wr], n, uio);
-		if (error)
-			break;
+		if (audio_stereo) {
+			unsigned pairs = uio->uio_resid / 2, done;
 
-		/* Mirror the part of the write that lands in the ring's first
-		 * AGUARD samples into the guard copy, so the DMA's over-read past
-		 * the ring end (before audio_tick's wrap rewind lands) reads this
-		 * lap's real data rather than garbage. */
-		if (a_wr < AGUARD) {
-			unsigned m = AGUARD - a_wr;
-			if (m > n)
-				m = n;
-			bcopy((caddr_t)&abuf[a_wr],
-			    (caddr_t)&abuf[ASAMPLES + a_wr], m);
+			if (n > pairs)
+				n = pairs;
+			for (done = 0; done < n; ) {	/* deinterleave L,R -> 2 rings */
+				unsigned c = n - done, i;
+
+				if (c > sizeof(tmp) / 2)
+					c = sizeof(tmp) / 2;
+				error = uiomove((caddr_t)tmp, c * 2, uio);
+				if (error)
+					goto out;
+				for (i = 0; i < c; i++) {
+					abuf[a_wr + done + i] = tmp[2 * i];
+					RBASE[a_wr + done + i] = tmp[2 * i + 1];
+				}
+				done += c;
+			}
+			audio_mirror(abuf, a_wr, n);
+			audio_mirror(RBASE, a_wr, n);
+		} else {
+			if (n > uio->uio_resid)
+				n = uio->uio_resid;
+			error = uiomove((caddr_t)&abuf[a_wr], n, uio);
+			if (error)
+				break;
+			audio_mirror(abuf, a_wr, n);
 		}
 
 		s = splhigh();
 		a_wr += n;
-		if (a_wr >= ASAMPLES)
-			a_wr -= ASAMPLES;
+		if (a_wr >= a_rsize)
+			a_wr -= a_rsize;
 		a_used += n;
-		if (!audio_playing && a_used >= APREBUF)
+		if (!audio_playing && a_used >= prebuf)
 			audio_hw_start();
 		splx(s);
 	}
-
+out:
 	/* Short clip that never reached the prebuffer threshold: start it. */
 	s = splhigh();
 	if (!audio_playing && a_used > 0)
