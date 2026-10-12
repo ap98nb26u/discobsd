@@ -82,5 +82,6 @@ arch/gba/dev/gba_text.c		optional uart
 arch/gba/dev/gba_font.c		optional uart
 arch/gba/dev/swkbd.c			optional uart
 arch/gba/dev/gba_sound.c		optional uart
+arch/gba/dev/gba_audio.c		standard
 arch/gba/dev/sram.c			optional uart
 arch/gba/dev/gba_sio_uart.c		optional uart

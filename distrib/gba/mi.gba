@@ -383,23 +383,16 @@ major 16
 minor 1
 
 #
-# Skeleton driver.
+# DirectSound PCM audio.
 #
-cdev /dev/skel1
+cdev /dev/audio
 major 17
 minor 0
-cdev /dev/skel2
+mode 666
+cdev /dev/audio16
 major 17
 minor 1
-cdev /dev/skel3
-major 17
-minor 2
-cdev /dev/skel4
-major 17
-minor 3
-cdev /dev/skel5
-major 17
-minor 4
+mode 666
 
 #
 # Files: /root

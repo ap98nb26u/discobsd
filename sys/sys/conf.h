@@ -51,6 +51,7 @@ struct cdevsw
 #define UART_MAJOR      6
 #define UARTUSB_MAJOR   7
 #define GPANEL_MAJOR    16
+#define AUDIO_MAJOR     17
 
 #ifdef KERNEL
 #ifndef CONS_MINOR

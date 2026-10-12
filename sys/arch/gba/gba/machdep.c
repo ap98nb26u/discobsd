@@ -32,6 +32,7 @@
 
 #include <gba/dev/mgbalog.h>
 #include <gba/dev/gba_sio_uart.h>
+#include <gba/dev/gba_audio.h>
 #include <machine/gba_syscall.h>
 
 int cpu_khz = 16777;
@@ -318,6 +319,12 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
         }
 
         /*
+         * Keep DirectSound PCM fed: advance the play position and wrap the
+         * sound DMA once per interrupt. Cheap no-op when nothing is playing.
+         */
+        audio_tick();
+
+        /*
          * Sample console input here too, not just in idle(), so ^C and
          * the software keyboard keep working while a command is running
          * (the scheduler is not in idle() then). Guarded against idle()
@@ -429,6 +436,9 @@ startup(void)
 		extern void gba_sound_init(void);
 		gba_sound_init();
 	}
+
+	/* DirectSound PCM device (/dev/audio); see gba_audio.c. */
+	audio_init();
 
 	/*
 	 * Load persistent boot parameters from cartridge SRAM, falling back to
