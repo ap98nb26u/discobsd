@@ -401,6 +401,10 @@ cdev /dev/audiost16
 major 17
 minor 3
 mode 666
+cdev /dev/audio4
+major 17
+minor 4
+mode 666
 
 #
 # Files: /root
