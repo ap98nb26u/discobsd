@@ -26,6 +26,8 @@
 #ifdef KERNEL
 void audio_init(void);		/* one-time hardware/state setup, at boot */
 void audio_tick(void);		/* ring->FIFO bookkeeping, from Timer0 ISR */
+void audio_suspend(void);	/* pause sample clock across an SD transfer (ed.c) */
+void audio_resume(void);	/* resume it afterwards */
 
 int audioopen(dev_t dev, int flag, int mode);
 int audioclose(dev_t dev, int flag, int mode);

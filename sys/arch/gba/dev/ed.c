@@ -13,6 +13,7 @@
 #include <sys/systm.h>
 
 #include <gba/dev/ed.h>
+#include <gba/dev/gba_audio.h>	/* audio_suspend/resume around SD transfers */
 
 #define ED_REG_BASE     0x09FC0000
 
@@ -303,12 +304,16 @@ ed_sd_dma_wr(const void *src)
 {
     ed_reg_wr(ED_REG_SD_RAM, 0);
     ed_sd_mode(ED_SD_MODE4);
+    audio_suspend();			/* keep the sound DMA off the bus - see above */
     DMA_SRC = (uint32_t)src;
     DMA_DST = (uint32_t)(ED_REG_BASE + ED_REG_SD_DAT * 2);
     DMA_LEN = 256;
     DMA_CTR = 0x8040;
-    if (ed_dma_wait())
+    if (ed_dma_wait()) {
+        audio_resume();
         return 1;
+    }
+    audio_resume();
     return 0;
 }
 
@@ -380,12 +385,24 @@ ed_sd_dma_rd(void *dst, int slen)
         if (wf != 0)
             return wf;             /* 1 = busy stuck, 2 = card timeout */
 
+        /*
+         * Idle the sound DMA (via its Timer1 sample clock) just for this one
+         * 256-word SD DMA: on real EverDrive hardware a sound DMA contending
+         * for the WRAM bus mid-transfer intermittently wedges the SD DMA (then
+         * the SD read hangs, uninterruptibly). Only the DMA itself is wrapped,
+         * not the busy-wait before it, so the ~60 us pause is hidden by the
+         * FIFO and playback stays smooth. See audio_suspend.
+         */
+        audio_suspend();
         DMA_SRC = (uint32_t)(ED_REG_BASE + ED_REG_SD_DAT * 2);
         DMA_DST = (uint32_t)dst;
         DMA_LEN = 256;
         DMA_CTR = 0x8000;
-        if (ed_dma_wait())
+        if (ed_dma_wait()) {
+            audio_resume();
             return 3;
+        }
+        audio_resume();
 
         slen--;
         dst = (char *)dst + 512;
