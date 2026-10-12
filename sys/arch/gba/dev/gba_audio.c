@@ -173,6 +173,31 @@ audio_set_timer(void)
 }
 
 /*
+ * Suspend/resume the sample clock around an EverDrive SD data transfer (called
+ * from ed.c).  Stopping Timer1 stops the FIFO draining, so the sound DMA stops
+ * requesting and goes idle WITHOUT being disabled - its source position is
+ * preserved, so playback resumes seamlessly.  This keeps the sound DMA off the
+ * bus while DMA3 drives the SD: on real EverDrive hardware a sound DMA running
+ * concurrently with an SD transfer intermittently wedges the transfer (the cat
+ * process then hangs in the SD driver's IME=0 busy-wait, uninterruptible by
+ * ^C). The emulator does not reproduce it. No-op when nothing is playing, so
+ * ordinary SD I/O is unaffected.
+ */
+void
+audio_suspend(void)
+{
+	if (audio_playing)
+		REG_TM1CNT_H = 0;		/* stop clock; DMA1 stays enabled but idle */
+}
+
+void
+audio_resume(void)
+{
+	if (audio_playing)
+		audio_set_timer();		/* restart the sample clock */
+}
+
+/*
  * Start the hardware playing from the current a_play. Caller holds splhigh.
  *
  * Order matters to avoid a startup click: reset+enable the DSound A path,
