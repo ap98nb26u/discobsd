@@ -9,6 +9,16 @@
  * DMA2, both clocked by the same Timer1.  NB the GBA's built-in speaker is
  * mono; stereo separation is only heard on headphones / an emulator.
  *
+ * Rates: /dev/audio=8192, /dev/audio16=16384, /dev/audio4=4096 (mono) and
+ * /dev/audiost[16] (stereo); AUDIO_SETRATE overrides.  On the plain GBA
+ * (mrams, data in ROM) playback is clean apart from the wrap click below.
+ * On GBAED it is USABLE BUT NOT PRACTICAL: the data streams off the SD while
+ * playing, and the SD stalls (plus the halved-ring wraps) add audible drop-
+ * outs, beat/growl and a startup echo - 4096 Hz halves the data rate and so
+ * smooths it a little at the cost of a 2 kHz-dull tone, but neither rate is
+ * clean.  Getting any PCM out while also reading it from the SD is the point
+ * of the GBAED support, not high fidelity.
+ *
  * The hard parts of GBA PCM are all about who keeps the sound FIFO fed,
  * because the sound DMA has no "wrap" and no
  * completion interrupt (in FIFO mode the word count is forced to 4 and the
@@ -344,17 +354,21 @@ audioopen(dev_t dev, int flag, int mode)
 	 *   1 /dev/audio16    mono  16384 Hz
 	 *   2 /dev/audiost    stereo 8192 Hz   (interleaved L,R,L,R...)
 	 *   3 /dev/audiost16  stereo 16384 Hz
-	 * Both rates divide the 16.78 MHz timer clock exactly (reload 0xF800 /
-	 * 0xFC00); 16384 is twice the default and half the GBA's native 32768 Hz
-	 * output, unlike a round 16000 which the timer cannot hit.  AUDIO_SETRATE
-	 * still overrides the rate.  Stereo halves the per-channel ring so two
-	 * channels cost the same RAM as mono.
+	 *   4 /dev/audio4     mono   4096 Hz
+	 * All rates divide the 16.78 MHz timer clock exactly (reloads 0xF000 /
+	 * 0xF800 / 0xFC00); 16384 is twice the 8192 default and half the GBA's
+	 * native 32768 Hz output, unlike a round 16000 the timer cannot hit.
+	 * 4096 (Nyquist 2 kHz) is dull but halves the data rate, so on GBAED it
+	 * streams from SD with half the reads and half the ring wraps - smoother,
+	 * worth it for voice/effects.  AUDIO_SETRATE still overrides the rate;
+	 * stereo halves the per-channel ring so two channels cost the mono RAM.
 	 */
 	switch (minor(dev)) {
 	case 0: audio_rate = AUDIO_RATE_DEF; audio_stereo = 0; break;
 	case 1: audio_rate = 16384;          audio_stereo = 0; break;
 	case 2: audio_rate = AUDIO_RATE_DEF; audio_stereo = 1; break;
 	case 3: audio_rate = 16384;          audio_stereo = 1; break;
+	case 4: audio_rate = 4096;           audio_stereo = 0; break;
 	default: return ENXIO;
 	}
 	if (audio_open)
