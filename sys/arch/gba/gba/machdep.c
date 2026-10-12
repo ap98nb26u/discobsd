@@ -52,6 +52,23 @@ int	usechz = (1000000L + HZ - 1) / HZ;
  */
 #define CLOCK_MAXCATCHUP	512
 
+/*
+ * Clock-drift correction (software). Timer0 is clocked /1024 with an
+ * integer reload, so it actually overflows at 16777216/1024/163 =
+ * 16384/163 = 100.515 Hz - +0.515% over the nominal HZ=100 the software
+ * clock assumes (163 is the truncation of the ideal 163.84). The clock
+ * therefore gains ~7 min/day. Skipping one hardclock() tick every
+ * CLOCK_DRIFT_SKIP ticks makes it advance at the real rate instead:
+ * keeping 194/195 of the ticks gives 100.515 * 194/195 = 99.99986 Hz,
+ * ~0.01 s/day residual (the RTC corrects the rest, plus crystal
+ * tolerance, at boot). This is done in software, NOT with a finer /64
+ * prescaler: /64 did cut the quantization error but hung real GBAED
+ * hardware for reasons never pinned down, so the timer config is kept
+ * byte-identical to the known-stable /1024 one. CLOCK_DRIFT_SKIP is tied
+ * to HZ=100 and the /1024 reload (163); recompute it if either changes.
+ */
+#define CLOCK_DRIFT_SKIP	195
+
 #ifdef TIMEZONE
 struct timezone		tz = { TIMEZONE, DST };
 #else
@@ -277,6 +294,7 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
          */
         {
             static uint16_t last_tm3;
+            static uint16_t drift;      /* drift corrector, see CLOCK_DRIFT_SKIP */
             uint16_t elapsed = (uint16_t)(REG_TM3CNT_L - last_tm3);
 
             if (elapsed == 0)           /* we did take an interrupt */
@@ -285,7 +303,17 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
                 elapsed = CLOCK_MAXCATCHUP;
             last_tm3 += elapsed;
             do {
-                hardclock((caddr_t)0, 0);
+                /*
+                 * Drop one tick every CLOCK_DRIFT_SKIP to cancel the
+                 * /1024 timer's +0.515% fast rate (see the define). The
+                 * skipped tick's clock advance and callout decrement are
+                 * simply deferred to the next interrupt - within the
+                 * normal +/-1 tick timeout granularity.
+                 */
+                if (++drift >= CLOCK_DRIFT_SKIP)
+                    drift = 0;          /* skip: do not advance the clock */
+                else
+                    hardclock((caddr_t)0, 0);
             } while (--elapsed);
         }
 
