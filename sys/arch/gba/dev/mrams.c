@@ -12,6 +12,7 @@
 #include <machine/debug.h>
 
 #include <gba/dev/mrams.h>
+#include <gba/dev/gba_audio.h>	/* audio_suspend/resume around PSRAM swap I/O */
 
 #define MRAM_WREN       0x06
 #define MRAM_WRDI       0x04
@@ -32,6 +33,19 @@ extern char __swap_start[];
 extern char __swap_end[];
 
 int mrams_dkindex;                      /* disk index for statistics */
+
+/*
+ * GBAED PSRAM swap write-reliability diagnostics (see mrams_write). Counted
+ * across all swap writes; mrams_wr_fails > 0 means a store never verified
+ * even after retries (real corruption risk). Globals so they can be read
+ * from a debugger / future sysctl.
+ */
+unsigned int mrams_wr_retries;
+unsigned int mrams_wr_fails;
+
+/* GBA REG_WAITCNT; bit 14 is the ROM prefetch-buffer enable. */
+#define MR_REG_WAITCNT      (*(volatile unsigned short *)0x04000204)
+#define MR_WAITCNT_PREFETCH 0x4000
 
 /*
  * Size of RAM disk.
@@ -71,21 +85,53 @@ int mrams_write(size_t phys_addr, char *data, unsigned bcount)
     // offset (block number) to byte address
     size_t dst_addr = phys_addr;
 
-    //volatile unsigned short dummy;
-
-    if (dst_addr >= (size_t)__swap_start && dst_addr <= (size_t)__swap_end) {
-        // copy only swap device.
-        //bcopy((void *)data, (void *)dst_addr, bcount);
+    if (dst_addr >= (size_t)__swap_start && dst_addr < (size_t)__swap_end) {
+        /*
+         * GBAED swap lives in EverDrive PSRAM, written over the cartridge
+         * bus. A 16-bit store can occasionally be dropped when the ROM
+         * prefetch unit contends for that same bus while the kernel both
+         * fetches its own code from ROM and stores into PSRAM; a lost store
+         * would silently corrupt a swapped-out image (seen as "panic: setrun"
+         * after a garbage u-area is swapped back in). So disable the prefetch
+         * buffer for the copy and verify each halfword against the VALUE WE
+         * JUST WROTE (latched in v), rewriting that one word until it sticks.
+         *
+         * Verifying against the latched v - not by re-reading src[i] - is
+         * important: the swap source is live core that can change under a
+         * long (IME-off) copy, so a src re-read can differ from what was
+         * stored even though the store was correct (observed as a harmless
+         * boot-time "got = want-1"). Comparing to v catches only real dropped
+         * stores and is immune to that. ARM7TDMI has no cache, so the
+         * read-back sees real PSRAM. On the plain GBA build swap is in EWRAM
+         * (never the cart bus), so this is just a reliable store there.
+         */
         volatile unsigned short *dst = (volatile unsigned short *)dst_addr;
         unsigned short *src = (unsigned short *)data;
-        size_t i;
-        for (i=0; i<bcount/2;i++) {
-            dst[i] = src[i];
+        size_t n = bcount >> 1, i;
+        unsigned short savewc = MR_REG_WAITCNT;
+
+        MR_REG_WAITCNT = savewc & ~MR_WAITCNT_PREFETCH;
+        for (i = 0; i < n; i++) {
+            unsigned short v = src[i];
+            int t;
+
+            dst[i] = v;
+            for (t = 0; dst[i] != v && t < 4; t++) {
+                dst[i] = v;
+                mrams_wr_retries++;     /* a store was dropped and redone */
+            }
+            if (dst[i] != v) {
+                /* A cell that will not take the value even after retries:
+                 * a genuine write fault, not the benign src-changed case.
+                 * Surface it once; the counter keeps the running total. */
+                if (mrams_wr_fails++ == 0)
+                    printf("mrams: PSRAM swap store failed at %x\n",
+                        (unsigned)(dst_addr + (i << 1)));
+            }
         }
-        //dummy = dst[i-1]; (void)dummy;
+        MR_REG_WAITCNT = savewc;
     }
 
-    //dummy = *(volatile unsigned short *)0x02000000; (void)dummy;
     return 1;
 }
 
@@ -96,6 +142,7 @@ static int mrams_init(void)
 {
     return 1;
 }
+
 
 /*
  * Open the disk.
@@ -120,12 +167,15 @@ daddr_t mrams_size(dev_t dev)
     case 0:
         /* Whole disk. */
         ret = MRAMS_TOTAL_KBYTES + MRAMS_SWAP_KBYTES;
+        break;
     case 1:
         /* Partition A: filesystem. */
         ret = MRAMS_TOTAL_KBYTES;
+        break;
     case 2:
         /* Partition B: swap space. */
         ret = MRAMS_SWAP_KBYTES;
+        break;
     }
     return ret;
 }
@@ -138,18 +188,30 @@ void mrams_strategy(struct buf *bp)
     int unit = minor(bp->b_dev); // minor device number
 
     /*
+     * Bound the transfer against THIS partition's size, not always the
+     * filesystem partition's. On GBAED the fs partition (__fs_start) is an
+     * empty placeholder (fs is on the SD card) while the swap partition
+     * (minor 2, __swap_start) is the real 8 MB PSRAM region - checking swap
+     * against MRAMS_TOTAL_KBYTES there would truncate every swap transfer to
+     * EOF. (On the plain GBA build fs is ~20 MB so the old check happened to
+     * never truncate swap, masking this.)
+     */
+    daddr_t psize = (unit == 2) ? (daddr_t)MRAMS_SWAP_KBYTES
+                                : (daddr_t)MRAMS_TOTAL_KBYTES;
+
+    /*
      * Determine the size of the transfer, and make sure it is
      * within the boundaries of the partition.
      */
-    if (bp->b_blkno + nblk > MRAMS_TOTAL_KBYTES) {
+    if (bp->b_blkno + nblk > psize) {
         /* if exactly at end of partition, return an EOF */
-        if (bp->b_blkno == MRAMS_TOTAL_KBYTES) {
+        if (bp->b_blkno == psize) {
             bp->b_resid = bp->b_bcount;
             biodone(bp);
             return;
         }
         /* or truncate if part of it fits */
-        nblk = MRAMS_TOTAL_KBYTES - bp->b_blkno;
+        nblk = psize - bp->b_blkno;
         if (nblk <= 0) {
             bp->b_error = EINVAL;
             bp->b_flags |= B_ERROR;
@@ -176,6 +238,18 @@ void mrams_strategy(struct buf *bp)
     } else {
         phys_addr = (offset<<DEV_BSHIFT) + (size_t)__fs_start;
     }
+    /*
+     * GBAED swap I/O is a long (up to ~250 KB) CPU copy over the cart bus
+     * that runs with all interrupts disabled (splbio == IME off on this
+     * Thumb build), so the Timer0 audio ISR cannot service the DirectSound
+     * ring during it: a sound DMA left free-running would hit an unmanaged
+     * ring wrap and screech. Idle the sample clock across the copy (same
+     * trick ed.c uses around SD DMA) so playback cleanly pauses for the
+     * copy instead, then resumes in place. No-op when nothing is playing.
+     */
+#ifdef GBAED
+    audio_suspend();
+#endif
     if (bp->b_flags & B_READ) {
         mrams_read(phys_addr, bp->b_addr, bp->b_bcount);
     } else {
@@ -186,6 +260,9 @@ void mrams_strategy(struct buf *bp)
             mrams_write(phys_addr, bp->b_addr, bp->b_bcount);
         }
     }
+#ifdef GBAED
+    audio_resume();
+#endif
 
     biodone(bp);
 #ifdef UCB_METER

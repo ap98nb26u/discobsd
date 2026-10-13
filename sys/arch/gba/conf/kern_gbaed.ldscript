@@ -104,12 +104,24 @@ __iwram_end		= ORIGIN(IWRAM) + LENGTH(IWRAM);
 __user_data_start	= ORIGIN(USERRAM);
 __user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
 /*
- * GBAED has no EWRAM swap region (swap is on the SD), but machdep.c's
- * check_irq_pc() still references these symbols. Point both at the end of
- * USERRAM so the range is empty and the check is simply never true.
+ * GBAED swap lives in EverDrive PSRAM - the otherwise-unused ROM/cart
+ * window above the kernel image - NOT on the SD card. The window is
+ * writable at runtime because ed_probe() leaves the EverDrive in
+ * NROM_RAM | ROM_WE_ON (dev/ed.c), and the CPU can store to it directly
+ * (verified on real hardware). Contents are volatile (lost on power-off),
+ * which is exactly what swap needs. mrams.c serves this range as the swap
+ * block device (mr0b); machparam.h/MAXMEM are unaffected (swap size is
+ * independent of the user RAM window).
+ *
+ * To resize, change PSRAM_SWAP_SIZE alone. The region must stay clear of
+ * the kernel image at ORIGIN(FLASH) (~132 KB today; the 8 MB start offset
+ * leaves enormous margin) and below the EverDrive FPGA registers at
+ * 0x09FC0000. Default 8 MB: 0x08800000 .. 0x09000000.
  */
-__swap_start		= __user_data_end;
-__swap_end		= __user_data_end;
+PSRAM_SWAP_SIZE		= 8M;
+PSRAM_SWAP_START	= ORIGIN(FLASH) + 8M;	/* 0x08800000 */
+__swap_start		= PSRAM_SWAP_START;
+__swap_end		= PSRAM_SWAP_START + PSRAM_SWAP_SIZE;
 
 syscall_vector		= ORIGIN(SYSVEC);
 u0			= ORIGIN(U0AREA);
