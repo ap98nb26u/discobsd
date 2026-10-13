@@ -106,6 +106,12 @@ minor 2
 bdev /dev/mr0
 major 3             # Volatile disk - MRAM on SPI port (mrams)
 minor 0
+bdev /dev/mr0a
+major 3             # mrams partition a (GBA: ROM root fs)
+minor 1
+bdev /dev/mr0b
+major 3             # mrams partition b (GBA: EWRAM swap / GBAED: PSRAM swap)
+minor 2
 bdev /dev/swap
 major 4             # Virtual swap device, mapped to real swap partition
 minor 64

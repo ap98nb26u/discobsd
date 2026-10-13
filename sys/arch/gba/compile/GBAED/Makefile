@@ -2,6 +2,7 @@ PARAM = -DGBA
 PARAM += -DARM7TDMI
 PARAM += -DUART1_ENABLED
 PARAM += -DUART2_ENABLED
+PARAM += -DMR_ENABLED
 PARAM += -DED_ENABLED
 PARAM += -DSD_ENABLED
 PARAM += -DRTC_ENABLED
@@ -76,8 +77,8 @@ OBJS = exec_aout.o exec_conf.o exec_elf.o exec_script.o exec_subr.o \
 	ufs_namei.o ufs_subr.o ufs_syscalls.o ufs_syscalls2.o \
 	vfs_vnops.o vm_sched.o vm_swap.o vm_swp.o cons.o mem.o swap.o \
 	clock.o conf.o machdep.o mpu.o sig_machdep.o syscall.o sysctl.o \
-	ed.o sd.o rtc.o mgba_uart.o gba_text.o gba_font.o swkbd.o \
-	gba_sound.o gba_audio.o sram.o gba_sio_uart.o 
+	mrams.o ed.o sd.o rtc.o mgba_uart.o gba_text.o gba_font.o \
+	swkbd.o gba_sound.o gba_audio.o sram.o gba_sio_uart.o 
 
 CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/kern/exec_script.c $S/kern/exec_subr.c $S/kern/init_main.c \
@@ -99,8 +100,8 @@ CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/dev/swap.c $S/arch/gba/gba/clock.c $S/arch/gba/gba/conf.c \
 	$S/arch/gba/gba/machdep.c $S/arch/gba/gba/mpu.c \
 	$S/arch/gba/gba/sig_machdep.c $S/arch/gba/gba/syscall.c \
-	$S/arch/gba/gba/sysctl.c $S/arch/gba/dev/ed.c \
-	$S/arch/gba/dev/sd.c $S/arch/gba/dev/rtc.c \
+	$S/arch/gba/gba/sysctl.c $S/arch/gba/dev/mrams.c \
+	$S/arch/gba/dev/ed.c $S/arch/gba/dev/sd.c $S/arch/gba/dev/rtc.c \
 	$S/arch/gba/dev/mgba_uart.c $S/arch/gba/dev/gba_text.c \
 	$S/arch/gba/dev/gba_font.c $S/arch/gba/dev/swkbd.c \
 	$S/arch/gba/dev/gba_sound.c $S/arch/gba/dev/gba_audio.c \
@@ -356,6 +357,9 @@ syscall.o: $S/arch/gba/gba/syscall.c
 	${COMPILE_C}
 
 sysctl.o: $S/arch/gba/gba/sysctl.c
+	${COMPILE_C}
+
+mrams.o: $S/arch/gba/dev/mrams.c
 	${COMPILE_C}
 
 ed.o: $S/arch/gba/dev/ed.c
