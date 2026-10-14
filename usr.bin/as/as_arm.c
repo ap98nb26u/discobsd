@@ -18,9 +18,20 @@
 #include <string.h>
 #include <ctype.h>
 
-#define MAXSYM   4096
-#define MAXLIT   4096
-#define TEXTMAX  (1<<20)
+/*
+ * Buffer sizes. as_arm keeps the whole input and all section output in these
+ * fixed arrays, so together with its text and stack they must fit the target
+ * user window (GBAED = 250 KB). They are therefore far smaller than a host
+ * assembler would pick (the original 1 MB/section, 64 K-line values gave a
+ * ~6 MB .bss that could not load - it ran off the end of the window and hung).
+ * Big enough for small/medium programs; a very large unit (e.g. self-hosting
+ * the compiler) would need a streaming rewrite rather than these arrays.
+ */
+#define MAXSYM   512
+#define MAXLIT   256
+#define MAXREL   512
+#define MAXLINES 4096
+#define TEXTMAX  (1<<14)
 
 /* symbols */
 struct sym { char name[64]; int addr; int defined; int global; };
@@ -411,7 +422,7 @@ static struct pool pool[MAXLIT];
 static int npool;                     /* total ldr= seen */
 static int poolflush;                 /* index of first not-yet-placed entry */
 
-static char *lines[65536];
+static char *lines[MAXLINES];
 static int nlines;
 
 static int cursec;
@@ -434,13 +445,14 @@ static int objmode;                   /* emit a.out object instead of flat bin *
 
 /* relocations recorded in pass 2 (object mode) */
 struct areloc { int sec; int off; int kind; char sym[64]; };
-static struct areloc rels[MAXLIT*4];
+static struct areloc rels[MAXREL];
 static int nrel;
 static struct sym *sym_get(const char *n);   /* fwd */
 static void addrel(int sec, int off, int kind, const char *sym)
 {
     sym_get(sym);   /* ensure the referenced symbol is in the table (may be
                        an undefined external that must land in the symtab) */
+    if (nrel >= MAXREL) fatal("too many relocations", sym);
     rels[nrel].sec=sec; rels[nrel].off=off; rels[nrel].kind=kind;
     strncpy(rels[nrel].sym,sym,63); rels[nrel].sym[63]=0; nrel++;
 }
@@ -536,7 +548,7 @@ static void do_line(char *raw, int pass)
             char *v=skipws(eq+1);
             if(isdigit((unsigned char)*v)||*v=='-'||*v=='+') { val=strtol(v,NULL,0); issym=0; }
             else { issym=1; strncpy(symn,v,63); symn[63]=0; }
-            if(pass==1){ pool[npool].val=val; pool[npool].issym=issym; if(issym)strcpy(pool[npool].sym,symn); npool++; }
+            if(pass==1){ if(npool>=MAXLIT) fatal("literal pool full",""); pool[npool].val=val; pool[npool].issym=issym; if(issym)strcpy(pool[npool].sym,symn); npool++; }
             {
                 int slot = pool[curldr].slotoff;   /* known in pass2 (set at ltorg in pass1) */
                 if(pass==2){
@@ -670,7 +682,7 @@ static int assemble(const char *in, const char *out)
     FILE *f=fopen(in,"r"); if(!f){perror(in);return 1;}
     char buf[512];
     infile=in;
-    while(fgets(buf,sizeof(buf),f)){ lines[nlines]=strdup(buf); if(++nlines>=65536)break; }
+    while(fgets(buf,sizeof(buf),f)){ if(nlines>=MAXLINES) fatal("too many input lines",""); lines[nlines]=strdup(buf); nlines++; }
     fclose(f);
 
     /* pass 1: sizes, labels, pool slot offsets */
