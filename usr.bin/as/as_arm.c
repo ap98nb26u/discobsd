@@ -427,6 +427,7 @@ static int nlines;
 
 static int cursec;
 static int objmode;                   /* emit a.out object instead of flat bin */
+static int verbose;                   /* -v: print the symbol table to stderr */
 
 /* ---- a.out reloc/symbol constants (match tools/aoututils/include) ---- */
 #define R_ABS32   0x01                /* RBYTE32: 32-bit absolute address */
@@ -673,8 +674,10 @@ static void write_object(const char*out)
       }
     }
     fclose(f);
-    for(i=0;i<nsym;i++) if(syms[i].defined) fprintf(stderr,"SYM %s %d sec=%d g=%d\n",syms[i].name,syms[i].addr,symx[i].sec,syms[i].global);
-    for(i=0;i<nsym;i++) if(!syms[i].defined) fprintf(stderr,"UND %s\n",syms[i].name);
+    if(verbose){
+      for(i=0;i<nsym;i++) if(syms[i].defined) fprintf(stderr,"SYM %s %d sec=%d g=%d\n",syms[i].name,syms[i].addr,symx[i].sec,syms[i].global);
+      for(i=0;i<nsym;i++) if(!syms[i].defined) fprintf(stderr,"UND %s\n",syms[i].name);
+    }
 }
 
 static int assemble(const char *in, const char *out)
@@ -722,8 +725,8 @@ static int assemble(const char *in, const char *out)
         { int k; for(k=0;k<secoff[SEC_BSS];k++) fputc(0,of); }
         fclose(of);
     }
-    /* report symbols to stderr for the harness */
-    { int i; for(i=0;i<nsym;i++) if(syms[i].defined) fprintf(stderr,"SYM %s %d\n",syms[i].name,syms[i].addr);
+    /* report symbols to stderr (only with -v; the harness passes it) */
+    if(verbose){ int i; for(i=0;i<nsym;i++) if(syms[i].defined) fprintf(stderr,"SYM %s %d\n",syms[i].name,syms[i].addr);
       for(i=0;i<nsym;i++) if(!syms[i].defined) fprintf(stderr,"UND %s\n",syms[i].name); }
     return 0;
 }
@@ -749,6 +752,7 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i],"-e")) { do_expr(argv[i+1]?argv[i+1]:""); return 0; }
         else if (!strcmp(argv[i],"-o")) { out=argv[++i]; }
         else if (!strcmp(argv[i],"-b")) { flat=1; }   /* flat image (dev/test) */
+        else if (!strcmp(argv[i],"-v")) { verbose=1; }
         else if (argv[i][0]=='-') { /* ignore other flags (e.g. from cc) */ }
         else { if (!in) in=argv[i]; else if (!out) out=argv[i]; }
     }

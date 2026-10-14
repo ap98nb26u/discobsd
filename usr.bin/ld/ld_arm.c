@@ -264,7 +264,7 @@ int main(int argc,char**argv)
              (Relocatable object output, -r, is left non-executable.) */
           if(omagic) chmod(out, 0755);
         }
-        fprintf(stderr,"ENTRY %x\n",ea);
+        if(verbose) fprintf(stderr,"ENTRY %x\n",ea);
         if(verbose){ fprintf(stderr,"a_text=%u a_data=%u a_bss=%u\n",a_text,a_data,a_bss);
           for(i=0;i<ngsym;i++) fprintf(stderr,"SYM %s %x\n",gsyms[i].name,gsyms[i].addr); }
       }
