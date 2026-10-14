@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>	/* chmod() - a linked executable must be runnable */
 
 #define RSMASK 0x70
 #define RFMASK 0x07
@@ -34,14 +35,21 @@
 #define N_EXT  0x20
 
 #define MAXOBJ 64
-#define MAXSYM 8192
+/*
+ * gsyms[] (global symbols across all objects) is static; keep it modest so
+ * ld_arm's .bss fits the target user window (GBAED = 250 KB). Per-object
+ * symbol tables are malloc'd per object (see parse_obj) rather than a fixed
+ * [2048] array inside each of the 64 obj slots, which alone was ~9 MB of .bss
+ * and overran the window (the linker hung on real hardware).
+ */
+#define MAXSYM 1024
 
 struct osym { char name[64]; int type; unsigned val; };
 struct obj {
     unsigned char *buf; long len;
     unsigned magic,textsz,datasz,bsssz,rtsz,rdsz,symsz;
     unsigned char *text,*data,*treloc,*dreloc,*sym;
-    struct osym syms[2048]; int nsym;
+    struct osym *syms; int nsym;	/* malloc'd per object in parse_obj */
     unsigned toff,doff,boff;      /* offset of this object's segs in combined */
 };
 static struct obj objs[MAXOBJ]; static int nobj;
@@ -69,6 +77,10 @@ static void parse_obj(struct obj*o, unsigned char*buf)
     o->treloc=buf+p; p+=o->rtsz;
     o->dreloc=buf+p; p+=o->rdsz;
     o->sym=buf+p; p+=o->symsz;
+    /* Each symtab record is >= 6 bytes (len,type,val, zero-length name), so
+       symsz/6 + 1 is a safe upper bound on the symbol count. */
+    o->syms = malloc((o->symsz/6 + 1) * sizeof(struct osym));
+    if(!o->syms){ fprintf(stderr,"ld_arm: out of memory for symbols\n"); exit(1); }
     { unsigned q=0; o->nsym=0;
       while(q<o->symsz){ int len=o->sym[q++]; int typ=o->sym[q++]; unsigned val=rd32(o->sym+q); q+=4;
         struct osym*s=&o->syms[o->nsym++]; memcpy(s->name,o->sym+q,len); s->name[len]=0; q+=len;
@@ -192,6 +204,7 @@ int main(int argc,char**argv)
         else if(argv[i][0]=='-') { /* ignore other flags (e.g. -X, -N from cc) */ }
         else load_obj(argv[i]);
     }
+    libdir[nld++] = "/usr/lib";   /* default system library path (searched after any -L) */
     /* pull in -l archives after all explicit objects (on-demand member linking) */
     { int j,d; for(j=0;j<nla;j++){
         char path[512]; int found=0;
@@ -247,6 +260,9 @@ int main(int argc,char**argv)
               for(pad=((objs[i].datasz+3)&~3)-objs[i].datasz; pad>0; pad--) fputc(0,of); }
           if(!omagic){ unsigned k; for(k=0;k<a_bss;k++) fputc(0,of); }  /* flat: zero bss */
           fclose(of);
+          /* An OMAGIC executable must be runnable; fopen() leaves it 0644.
+             (Relocatable object output, -r, is left non-executable.) */
+          if(omagic) chmod(out, 0755);
         }
         fprintf(stderr,"ENTRY %x\n",ea);
         if(verbose){ fprintf(stderr,"a_text=%u a_data=%u a_bss=%u\n",a_text,a_data,a_bss);
