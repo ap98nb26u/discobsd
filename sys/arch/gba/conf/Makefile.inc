@@ -49,6 +49,19 @@ POST_CLEANFS=	rm -f $(GBA_DEV_ROOTFS)
 ${FSIMG}:	distrib/gba/md.gba distrib/gba/mi.gba
 		rm -f $@ distrib/gba/_manifest
 		cat distrib/gba/mi.gba distrib/gba/md.gba > distrib/gba/_manifest
+		# Native ARM a.out C runtime (crt0.o + minimal libc.a) for the
+		# on-device toolchain, installed into the image's /usr/lib. ld_arm
+		# links DiscoBSD a.out objects, so the cross-built ELF libc is
+		# unusable on target; this runtime is produced by host-run copies of
+		# this port's own tools (as_arm + smlrc) from the arm-dev/rt sources.
+		# The toolchain binaries (cc/cpp/as/ld/ar/smlrc) come from the normal
+		# usr.bin build. /hello.c is a tiny on-device smoke-test program.
+		( cd ${TOPSRC}/usr.bin/as/arm-dev && sh build.sh )
+		$(MAKE) -C ${TOPSRC}/usr.bin/as/arm-dev/rt
+		mkdir -p ${DESTDIR}/usr/lib
+		cp ${TOPSRC}/usr.bin/as/arm-dev/rt/crt0.o ${DESTDIR}/usr/lib/crt0.o
+		cp ${TOPSRC}/usr.bin/as/arm-dev/rt/libc.a ${DESTDIR}/usr/lib/libc.a
+		cp ${TOPSRC}/distrib/gba/hello.c ${DESTDIR}/hello.c
 		$(FSUTIL) --new --size=`expr $(FS_MBYTES) \* 1024` --manifest=distrib/gba/_manifest $@ ${DESTDIR}
 		cp $@ $(GBA_DEV_ROOTFS)
 		d=`mktemp -d`; mkdir -p $$d/etc; \

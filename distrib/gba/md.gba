@@ -49,6 +49,29 @@ file /usr/include/machine/signal.h
 file /usr/include/machine/types.h
 
 #
+# Native C toolchain, so a program can be compiled ON the device:
+# cc drives cpp -> smlrc (Smaller C, arm backend) -> as (as_arm) -> ld
+# (ld_arm), linking /usr/lib/crt0.o + /usr/lib/libc.a into an OMAGIC a.out.
+# Arm/GBA-specific (the MIPS ports ship their own in md.pic32). /hello.c is
+# a tiny self-contained test program (no headers needed). Headers under
+# /usr/include can be added later for programs that #include them.
+#
+default
+filemode 0755
+file /usr/bin/cc
+file /usr/bin/cpp
+file /usr/bin/as
+file /usr/bin/ld
+file /usr/bin/ar
+file /usr/libexec/smlrc
+
+default
+dir /usr/lib
+file /usr/lib/crt0.o
+file /usr/lib/libc.a
+file /hello.c
+
+#
 # Raw (character) sd disks - GBA-specific (char major 19 = SD_CMAJOR in
 # sys/arch/gba/gba/conf.c; only this port has that cdevsw slot). Same minor
 # encoding as the shared block sd* nodes (unit<<3 | partition). They let
