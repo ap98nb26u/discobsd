@@ -48,6 +48,10 @@ AFLAGS=		-x assembler-with-cpp ${CWARNFLAGS} ${CMACHFLAGS}
 LDFLAGS=	-T ${_confdir}/${LDSCRIPT}
 LDFLAGS+=	-nostdlib -Map=$@.map -z noexecstack
 LDFLAGS+=	-static -marmelf
+# Unquoted linker-script path for use as a make prerequisite (config emits
+# LDSCRIPT quoted - fine for the shell in LDFLAGS, but quotes in a prereq
+# would be taken as part of the filename). GNU make strips them with subst.
+LDSCRIPT_DEP=	${_confdir}/$(subst ",,${LDSCRIPT})
 LDADD=		-L/usr/lib/gcc/arm-none-eabi/12.2.1/thumb/nofp -lgcc
 FIXBIN=		/mnt/c/msys64/usr/local/bin/gbafix.exe
 
@@ -105,7 +109,7 @@ CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 #	${SYSTEM_LD_TAIL}
 SYSTEM_OBJ=	locore0.o locore.o ${OBJS} ioconf.o
 SYSTEM_OBJ+=	sdcard.o
-SYSTEM_DEP=	Makefile ioconf.c machine sys .deps ${SYSTEM_OBJ}
+SYSTEM_DEP=	Makefile ioconf.c machine sys .deps ${LDSCRIPT_DEP} ${SYSTEM_OBJ}
 SYSTEM_LD_HEAD=	sh $S/conf/newvers.sh > vers.c; ${CC} ${CFLAGS} -c vers.c; rm -f $@
 SYSTEM_LD=	-@echo ${LD} ${LDFLAGS} '$${SYSTEM_OBJ}' vers.o -o $@ ${LDADD}; \
 		${LD} ${LDFLAGS} ${SYSTEM_OBJ} vers.o -o $@ ${LDADD}
