@@ -113,13 +113,18 @@ __user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
  * block device (mr0b); machparam.h/MAXMEM are unaffected (swap size is
  * independent of the user RAM window).
  *
- * To resize, change PSRAM_SWAP_SIZE alone. The region must stay clear of
- * the kernel image at ORIGIN(FLASH) (~132 KB today; the 8 MB start offset
- * leaves enormous margin) and below the EverDrive FPGA registers at
- * 0x09FC0000. Default 8 MB: 0x08800000 .. 0x09000000.
+ * To resize, change PSRAM_SWAP_SIZE/START. The region must stay clear of
+ * the kernel image at ORIGIN(FLASH) (~132 KB today; the 1 MB start offset
+ * leaves ample margin) and below the EverDrive FPGA registers at 0x09FC0000.
+ * Sized to use essentially all of PSRAM as swap: 30 MB at 0x08100000 ..
+ * 0x09F00000 (1 MB kernel margin below, 768 KB register margin above). This
+ * backs the "big swap, EWRAM stays the exec window" model - many processes
+ * (each parked at its real size) rather than one giant process; enough for
+ * e.g. a native Smaller C self-host pipeline whose stages each fit the 250 KB
+ * EWRAM window and park here between runs.
  */
-PSRAM_SWAP_SIZE		= 8M;
-PSRAM_SWAP_START	= ORIGIN(FLASH) + 8M;	/* 0x08800000 */
+PSRAM_SWAP_SIZE		= 30M;
+PSRAM_SWAP_START	= ORIGIN(FLASH) + 1M;	/* 0x08100000 .. 0x09F00000 */
 __swap_start		= PSRAM_SWAP_START;
 __swap_end		= PSRAM_SWAP_START + PSRAM_SWAP_SIZE;
 
