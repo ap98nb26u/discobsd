@@ -189,6 +189,7 @@ dir /usr/lib
 file /usr/lib/crt0.o
 file /usr/lib/libc.a
 file /hello.c
+file /ctest.c
 
 #
 # Raw (character) sd disks - GBA-specific (char major 19 = SD_CMAJOR in
