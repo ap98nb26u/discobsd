@@ -62,6 +62,7 @@ ${FSIMG}:	distrib/gba/md.gba distrib/gba/mi.gba
 		cp ${TOPSRC}/usr.bin/as/arm-dev/rt/crt0.o ${DESTDIR}/usr/lib/crt0.o
 		cp ${TOPSRC}/usr.bin/as/arm-dev/rt/libc.a ${DESTDIR}/usr/lib/libc.a
 		cp ${TOPSRC}/distrib/gba/hello.c ${DESTDIR}/hello.c
+		cp ${TOPSRC}/distrib/gba/ctest.c ${DESTDIR}/ctest.c
 		$(FSUTIL) --new --size=`expr $(FS_MBYTES) \* 1024` --manifest=distrib/gba/_manifest $@ ${DESTDIR}
 		cp $@ $(GBA_DEV_ROOTFS)
 		d=`mktemp -d`; mkdir -p $$d/etc; \
