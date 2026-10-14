@@ -138,6 +138,10 @@ SWIs deliberately NOT used:
     to the kernel's simulate_swi_via_inline_data() trampoline, written
     once at boot (machdep.c:startup()); userland calls through that
     pointer.  machparam.h:124
+    The CONCEPT of this simulated SWI (calling the kernel through a
+    fixed RAM vector, since the real SWI vector is BIOS ROM) is inspired
+    by the Prex Game Boy Advance port's approach; the implementation is
+    this port's own (no Prex code is used).
   - Power-saving BIOS calls (Halt swi 0x02, Stop, IntrWait,
     VBlankIntrWait) are unused. idle() busy-waits with IME toggling
     instead of BIOS Halt. (Screen blanking, roadmap #6, is implemented

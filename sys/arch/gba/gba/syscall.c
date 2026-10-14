@@ -103,6 +103,13 @@ static volatile unsigned saved_tf_psr;
 static volatile int gba_exec_switched_stack;
 
 /*
+ * The CONCEPT of a software-simulated SWI - userland calls the kernel through
+ * a pointer at a fixed RAM address (SYSCALL_VECTOR_ADDR) because the real GBA
+ * SWI vector at 0x18 is unwritable BIOS ROM - is inspired by the Prex Game Boy
+ * Advance port's approach. The implementation below is this port's own (no Prex
+ * code is used). See the BIOS/SWI section of sys/arch/gba/NOTES.hardware.
+ */
+/*
  * naked: without this, GCC emits its own "push {fp}" prologue for this
  * function (frame-pointer setup) - but the inline asm below returns by
  * jumping directly via "bx lr" at the very end, never falling through to
