@@ -16,7 +16,11 @@ LIBS		= -lc
 
 ARCH            = ${MACHINE_ARCH}
 
-OBJS            = smlrc.o lb.o
+# lb.c is the Smaller C MIPS runtime (MIPS inline asm, built with gcc under a
+# faked -D__SMALLER_C__); it cannot compile for arm. The arm build instead
+# links the native ARM crt0.o + libc.a (lib/), so lb.o is MIPS-only.
+OBJS_MACH!=	if [ x"${MACHINE_ARCH}" = x"arm" ]; then echo ; else echo lb.o; fi
+OBJS            = smlrc.o ${OBJS_MACH}
 
 all:		smlrc
 
