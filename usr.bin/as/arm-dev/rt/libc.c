@@ -40,3 +40,11 @@ int printf(char* fmt, ...){ char* ap; ap=(char*)&fmt+4; g_buf=0; dofmt(fmt,ap); 
 int sprintf(char* buf, char* fmt, ...){ char* ap; ap=(char*)&fmt+4; g_buf=buf; dofmt(fmt,ap); *g_buf=0; g_buf=0; return 0; }
 int putchar(int c){ char b; b=c; write(1,&b,1); return c; }
 int puts(char* s){ while(*s){ emit1(*s); s=s+1; } emit1(10); return 0; }
+
+char _ctype_[1+256] = { 0,040,040,040,040,040,040,040,040,040,040|010,040|010,040|010,040|010,040|010,040,040,040,040,040,040,040,040,040,040,040,040,040,040,040,040,040,040,010|0200,020,020,020,020,020,020,020,020,020,020,020,020,020,020,020,04,04,04,04,04,04,04,04,04,04,020,020,020,020,020,020,020,01|0100,01|0100,01|0100,01|0100,01|0100,01|0100,01,01,01,01,01,01,01,01,01,01,01,01,01,01,01,01,01,01,01,01,020,020,020,020,020,020,02|0100,02|0100,02|0100,02|0100,02|0100,02|0100,02,02,02,02,02,02,02,02,02,02,02,02,02,02,02,02,02,02,02,02,020,020,020,020,040 };
+
+char* strrchr(char* s, int c){ char* r; r=0; while(*s){ if(*s==c) r=s; s=s+1; } if(c==0) return s; return r; }
+char* strstr(char* h, char* n){ char* a; char* b; if(*n==0) return h; while(*h){ a=h; b=n; while(*a && *b && *a==*b){ a=a+1; b=b+1; } if(*b==0) return h; h=h+1; } return 0; }
+char* strncat(char* d, char* s, int n){ char* r; r=d; while(*d) d=d+1; while(n>0 && *s){ *d=*s; d=d+1; s=s+1; n=n-1; } *d=0; return r; }
+char* memchr(char* s, int c, int n){ while(n>0){ if(*s==c) return s; s=s+1; n=n-1; } return 0; }
+int abs(int x){ if(x<0) return 0-x; return x; }
