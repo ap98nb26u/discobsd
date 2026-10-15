@@ -28,6 +28,7 @@
 #include <sys/param.h>
 #include <sys/conf.h>
 #include <sys/user.h>
+#include <sys/proc.h>
 #include <sys/ioctl.h>
 #include <sys/tty.h>
 #include <sys/systm.h>
@@ -368,6 +369,35 @@ swkbd_poll(void)
 	down = (uint16_t)(~raw & 0x03FF);
 	fresh = (uint16_t)(down & ~swkbd_prev);
 	swkbd_prev = down;
+
+	/*
+	 * Hardware interrupt chord: L + R + SELECT held together sends SIGINT
+	 * to the console tty's foreground process group - a "hardware Ctrl-C".
+	 * Its purpose is an always-available escape from a full-screen graphics
+	 * program (one holding /dev/tft0, where the soft keyboard is hidden):
+	 * the SIGINT ends it, its close() releases the panel (gpanel_close
+	 * clears the screen) and the shell returns.  Signalling the pgrp
+	 * directly - rather than injecting the interrupt char via ttyinput() -
+	 * makes the escape work even if the program put the tty in raw mode.
+	 * Edge-triggered (fires once, when the last of the three goes down) so a
+	 * held chord does not storm signals.  Like a real Ctrl-C on this port,
+	 * the signal is delivered on the target's next syscall/trap return (this
+	 * kernel has no preemptive signal delivery to a user compute loop), so a
+	 * program that draws continuously - any normal graphics app - is
+	 * interrupted at once, while a pathological no-syscall spin would not be.
+	 */
+#define SWKBD_ESC_CHORD	(KEY_L | KEY_R | KEY_SELECT)
+	if ((down & SWKBD_ESC_CHORD) == SWKBD_ESC_CHORD &&
+	    (fresh & SWKBD_ESC_CHORD)) {
+		struct tty *tp = &uartttys[CONS_MINOR];
+
+		if (tp->t_pgrp) {
+			extern void console_activity(void);
+			console_activity();	/* unblank if the saver had hidden it */
+			gsignal(tp->t_pgrp, SIGINT);
+		}
+		return;				/* consume the chord this frame */
+	}
 
 	/*
 	 * Any button held is console activity: keep the screen awake (and
