@@ -1,0 +1,285 @@
+GBA graphics: design for a gpanel backend (roadmap #9)
+======================================================
+
+Status: DESIGN (branch gba-gpanel). No driver code yet. This file is the
+plan; it is a map, not a spec, and will be trimmed/moved once the driver
+lands.
+
+
+1. GOAL
+-------
+
+Expose a pixel-addressable graphics device on the GBA so the existing
+DiscoBSD graphics stack - the gpanel framework (/dev/tft0, sys/sys/gpanel.h,
+lib/libgpanel, share/examples/gpanel) - runs unchanged on real GBA hardware
+and in mGBA.  "Unchanged" is the whole point: we are NOT inventing a GBA
+graphics API, we are adding a GBA BACKEND under the portable API that
+pic32 already uses, so the example programs (pixel, line, rect, circle,
+fill, color, font, and the games flappy / tftetris) and libgpanel work as-is.
+
+
+2. WHAT ALREADY EXISTS (do not reinvent)
+----------------------------------------
+
+Portable layer (reuse verbatim where possible):
+  - sys/sys/gpanel.h   - the ioctl ABI: GPANEL_CLEAR/PIXEL/LINE/RECT/FILL/
+                         CIRCLE/IMAGE/CHAR/TEXT, the gpanel_font_t glyph
+                         format, and the kernel-side struct gpanel_hw
+                         backend (set_pixel / fill_rectangle / draw_image /
+                         draw_glyph) + globals gpanel_width/gpanel_height.
+  - lib/libgpanel      - userland wrappers (gpanel_open/clear/pixel/line/
+                         rect/fill/circle/image/char/text/text_width/
+                         fill_triangle).  ALREADY built for ARM (lib/Makefile
+                         SUBDIR) as lib/libgpanel.a - what the cross-built GBA
+                         userland links; there is also an ARM lib/libc_aout/
+                         libgpanel for the on-device native a.out toolchain.
+  - share/examples/gpanel - the "graphics commands": pixel/line/rect/fill/
+                         circle/color/font/speed + games flappy, tftetris.
+                         Fonts (5x7, 6x9, lucidasans*, verdana7, digits*)
+                         are plain .c arrays in gpanel_font_t form.
+
+PIC32 reference driver: sys/arch/pic32/dev/gpanel.c (705 lines).  It is
+mostly machine-independent: the software rasterizers gpanel_draw_line,
+gpanel_draw_circle, gpanel_draw_char/text and the GPANEL_* ioctl dispatch
+all run on the abstract `hw` ops.  Only the lower part is PIC32-specific
+(SPI/parallel bus access read_reg16/32, controller probe/attach, the
+ili9341/st7781/... init_display backends, draw_logo).  GPANEL_MAJOR = 16
+(sys/sys/conf.h).
+
+GBA side today: video is already Mode 3 (240x160, 16bpp linear framebuffer
+at VRAM = 0x06000000).  gba_text.c writes glyph pixels straight into it
+(VRAM[y*240 + x] = colour, BGR555).  So the GBA is ALREADY the exact kind
+of framebuffer gpanel wants - a gpanel pixel is one VRAM store.  conf.c
+cdevsw slot 16 ("hxtft, gpanel, sgpanel") is reserved and currently NOCDEV.
+
+
+3. ARCHITECTURE
+---------------
+
+Backend ops needed by the portable raster (struct gpanel_hw):
+    set_pixel(x,y,color)                 -> VRAM[y*240 + x] = conv(color)
+    fill_rectangle(x0,y0,x1,y1,color)    -> clamped double loop of stores
+    draw_image(x,y,w,h,data)             -> blit row-major 16-bit pixels
+    draw_glyph(font,color,bg,x,y,w,bits) -> per-row bit unpack like gba_text
+    resize(w,h)                          -> fixed 240x160, effectively no-op
+gpanel_width = 240, gpanel_height = 160.
+
+All of line/rect/circle/char/text/fill_triangle come "for free" from the
+portable rasterizers once those four primitives exist.
+
+Driver-structure decision (recommended): a SELF-CONTAINED GBA driver
+    sys/arch/gba/dev/gba_gpanel.c
+that contains (a) the GPANEL_* open/close/ioctl dispatch, (b) the software
+rasterizers, and (c) the trivial VRAM backend.  The rasterizers are copied
+from pic32 gpanel.c's MI portion (lines ~269-565) with the bus/probe/logo
+code dropped.
+
+Rationale over the alternatives:
+  - vs. "compile pic32/dev/gpanel.c for GBA": that file drags in PIC32 bus
+    access and controller probing; #ifdef'ing it up is uglier than a clean
+    GBA file and couples two arches.
+  - vs. "refactor gpanel.c into an MI core + per-arch backend": that is the
+    tidy long-term shape, but it EDITS the working pic32 driver and its
+    files/conf - risk to another port for no GBA benefit right now.  The
+    standing rule is MI-safe + don't break what works.  So: ship the
+    self-contained GBA driver first (zero pic32 changes); leave a TODO to
+    hoist the shared rasterizers into sys/dev/gpanel_raster.c later and have
+    BOTH arches include it.  The duplicated code is ~150 lines of stable,
+    well-understood raster math.
+
+Forward-compatibility requirement: expose the GBA framebuffer primitives
+(set_pixel / fill_rectangle / blit-scroll / xor-cell / clear / draw_glyph)
+as KERNEL-INTERNAL functions in gba_gpanel.c from day one, not buried in the
+ioctl switch.  The char-device ioctls call them, and - crucially - the text
+console and swkbd can LATER be migrated onto the same functions (see section
+5.1).  Designing Phase 1 this way means the convergence is a rewiring of
+callers, not a rewrite.
+
+
+4. COLOUR FORMAT  (the one real gotcha)
+---------------------------------------
+
+The portable code and the example data assume 16-bit RGB565 (the pic32 TFT
+panels' native order: R<<11 | G<<5 | B).  The GBA framebuffer is 15-bit
+BGR555 (B<<10 | G<<5 | R, bit15 unused).  So the GBA backend's set_pixel
+(and fill/image/glyph) must convert RGB565 -> BGR555:
+
+    r = (c >> 11) & 0x1f;        /* 5 bits */
+    g = (c >> 6)  & 0x1f;        /* top 5 of the 6 green bits */
+    b =  c        & 0x1f;        /* 5 bits */
+    bgr555 = (b << 10) | (g << 5) | r;
+
+Done once in set_pixel so every primitive, image and glyph is correct, and
+so the shipped fonts/examples (written for RGB565) show the right colours.
+gba_text.c keeps its own BGR555 constants and is untouched.  (Image data in
+share/examples is RGB565 too, so it converts consistently.)
+
+
+5. CONSOLE / KEYBOARD COEXISTENCE  (must-fix, or graphics gets scribbled on)
+---------------------------------------------------------------------------
+
+The text console and graphics share the ONE Mode 3 framebuffer.  Two async
+writers currently paint it from idle() (machdep.c) and WILL corrupt a
+graphics screen if left running:
+  - the block cursor blink: gtxt_cursor(lbolt < hz/2)       (machdep.c:721)
+  - the on-screen keyboard:  swkbd_poll()                    (machdep.c:247)
+  - the idle screen-blank:   gtxt_blank(1)                   (machdep.c:703)
+
+Plan: a single "graphics active" flag owned by the gpanel driver.
+  - gpanel_open()  sets it (and may clear the screen);
+  - gpanel_close() clears it (console resumes; see redraw note below).
+  - machdep.c idle() skips the cursor-blink and the screen-blank while it is
+    set; swkbd stays hidden (do not draw the keyboard over graphics).
+  - gba_text.c / console output: harmless to leave as-is (the app owns the
+    screen while open), but gtxt_putc should likewise no-op or be avoided
+    while graphics is active - simplest is that nothing writes to the TTY
+    during a full-screen graphics program anyway.
+Expose it as e.g. int gba_gfx_active(void) that machdep.c/swkbd.c test;
+keep the flag in gba_gpanel.c.
+
+On close there is NO text backing store (the console is pixels only), so
+the pre-graphics text cannot be restored.  v1 behaviour: on close, clear to
+black (or leave the last frame) and let the next console output scroll from
+the current cursor row - same as returning from vi today.  A fancier
+"redraw the console" is out of scope for v1 (but see 5.1, which makes it
+natural).
+
+
+5.1  CONVERGENCE: one framebuffer owner (the clean fix for section 5)
+---------------------------------------------------------------------
+
+The interim flag in section 5 papers over the real issue: the GBA
+framebuffer currently has THREE independent writers (console, swkbd, a
+future /dev/tft0 app) with no owner.  The structural fix is to converge the
+existing GBA graphics foundation onto the panel layer so there is exactly
+ONE owner of VRAM, and arbitration lives in that one place instead of being
+sprinkled across machdep.c / swkbd.c / gba_text.c.  (User-requested
+direction; adopt it as the end-state, after the self-contained driver
+proves out.)
+
+End-state: gba_gpanel.c owns VRAM and exports the kernel-internal
+primitives from section 3.  Its clients are:
+    - the text console (gba_text.c)  - a built-in client;
+    - the on-screen keyboard (swkbd.c) - an overlay client;
+    - a userland process via /dev/tft0 - an exclusive client.
+The panel layer tracks the active owner; while a userland client holds the
+panel, the console/swkbd draws are suppressed at this single boundary, and
+on release the console redraws itself.  Gotcha #2 then disappears: there is
+no async scribble because there is one arbiter.
+
+Scope (why this is tractable, not a rewrite): gba_text.c's direct VRAM
+pokes are already concentrated in four helpers -
+    gtxt_shift / gtxt_shift_full  -> panel blit-scroll (bulk row copy)
+    gtxt_draw_cell                -> panel draw_glyph (also swkbd's only path)
+    gtxt_cursor                   -> panel xor-cell  (p[] ^= 0x7FFF invert)
+    gtxt_cls                      -> panel clear
+and swkbd.c already draws ONLY through gtxt_draw_cell.  So converging is:
+route those helpers through the panel primitives (same pixels, just one
+owner), move the owner flag/arbitration into the panel, and - the one real
+addition - give the console a small CHARACTER backing store (<=40x20 cells
++ attribute, ~1-2 KB) so it can redraw after a graphics app or screen-blank
+(today it is pixels-only and cannot restore; this also cleans up the blank
+restore and would let vi repaint without a full app redraw).  Note the two
+ops the gpanel ABI lacks but the console needs - a scroll/blit and an
+xor-cursor - stay as internal panel entry points, not gpanel ioctls.
+
+Cost / risk: GBA-internal only (gba_text.c, swkbd.c, machdep.c idle hooks,
+gba_gpanel.c) - still MI-safe, no other arch touched.  But it edits the
+working console, so it is deliberately a LATER phase (see section 9), done
+once the panel primitives are trusted; the section-5 flag ships first and is
+removed when this lands.
+
+
+6. VIDEO MODE
+-------------
+
+v1: keep Mode 3 (single 240x160x16bpp buffer).  Pros: already active, full
+resolution, 16bpp, zero mode-switch, shares the console's VRAM.  Con: no
+double buffering, so animation (flappy/tetris) can tear/flicker since draws
+land mid-scanout.  Acceptable for v1 and for static demos (pixel/rect/
+circle/font/color).
+
+Future (note, not v1): Mode 5 gives two 160x128x16bpp pages (page-flip via
+DISPCNT bit4 + the 0x0600A000 second frame) for flicker-free animation, at
+reduced resolution; Mode 4 gives two 240x160x8bpp paletted pages.  If
+animation quality matters, add a page-flip ioctl / mode later.  gpanel has
+no page-flip concept, so this would be a GBA extension ioctl.
+
+
+7. KERNEL INTEGRATION (mechanical)
+----------------------------------
+
+  - New file sys/arch/gba/dev/gba_gpanel.c; add to sys/arch/gba/conf/files.gba
+    (standard, all three configs GBA/GBAED/GBALOG).
+  - conf.c cdevsw slot 16: replace NOCDEV with gpanel_open/close/norw(read)/
+    gpanel_write(or nowrite)/gpanel_ioctl/nullstop/0/seltrue/... and #include
+    the gpanel header; guard with "#if GPANEL_MAJOR != 16 #error".  (read/
+    write unused: gpanel is ioctl-driven, like the pic32 slot.)
+  - Re-run config in each compile dir (GBA, GBAED, GBALOG) so files.gba is
+    picked up - ioconf.c is generated+tracked and its reconfig rule is
+    mtime-based (see the RTC/ioconf gotcha memo), so regenerate deliberately.
+  - distrib/gba/mi.gba: add  cdev /dev/tft0  major 16  minor 0  mode 666.
+    (libgpanel/examples default to "/dev/tft0".)
+
+
+8. USERLAND
+-----------
+
+  - libgpanel: lib/libgpanel.a is already built for ARM (lib/Makefile) and
+    is what the cross-built GBA example programs link; the on-device native
+    toolchain has its own ARM lib/libc_aout/libgpanel.  Nothing to port here;
+    just link the demos against it in their GBA build.
+  - Example programs: build a subset for the GBA image and/or ship sources
+    for the on-device cc.  Start with the STATIC demos (no input):
+    pixel, line, rect, circle, fill, color, font - these prove the pipeline.
+    Then the interactive ones.
+  - Input for interactive demos (flappy/tftetris): on pic32 they read the
+    tty / stdin.  On GBA the "keyboard" is swkbd, which we hide during
+    graphics.  So interactive demos need either (a) read the GBA buttons
+    (REG_KEYINPUT) - cleanest for games - or (b) a minimal key path that
+    still works with graphics active.  Treat games as a later phase; v1 is
+    the static demos + a confidence image.
+
+Test harness: the same libmgba route used for audio works for video too -
+mgbarun/mgbadump already set a video buffer (core->setVideoBuffer); a small
+tool can dump the 240x160 framebuffer to a PPM/PNG after N frames and diff
+it against the expected shape (e.g. "rect drew a red box at x,y").  This
+gives automated, ear-free verification before real-HW.
+
+
+9. PHASING
+----------
+
+  Phase 1  Driver + node + one static demo.  gba_gpanel.c (kernel-internal
+           primitives per section 3 + the GPANEL_* ioctls using them: pixel/
+           fill/rect/line/circle + CLEAR size report), slot 16, /dev/tft0,
+           the interim graphics-active flag gating idle() redraws (section 5).
+           Verify with the framebuffer-dump harness: clear + rects/lines/
+           circles.
+  Phase 2  draw_image + draw_glyph/text + fonts; run font/color/image demos.
+  Phase 3  Double buffering (Mode 5 page flip) + button input; run
+           flappy/tftetris.  (Optional / quality.)
+  Phase 4  CONVERGENCE (section 5.1): route gba_text.c + swkbd.c through the
+           panel primitives, add the console char backing store, move owner
+           arbitration into the panel, delete the section-5 flag.  This is
+           the user-requested end-state; it RETIRES gotcha #2 structurally.
+           Can be pulled earlier (after Phase 1) if the coexistence flag
+           proves fiddly, since Phase 1 already exposes the needed primitives.
+
+  MI-safety: ALL phases touch ONLY sys/arch/gba/* and distrib/gba/mi.gba -
+  no pic32/stm32, no shared sys/ edits (gpanel.h is reused read-only).  The
+  separate "hoist shared raster to sys/dev" dedup (section 3) is the only
+  step that would touch other arches and is left for its own reviewed PR.
+
+
+10. OPEN QUESTIONS (decide during Phase 1)
+------------------------------------------
+
+  - Clip policy: clamp out-of-range pixels (safe) vs. trust the app.  pic32
+    draw_char clamps; set_pixel does not.  GBA must clamp in set_pixel (a
+    stray VRAM store past 240x160 hits other VRAM/OAM).  -> clamp.
+  - Should gpanel_open() force the screen to black, or inherit whatever the
+    console left?  Leaning: clear to black on open (matches gpanel_clear
+    being the usual first call anyway) but make it cheap.
+  - Keep gba_text's Mode-3 assumption documented as a shared invariant so a
+    future Mode-5 double-buffer change updates both.
