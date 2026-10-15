@@ -31,6 +31,7 @@
 #endif
 
 #include <gba/dev/gba_audio.h>
+#include <gba/dev/gba_gpanel.h>
 
 #ifdef PTY_ENABLED
 #include <sys/pty.h>
@@ -240,8 +241,13 @@ const struct cdevsw cdevsw[] = {
 	{	/* 15 - picga */	/* Ignore this for now - it's WIP. */
 		NOCDEV
 	},
-	{	/* 16 - hxtft, gpanel, sgpanel */
-		NOCDEV
+	{	/* 16 - gpanel: graphics panel, /dev/tft0 (GBA Mode 3 framebuffer) */
+#if GPANEL_MAJOR != 16
+#error Wrong GPANEL_MAJOR value!
+#endif
+		gpanel_open,	gpanel_close,	norw,		norw,
+		gpanel_ioctl,	nullstop,	0,		seltrue,
+		nostrategy,	0,		0,
 	},
 	{	/* 17 - audio: DirectSound PCM, /dev/audio */
 #if AUDIO_MAJOR != 17
