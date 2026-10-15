@@ -1,9 +1,31 @@
 GBA graphics: design for a gpanel backend (roadmap #9)
 ======================================================
 
-Status: DESIGN (branch gba-gpanel). No driver code yet. This file is the
-plan; it is a map, not a spec, and will be trimmed/moved once the driver
-lands.
+Status: IN PROGRESS (branch gba-gpanel).  Phase 1 (driver /dev/tft0),
+Phase 4 (console/panel convergence) and the L+R+SELECT escape chord are
+implemented; Phases 2/3 remainder (ship demos, Mode 5 double-buffer + game
+input) and Phase 4b (console backing-store redraw) remain.  This file is the
+plan + a few implementation notes; a map, not a spec.
+
+
+0. ESCAPE / FULL-SCREEN APP GUIDELINE  (read first if writing a demo)
+--------------------------------------------------------------------
+
+L+R+SELECT held together is a "hardware Ctrl-C": swkbd_poll() sends SIGINT
+to the console tty's foreground pgrp, so a program that owns /dev/tft0 (soft
+keyboard hidden) can always be interrupted and the shell regained (its
+close() -> gpanel_close() clears the screen).
+
+IMPORTANT consequence for app authors: like a real Ctrl-C on this port, the
+signal is delivered on the target's next SYSCALL/TRAP return - there is no
+preemptive delivery to a user CPU-spin.  So a program that displays a static
+image must BLOCK (pause(), or a read), NOT busy-spin `for(;;);`, or it can
+neither be Ctrl-C'd nor escaped by the chord.  Programs that animate (draw
+every frame = continuous ioctls) are interruptible as-is.  The bundled demos
+use `for(;;) pause();` for exactly this reason.  (A truly bulletproof escape
+from an accidental no-syscall spin would need preemptive signal delivery on
+the Timer0 IRQ return - an AST path the port does not have; a deliberate,
+risky kernel change left for later.)
 
 
 1. GOAL
