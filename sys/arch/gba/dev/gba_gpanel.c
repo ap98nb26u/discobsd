@@ -294,6 +294,14 @@ gpanel_open(dev_t dev, int flag, int mode)
 int
 gpanel_close(dev_t dev, int flag, int mode)
 {
+	/*
+	 * Release the panel back to the console.  Clear to black first (the
+	 * app's last frame is not the console's to keep, and there is no text
+	 * backing store yet - NOTES.graphics 5.1), then drop the owner flag so
+	 * console/keyboard drawing resumes; the next console output paints on
+	 * the cleared screen.
+	 */
+	gba_fb_fill(0, 0, GFB_W - 1, GFB_H - 1, 0);
 	gpanel_active = 0;
 	return 0;
 }

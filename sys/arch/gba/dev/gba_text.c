@@ -21,6 +21,18 @@
 
 extern const unsigned char gtxt_font[2048];
 
+/*
+ * True while a userland process owns the graphics panel (/dev/tft0).  The
+ * console and the on-screen keyboard share the one Mode 3 framebuffer with
+ * it, so every function here that writes VRAM bows out while it is set: the
+ * panel is the sole drawer, and the console's text STATE still advances so
+ * output is not lost, it just is not painted until the panel is released
+ * (gpanel_close clears the screen; a backing-store redraw is a later step).
+ * This gives the framebuffer a single owner - the structural fix for the
+ * console/graphics scribble (NOTES.graphics section 5 / 5.1).
+ */
+extern int gba_gfx_active(void);
+
 #define GTXT_SCREEN_W   240
 #define GTXT_SCREEN_H   160
 #define GTXT_CHAR_W     6	/* 6px-wide cell -> 240/6 = 40 columns */
@@ -66,6 +78,8 @@ gtxt_shift(void)
     volatile unsigned short *end = VRAM + (GTXT_SCREEN_W * (GTXT_CONS_H - GTXT_CHAR_H));
     volatile unsigned short *tail = VRAM + (GTXT_SCREEN_W * GTXT_CONS_H);
 
+    if (gba_gfx_active())
+        return;
     for (; p < end; p++)
         *p = p[GTXT_ROW_PIXELS];
     for (; p < tail; p++)
@@ -84,6 +98,8 @@ gtxt_shift_full(void)
     volatile unsigned short *end = VRAM + (GTXT_SCREEN_W * (GTXT_SCREEN_H - GTXT_CHAR_H));
     volatile unsigned short *tail = VRAM + (GTXT_SCREEN_W * GTXT_SCREEN_H);
 
+    if (gba_gfx_active())
+        return;
     for (; p < end; p++)
         *p = p[GTXT_ROW_PIXELS];
     for (; p < tail; p++)
@@ -118,6 +134,8 @@ gtxt_draw_cell(char c, int col, int row, unsigned short fg, unsigned short bg)
     int r, col2;
     unsigned char bits;
 
+    if (gba_gfx_active())		/* panel owned: console + swkbd stay silent */
+        return;
     for (r = 0; r < GTXT_CHAR_H; r++) {
         bits = glyph[r];
         for (col2 = 0; col2 < GTXT_CHAR_W; col2++) {
@@ -185,6 +203,9 @@ gtxt_cursor(int on)
     volatile unsigned short *p;
     int row, col, cx, cy;
 
+    if (gba_gfx_active())
+        return;
+
     /*
      * A glyph typed in the last column holds a deferred wrap: gtxt_curx
      * == GTXT_COLS and the logical cursor sits at the START of the next
@@ -224,8 +245,9 @@ gtxt_cls(void)
     volatile unsigned short *p = VRAM;
     volatile unsigned short *end = VRAM + (GTXT_SCREEN_W * GTXT_SCREEN_H);
 
-    for (; p < end; p++)
-        *p = gtxt_bg;
+    if (!gba_gfx_active())
+        for (; p < end; p++)
+            *p = gtxt_bg;
     gtxt_curx = 0;
     gtxt_cury = GTXT_BOTTOM;	/* start at the bottom, like a terminal */
     gtxt_cursor_on = 0;		/* cleared along with the rest of VRAM */
