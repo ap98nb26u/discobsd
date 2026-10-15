@@ -700,7 +700,9 @@ idle(void)
 		 */
 		extern void gtxt_blank(int);
 		extern int gtxt_is_blanked(void);
+		extern int gba_gfx_active(void);
 		if (console_blank_secs > 0 && !gtxt_is_blanked() &&
+		    !gba_gfx_active() &&
 		    (time.tv_sec - console_last_active) >= console_blank_secs)
 			gtxt_blank(1);
 
@@ -718,7 +720,7 @@ idle(void)
 		 * blocks or smears output.
 		 */
 		extern void gtxt_cursor(int on);
-		if (!gtxt_is_blanked())
+		if (!gtxt_is_blanked() && !gba_gfx_active())
 			gtxt_cursor(lbolt < hz / 2);
 	}
 
