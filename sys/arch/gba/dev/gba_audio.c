@@ -129,6 +129,26 @@
 #define ASAMPLES_ST	4608		/* stereo per-channel ring; mult of 16 */
 #define AGUARD_ST	(HALF - ASAMPLES_ST)		/* 512 */
 
+/*
+ * Producer safety reserve.  The sound DMA reads AHEAD of the software play
+ * position a_play (by the up-to-32-sample FIFO occupancy, plus any slack
+ * between a_play's Timer3-derived estimate and the hardware's true output
+ * point).  If the ring is allowed to fill completely, the producer's write
+ * front a_wr coincides with a_play, leaving only that ~32-sample FIFO margin
+ * between the producer and the samples the DMA is about to read: the producer
+ * then overwrites a frame AS the DMA reads it.  Within a constant tone that is
+ * inaudible (same data either lap), but at a segment boundary - and, in stereo,
+ * because a frame is written as two separate stores (left ring then right ring)
+ * - the DMA reads a torn frame: left from the new lap, right from the old (or
+ * vice versa), i.e. channel bleed plus a crackle.  The first wrap's
+ * audio_dma_rewind() happens to restore a clean margin, which is why the defect
+ * is heard only on the first ring lap.  Reserving ARESERVE samples (never
+ * filling the last of the ring) keeps a_wr a safe distance behind the DMA read
+ * front at all times, on the first lap as well.  Costs ARESERVE samples of
+ * buffering (negligible: 256 of 4608/9216).
+ */
+#define ARESERVE	256		/* mult of 16; >= FIFO occupancy + slack */
+
 static signed char abuf[ASAMPLES + AGUARD];
 #define RBASE		(&abuf[HALF])	/* stereo right-channel ring base */
 
@@ -355,6 +375,7 @@ audioopen(dev_t dev, int flag, int mode)
 	 *   2 /dev/audiost    stereo 8192 Hz   (interleaved L,R,L,R...)
 	 *   3 /dev/audiost16  stereo 16384 Hz
 	 *   4 /dev/audio4     mono   4096 Hz
+	 *   5 /dev/audiost4   stereo 4096 Hz
 	 * All rates divide the 16.78 MHz timer clock exactly (reloads 0xF000 /
 	 * 0xF800 / 0xFC00); 16384 is twice the 8192 default and half the GBA's
 	 * native 32768 Hz output, unlike a round 16000 the timer cannot hit.
@@ -369,6 +390,7 @@ audioopen(dev_t dev, int flag, int mode)
 	case 2: audio_rate = AUDIO_RATE_DEF; audio_stereo = 1; break;
 	case 3: audio_rate = 16384;          audio_stereo = 1; break;
 	case 4: audio_rate = 4096;           audio_stereo = 0; break;
+	case 5: audio_rate = 4096;           audio_stereo = 1; break;
 	default: return ENXIO;
 	}
 	if (audio_open)
@@ -429,6 +451,12 @@ audiowrite(dev_t dev, struct uio *uio, int flag)
 	 * repoints the DMA onto not-yet-refilled samples (a ~0.5 s stale echo).
 	 */
 	unsigned prebuf = audio_stereo ? (a_rsize - a_rsize / 4) : (a_rsize / 2);
+	/*
+	 * Usable capacity, one ARESERVE short of the physical ring, so the
+	 * producer never writes the frame the DMA is about to read (see
+	 * ARESERVE).  prebuf stays below this (3/4 and 1/2 of the ring).
+	 */
+	unsigned cap = a_rsize - ARESERVE;
 
 	for (;;) {
 		if (audio_stereo) {
@@ -441,12 +469,12 @@ audiowrite(dev_t dev, struct uio *uio, int flag)
 			break;
 
 		s = splhigh();
-		while (a_used >= a_rsize) {		/* ring full: wait for drain */
+		while (a_used >= cap) {			/* ring full: wait for drain */
 			if (!audio_playing && a_used > 0)
 				audio_hw_start();
 			sleep((caddr_t)&a_used, PPIPE);
 		}
-		free = a_rsize - a_used;
+		free = cap - a_used;
 		splx(s);
 
 		/* n = per-channel samples to add this pass, bounded by the free
