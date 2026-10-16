@@ -11,10 +11,12 @@ plan + a few implementation notes; a map, not a spec.
 0. ESCAPE / FULL-SCREEN APP GUIDELINE  (read first if writing a demo)
 --------------------------------------------------------------------
 
-L+R+SELECT held together is a "hardware Ctrl-C": swkbd_poll() sends SIGINT
+A+B+START held together is a "hardware Ctrl-C": swkbd_poll() sends SIGINT
 to the console tty's foreground pgrp, so a program that owns /dev/tft0 (soft
 keyboard hidden) can always be interrupted and the shell regained (its
-close() -> gpanel_close() clears the screen).
+close() -> gpanel_close() clears the screen).  (The combo avoids L/R/SELECT:
+the GBA key matrix cannot distinguish certain 3-key combos - hardware key
+ghosting - and L+R+SELECT is one of them; A+B+START reads cleanly.)
 
 IMPORTANT consequence for app authors: like a real Ctrl-C on this port, the
 signal is delivered on the target's next SYSCALL/TRAP return - there is no

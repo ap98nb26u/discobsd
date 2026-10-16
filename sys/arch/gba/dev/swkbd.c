@@ -371,7 +371,7 @@ swkbd_poll(void)
 	swkbd_prev = down;
 
 	/*
-	 * Hardware interrupt chord: L + R + SELECT held together sends SIGINT
+	 * Hardware interrupt chord: A + B + START held together sends SIGINT
 	 * to the console tty's foreground process group - a "hardware Ctrl-C".
 	 * Its purpose is an always-available escape from a full-screen graphics
 	 * program (one holding /dev/tft0, where the soft keyboard is hidden):
@@ -385,8 +385,13 @@ swkbd_poll(void)
 	 * kernel has no preemptive signal delivery to a user compute loop), so a
 	 * program that draws continuously - any normal graphics app - is
 	 * interrupted at once, while a pathological no-syscall spin would not be.
+	 *
+	 * The combo is A+B+START, not something with L/R/SELECT: the GBA key
+	 * matrix cannot distinguish certain 3+ key combinations (hardware key
+	 * ghosting), and L+R+SELECT happens to be one of the indistinguishable
+	 * ones.  A+B+START reads cleanly on real hardware.
 	 */
-#define SWKBD_ESC_CHORD	(KEY_L | KEY_R | KEY_SELECT)
+#define SWKBD_ESC_CHORD	(KEY_A | KEY_B | KEY_START)
 	if ((down & SWKBD_ESC_CHORD) == SWKBD_ESC_CHORD &&
 	    (fresh & SWKBD_ESC_CHORD)) {
 		struct tty *tp = &uartttys[CONS_MINOR];
