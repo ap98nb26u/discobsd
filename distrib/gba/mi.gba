@@ -384,9 +384,15 @@ minor 0
 cdev /dev/tft0
 major 16
 minor 0
-cdev /dev/tftin0
+mode 666
+cdev /dev/tft1
 major 16
 minor 1
+mode 666
+cdev /dev/tft2
+major 16
+minor 2
+mode 666
 
 #
 # DirectSound PCM audio.
@@ -414,10 +420,6 @@ mode 666
 cdev /dev/audiost4
 major 17
 minor 5
-mode 666
-cdev /dev/tft0
-major 16
-minor 0
 mode 666
 
 #

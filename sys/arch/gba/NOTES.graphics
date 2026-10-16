@@ -1,11 +1,12 @@
 GBA graphics: design for a gpanel backend (roadmap #9)
 ======================================================
 
-Status: IN PROGRESS (branch gba-gpanel).  Phase 1 (driver /dev/tft0),
-Phase 4 (console/panel convergence) and the L+R+SELECT escape chord are
-implemented; Phases 2/3 remainder (ship demos, Mode 5 double-buffer + game
-input) and Phase 4b (console backing-store redraw) remain.  This file is the
-plan + a few implementation notes; a map, not a spec.
+Status: IN PROGRESS (branch gba-gpanel).  Phase 1 (driver /dev/tft0), Phase 2
+(image/glyph/font demos), Phase 3 (Mode 5 double buffering /dev/tft1,tft2 +
+button input) and Phase 4 (console/panel convergence) are implemented and
+real-HW verified, along with the A+B+START / A+B+R escape chords.  Phase 4b
+(console backing-store redraw) remains.  This file is the plan + a few
+implementation notes; a map, not a spec.
 
 
 0. ESCAPE / FULL-SCREEN APP GUIDELINE  (read first if writing a demo)
@@ -217,17 +218,32 @@ removed when this lands.
 6. VIDEO MODE
 -------------
 
-v1: keep Mode 3 (single 240x160x16bpp buffer).  Pros: already active, full
-resolution, 16bpp, zero mode-switch, shares the console's VRAM.  Con: no
-double buffering, so animation (flappy/tetris) can tear/flicker since draws
-land mid-scanout.  Acceptable for v1 and for static demos (pixel/rect/
-circle/font/color).
+Mode 3 (single 240x160x16bpp buffer) is the default panel, /dev/tft0.  Pros:
+full resolution, 16bpp, zero mode-switch, shares the console's VRAM.  Con: no
+double buffering, so a full-screen redraw every frame can tear.  It is the
+right choice for static demos and for INCREMENTAL animation (erase+redraw only
+the changed region), which does not tear noticeably and is the cheapest path.
 
-Future (note, not v1): Mode 5 gives two 160x128x16bpp pages (page-flip via
-DISPCNT bit4 + the 0x0600A000 second frame) for flicker-free animation, at
-reduced resolution; Mode 4 gives two 240x160x8bpp paletted pages.  If
-animation quality matters, add a page-flip ioctl / mode later.  gpanel has
-no page-flip concept, so this would be a GBA extension ioctl.
+Mode 5 (IMPLEMENTED) adds double buffering: two 160x128x16bpp pages (0x06000000
+and 0x0600A000, page-flipped via DISPCNT bit4), presented with the GBA-only
+GPANEL_FLIP ioctl (sys/sys/gpanel.h, _IO('g',10)) which swaps pages at vblank.
+gpanel has no page-flip concept, so FLIP is a GBA extension - a no-op on single-
+buffered panels.  The 160x128 pages are smaller than the screen, so BG2's affine
+transform places them; this is exposed as two devices:
+  /dev/tft1  BG2 scales 160x128 up to fill the whole 240x160 screen.
+  /dev/tft2  1:1, centred with a black border (pixel-exact 160x128).
+The scaling is done by the PPU per-scanline, so it costs ~0 CPU - tft1 and tft2
+run at the same speed; pick by whether full-screen or pixel-exact is wanted.
+
+COST NOTE (real-HW, roadmap #9 Phase 3).  The dominant cost of double-buffered
+animation is NOT the mode or the scaling, it is how much of the back page you
+repaint.  A naive "clear the whole 160x128 page + redraw" every frame writes
+~20,500 px/frame and ran ~4x slower than Mode 3 (and on GBAED stuttered when
+the big writes contended with SD/swap).  Tracking the previous sprite position
+PER PAGE (two pages => two frames stale) and erasing only that rect drops it to
+~hundreds of px/frame - as fast as Mode 3, no stutter.  So: use double buffering
+for the tear-free present, but still draw incrementally.  (Mode 4's two 8bpp
+paletted pages are a possible future variant; not needed so far.)
 
 
 7. KERNEL INTEGRATION (mechanical)
@@ -281,8 +297,10 @@ gives automated, ear-free verification before real-HW.
            Verify with the framebuffer-dump harness: clear + rects/lines/
            circles.
   Phase 2  draw_image + draw_glyph/text + fonts; run font/color/image demos.
-  Phase 3  Double buffering (Mode 5 page flip) + button input; run
-           flappy/tftetris.  (Optional / quality.)
+  Phase 3  Double buffering (Mode 5 page flip, GPANEL_FLIP) + button input.
+           /dev/tft1 (scaled fullscreen) and /dev/tft2 (1:1 centred); demos
+           read REG_KEYINPUT directly.  DONE + real-HW: see the section 6 cost
+           note (draw incrementally, not whole-page, or it stutters on GBAED).
   Phase 4  CONVERGENCE (section 5.1): route gba_text.c + swkbd.c through the
            panel primitives, add the console char backing store, move owner
            arbitration into the panel, delete the section-5 flag.  This is
@@ -290,8 +308,10 @@ gives automated, ear-free verification before real-HW.
            Can be pulled earlier (after Phase 1) if the coexistence flag
            proves fiddly, since Phase 1 already exposes the needed primitives.
 
-  MI-safety: ALL phases touch ONLY sys/arch/gba/* and distrib/gba/mi.gba -
-  no pic32/stm32, no shared sys/ edits (gpanel.h is reused read-only).  The
+  MI-safety: ALL phases touch ONLY sys/arch/gba/* and distrib/gba/mi.gba,
+  with ONE additive shared edit: GPANEL_FLIP in sys/sys/gpanel.h (a new ioctl
+  number, _IO('g',10)); no existing ABI changes, so pic32/stm32 are unaffected.
+  No other shared sys/ edits.  The
   separate "hoist shared raster to sys/dev" dedup (section 3) is the only
   step that would touch other arches and is left for its own reviewed PR.
 

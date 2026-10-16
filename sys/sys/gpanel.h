@@ -100,6 +100,11 @@ struct gpanel_text_t {
 #define GPANEL_IMAGE       _IOW('g', 7, struct gpanel_image_t)
 #define GPANEL_CHAR        _IOW('g', 8, struct gpanel_char_t)
 #define GPANEL_TEXT        _IOW('g', 9, struct gpanel_text_t)
+/*
+ * GBA extension: present the back page of a double-buffered panel (/dev/tft1,
+ * Mode 5).  No-op / unsupported on panels that are not double-buffered.
+ */
+#define GPANEL_FLIP        _IO('g', 10)
 
 #ifndef KERNEL
 /*
