@@ -30,6 +30,7 @@
 #include <sys/user.h>
 #include <sys/proc.h>
 #include <sys/ioctl.h>
+#include <sys/fcntl.h>
 #include <sys/tty.h>
 #include <sys/systm.h>
 #include <sys/config.h>
@@ -371,6 +372,24 @@ swkbd_poll(void)
 	swkbd_prev = down;
 
 	/*
+	 * When a full-screen /dev/tft0 program exits (e.g. via the escape chord
+	 * below) the panel is released and gpanel_close() clears the screen, but
+	 * the on-screen keyboard - whose drawing was suppressed while graphics
+	 * owned the framebuffer - is left blank.  On the graphics->console
+	 * transition, repaint it if it was shown, so the console comes back with
+	 * its keyboard intact.
+	 */
+	{
+		extern int gba_gfx_active(void);
+		static int gfx_prev;
+		int gfx = gba_gfx_active();
+
+		if (gfx_prev && !gfx && swkbd_shown)
+			swkbd_draw();
+		gfx_prev = gfx;
+	}
+
+	/*
 	 * Hardware interrupt chord: A + B + START held together sends SIGINT
 	 * to the console tty's foreground process group - a "hardware Ctrl-C".
 	 * Its purpose is an always-available escape from a full-screen graphics
@@ -392,16 +411,29 @@ swkbd_poll(void)
 	 * ones.  A+B+START reads cleanly on real hardware.
 	 */
 #define SWKBD_ESC_CHORD	(KEY_A | KEY_B | KEY_START)
-	if ((down & SWKBD_ESC_CHORD) == SWKBD_ESC_CHORD &&
-	    (fresh & SWKBD_ESC_CHORD)) {
-		struct tty *tp = &uartttys[CONS_MINOR];
+	{
+		uint16_t cb = (uint16_t)(down & SWKBD_ESC_CHORD);
 
-		if (tp->t_pgrp) {
-			extern void console_activity(void);
-			console_activity();	/* unblank if the saver had hidden it */
-			gsignal(tp->t_pgrp, SIGINT);
+		/*
+		 * Two or more of A/B/START held together is only ever the escape
+		 * chord forming - never a normal keyboard action (you press one
+		 * key at a time) - so swallow it: do NOT let A select a glyph or
+		 * B send Enter.  Fire on the completing edge.
+		 */
+		if (cb & (cb - 1)) {			/* >= 2 of the chord keys down */
+			if (cb == SWKBD_ESC_CHORD && (fresh & SWKBD_ESC_CHORD)) {
+				struct tty *tp = &uartttys[CONS_MINOR];
+
+				if (tp->t_pgrp) {
+					extern void console_activity(void);
+					console_activity();	/* unblank if blanked */
+					/* drop any stray char a partial press queued */
+					ttyflush(tp, FREAD);
+					gsignal(tp->t_pgrp, SIGINT);
+				}
+			}
+			return;				/* consume: never a normal key */
 		}
-		return;				/* consume the chord this frame */
 	}
 
 	/*
