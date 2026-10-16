@@ -390,50 +390,57 @@ swkbd_poll(void)
 	}
 
 	/*
-	 * Hardware interrupt chord: A + B + START held together sends SIGINT
-	 * to the console tty's foreground process group - a "hardware Ctrl-C".
-	 * Its purpose is an always-available escape from a full-screen graphics
-	 * program (one holding /dev/tft0, where the soft keyboard is hidden):
-	 * the SIGINT ends it, its close() releases the panel (gpanel_close
-	 * clears the screen) and the shell returns.  Signalling the pgrp
-	 * directly - rather than injecting the interrupt char via ttyinput() -
-	 * makes the escape work even if the program put the tty in raw mode.
-	 * Edge-triggered (fires once, when the last of the three goes down) so a
-	 * held chord does not storm signals.  Like a real Ctrl-C on this port,
-	 * the signal is delivered on the target's next syscall/trap return (this
-	 * kernel has no preemptive signal delivery to a user compute loop), so a
-	 * program that draws continuously - any normal graphics app - is
-	 * interrupted at once, while a pathological no-syscall spin would not be.
+	 * Hardware escape chords (always active).  A+B held together is only
+	 * ever an escape forming - never a normal single-key keyboard action -
+	 * so it is swallowed (A does not select a glyph, B does not send Enter):
+	 *   A + B + START  -> SIGINT  (a "hardware Ctrl-C")
+	 *   A + B + R      -> SIGKILL (a guaranteed kill, for a program that
+	 *                             catches or ignores SIGINT)
+	 * sent to the console tty's foreground process group.  Purpose: an
+	 * always-available escape from a full-screen graphics program (holding
+	 * /dev/tft0, soft keyboard hidden) - the signal ends it, its close()
+	 * releases the panel (gpanel_close clears the screen) and the shell
+	 * returns.  Signalling the pgrp directly (not via ttyinput) works even
+	 * if the tty is in raw mode; edge-triggered so a held chord does not
+	 * storm signals; the signal lands on the target's next syscall/trap
+	 * return (no preemptive delivery to a user compute loop), so a
+	 * continuously-drawing app is killed at once.  ttyflush drops any char a
+	 * single-key lead already queued.
 	 *
-	 * The combo is A+B+START, not something with L/R/SELECT: the GBA key
-	 * matrix cannot distinguish certain 3+ key combinations (hardware key
-	 * ghosting), and L+R+SELECT happens to be one of the indistinguishable
-	 * ones.  A+B+START reads cleanly on real hardware.
+	 * Not L/R/SELECT: the GBA reports certain 3-key combinations ambiguously
+	 * (key ghosting) and L+R+SELECT is one of them; A+B+START and A+B+R read
+	 * cleanly on real hardware.
 	 */
-#define SWKBD_ESC_CHORD	(KEY_A | KEY_B | KEY_START)
-	{
-		uint16_t cb = (uint16_t)(down & SWKBD_ESC_CHORD);
+	if ((down & (KEY_A | KEY_B)) == (KEY_A | KEY_B)) {
+		struct tty *tp = &uartttys[CONS_MINOR];
+		int sig = 0;
 
-		/*
-		 * Two or more of A/B/START held together is only ever the escape
-		 * chord forming - never a normal keyboard action (you press one
-		 * key at a time) - so swallow it: do NOT let A select a glyph or
-		 * B send Enter.  Fire on the completing edge.
-		 */
-		if (cb & (cb - 1)) {			/* >= 2 of the chord keys down */
-			if (cb == SWKBD_ESC_CHORD && (fresh & SWKBD_ESC_CHORD)) {
-				struct tty *tp = &uartttys[CONS_MINOR];
-
-				if (tp->t_pgrp) {
-					extern void console_activity(void);
-					console_activity();	/* unblank if blanked */
-					/* drop any stray char a partial press queued */
-					ttyflush(tp, FREAD);
-					gsignal(tp->t_pgrp, SIGINT);
-				}
-			}
-			return;				/* consume: never a normal key */
+		if ((down & KEY_START) && (fresh & (KEY_A | KEY_B | KEY_START)))
+			sig = SIGINT;
+		else if ((down & KEY_R) && (fresh & (KEY_A | KEY_B | KEY_R)))
+			sig = SIGKILL;
+		if (sig && tp->t_pgrp) {
+			extern void console_activity(void);
+			console_activity();		/* unblank if blanked */
+			ttyflush(tp, FREAD);		/* drop stray partial-press input */
+			gsignal(tp->t_pgrp, sig);
 		}
+		return;		/* A+B (+modifier) is never normal keyboard input */
+	}
+
+	/*
+	 * While a userland program owns the framebuffer (/dev/tft0) the ONLY
+	 * input that reaches the console is the escape chords above; every other
+	 * key - the soft keyboard, its SELECT toggle, the hidden-keyboard arrow
+	 * keys - is dropped here, so button activity in a graphics program
+	 * cannot leak characters onto the shell line and nothing draws over the
+	 * graphics.  The keyboard is repainted on the graphics->console
+	 * transition handled above.
+	 */
+	{
+		extern int gba_gfx_active(void);
+		if (gba_gfx_active())
+			return;
 	}
 
 	/*
