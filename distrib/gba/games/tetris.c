@@ -135,10 +135,42 @@ void box(unsigned x, unsigned y,
   }
 }
 
+/*
+ * GBA PSG sound effect: a square-wave tone of `frq` Hz for `d` ms on PSG
+ * channel 1.  No MMU here, so (like the button reads) we drive the sound
+ * registers from user space.  Two deliberate rules keep this from ever
+ * disturbing the kernel's console bell (gba_beep), during the game or after
+ * it exits:
+ *   1. Touch ONLY the per-channel SOUND1CNT_* registers.  The master enable,
+ *      channel-1 routing and PSG mix (SOUNDCNT_X/L/H) are set once at boot by
+ *      the kernel; we rely on them and never change them.  gba_beep rewrites
+ *      SOUND1CNT_* in full on its next call, so whatever we leave there is
+ *      harmless.
+ *   2. Always set the length-stop flag, so the tone self-terminates in
+ *      hardware within <=250ms even if the game is killed mid-tone (the GBA
+ *      length counter runs without the CPU) - no stuck note after we quit.
+ */
+#define SOUND1CNT_L (*(volatile unsigned short *)0x04000060)
+#define SOUND1CNT_H (*(volatile unsigned short *)0x04000062)
+#define SOUND1CNT_X (*(volatile unsigned short *)0x04000064)
+
 void beep(int frq, int d)
 {
-  (void)frq; // TBD???
-  delay(d);
+  if (frq > 0) {
+    /* rate = 131072 / (2048 - f)  ->  f = 2048 - 131072/frq, 11-bit. */
+    int f = 2048 - 131072 / frq;
+    /* length field L: tone plays (64 - L)/256 s.  L=0 is the 250ms max; a
+       longer d just leaves the rest of delay() silent. */
+    int len = 64 - (d * 256) / 1000;
+    if (f < 0) f = 0;
+    if (f > 0x7ff) f = 0x7ff;
+    if (len < 0) len = 0;
+    if (len > 63) len = 63;
+    SOUND1CNT_L = 0x0000;                          /* no frequency sweep */
+    SOUND1CNT_H = 0xF000 | 0x0080 | (len & 0x3F);  /* vol 15, 50% duty, length */
+    SOUND1CNT_X = 0x8000 | 0x4000 | (f & 0x07FF);  /* restart + length-stop + freq */
+  }
+  delay(d);   /* keep the game's timing; the tone self-terminates in <=250ms */
 }
 
 void boxb(unsigned x, unsigned y, unsigned w, unsigned h, unsigned short c)
