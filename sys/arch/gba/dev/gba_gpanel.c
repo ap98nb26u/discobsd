@@ -38,6 +38,7 @@
 
 #include <machine/gba.h>
 #include <gba/dev/gba_gpanel.h>
+#include <gba/dev/gba_text.h>		/* gtxt_restore() on panel release */
 
 #define GFB_W	240		/* Mode 3 (/dev/tft0): full screen, single buffer */
 #define GFB_H	160
@@ -417,14 +418,16 @@ gpanel_close(dev_t dev, int flag, int mode)
 {
 	/*
 	 * Release the panel back to the console.  Restore Mode 3 (undoing any
-	 * Mode-5 scaling) and clear to black - the app's last frame is not the
-	 * console's to keep, and there is no text backing store yet
-	 * (NOTES.graphics 5.1) - then drop the owner flag so console/keyboard
-	 * drawing resumes; the next console output paints on the cleared screen.
+	 * Mode-5 scaling), drop the owner flag so console/keyboard drawing
+	 * resumes, then repaint the console from its character backing store
+	 * (Phase 4b) - this brings back the text that was on screen before the
+	 * app ran, and anything printed while it ran, instead of leaving the
+	 * app's last frame or a black screen.  gtxt_restore repaints every cell,
+	 * so it also covers the whole framebuffer (no separate clear needed).
 	 */
 	panel_set_mode3();
-	gba_fb_fill(0, 0, GFB_W - 1, GFB_H - 1, 0);
 	gpanel_active = 0;
+	gtxt_restore();
 	return 0;
 }
 

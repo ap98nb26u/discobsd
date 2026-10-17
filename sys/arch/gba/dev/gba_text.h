@@ -22,6 +22,13 @@ void gtxt_init(unsigned short fg, unsigned short bg);
 void gtxt_cls(void);
 void gtxt_putc(char c);
 
+/*
+ * Repaint the whole screen from the character backing store.  Called when the
+ * graphics panel is released (gpanel_close) to restore the prior console text
+ * instead of leaving the screen black (Phase 4b).
+ */
+void gtxt_restore(void);
+
 /* Overlay support for the on-screen keyboard (swkbd.c). */
 void gtxt_draw_cell(char c, int col, int row, unsigned short fg,
 	unsigned short bg);

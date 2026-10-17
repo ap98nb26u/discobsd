@@ -201,6 +201,15 @@ SECTIONS {
      */
     .stack_check : {
         . = ALIGN(4);
-        ASSERT(. < ORIGIN(SYSVEC), "Error: IWRAM overflowed into SYSVEC!");
     } > IWRAM
 }
+
+/*
+ * Catch kernel IWRAM (.fast_text/.data/.bss) growing past SYSVEC into the BIOS
+ * IRQ stack.  This is a TOP-LEVEL assert on a defined symbol: an ASSERT placed
+ * inside an output section that emits no bytes is silently dropped by ld (that
+ * hole once let a .bss overrun slip through and corrupt the IRQ stack), whereas
+ * a top-level one always fires.
+ */
+ASSERT(__bss_end__ <= ORIGIN(SYSVEC),
+    "Error: kernel IWRAM overflowed past SYSVEC into the IRQ stack!")

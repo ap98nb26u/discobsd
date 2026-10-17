@@ -27,9 +27,10 @@ extern const unsigned char gtxt_font[2048];
  * it, so every function here that writes VRAM bows out while it is set: the
  * panel is the sole drawer, and the console's text STATE still advances so
  * output is not lost, it just is not painted until the panel is released
- * (gpanel_close clears the screen; a backing-store redraw is a later step).
- * This gives the framebuffer a single owner - the structural fix for the
- * console/graphics scribble (NOTES.graphics section 5 / 5.1).
+ * (on release gtxt_restore() repaints it from the character backing store -
+ * Phase 4b, see gtxt_cells below).  This gives the framebuffer a single owner
+ * - the structural fix for the console/graphics scribble (NOTES.graphics
+ * section 5 / 5.1).
  */
 extern int gba_gfx_active(void);
 
@@ -70,6 +71,68 @@ static int gtxt_cursor_on;	/* is the block cursor currently lit? */
 static int gtxt_reserved;
 
 #define GTXT_CONS_H     (GTXT_SCREEN_H - gtxt_reserved)
+#define GTXT_ROWS       (GTXT_SCREEN_H / GTXT_CHAR_H)	/* 20 text rows */
+/* Lowest character row the console may write to (just above any overlay). */
+#define GTXT_BOTTOM	((GTXT_CONS_H / GTXT_CHAR_H) - 1)
+
+/*
+ * Character backing store (Phase 4b): the glyph + colour of every text cell,
+ * so the console can be REDRAWN rather than lost.  gtxt_draw_cell keeps it in
+ * step with VRAM - updating it even while the graphics panel owns the screen,
+ * so output that advanced unpainted is not lost; the scroll helpers shift it;
+ * gtxt_restore() repaints the screen from it when the panel is released
+ * (gpanel_close), instead of leaving it black.
+ *
+ * It lives in SPARE VRAM above the framebuffer, NOT in kernel RAM.  IWRAM is
+ * full - GBAED has almost no slack, and an earlier in-IWRAM store pushed .bss
+ * past the syscall vector / BIOS IRQ stack (0x03007E00+) and hung the machine
+ * under IRQ load - and EWRAM is entirely the user/swap window.  Mode 3 draws
+ * VRAM up to 0x06012C00 and Mode 5 up to 0x06014000; this port uses no sprites,
+ * so the OBJ/tile area above that is free.  The store sits at 0x06015000 (40x20
+ * cells x 2 bytes = 1600 bytes, ending far below VRAM's end 0x06018000) and is
+ * never touched by any drawing, which all clamps to <= 240x160 / 160x128.  VRAM
+ * must be accessed 16 bits at a time (byte writes duplicate), so each cell is
+ * one 16-bit word: glyph in the low 8 bits + a 4-bit fg and 4-bit bg index into
+ * gtxt_pal[], a small table of the BGR555 colours used (full colour kept).
+ */
+static volatile unsigned short *const gtxt_cells =
+	(volatile unsigned short *)0x06015000;
+#define GTXT_CELL_AT(row,col)	gtxt_cells[(row) * GTXT_COLS + (col)]
+
+#define GTXT_NPAL	16
+static unsigned short gtxt_pal[GTXT_NPAL];	/* BGR555 colours seen so far */
+static int gtxt_npal;				/* entries of gtxt_pal[] in use */
+
+#define GTXT_PACK(ch,fi,bi) \
+	((unsigned short)(((bi) << 12) | ((fi) << 8) | ((ch) & 0xff)))
+#define GTXT_UNCH(v)	((char)((v) & 0xff))
+#define GTXT_UNFI(v)	(((v) >> 8) & 0x0f)
+#define GTXT_UNBI(v)	(((v) >> 12) & 0x0f)
+
+/* Map a BGR555 colour to a palette index, adding it if new (table full -> 0). */
+static int
+gtxt_pal_index(unsigned short color)
+{
+    int i;
+
+    for (i = 0; i < gtxt_npal; i++)
+        if (gtxt_pal[i] == color)
+            return i;
+    if (gtxt_npal < GTXT_NPAL) {
+        gtxt_pal[gtxt_npal] = color;
+        return gtxt_npal++;
+    }
+    return 0;
+}
+
+/* Set cell (row,col) in the backing store to a blank in the current bg. */
+static void
+gtxt_cell_blank(int row, int col)
+{
+    int bi = gtxt_pal_index(gtxt_bg);
+
+    GTXT_CELL_AT(row, col) = GTXT_PACK(' ', bi, bi);
+}
 
 static void
 gtxt_shift(void)
@@ -77,6 +140,15 @@ gtxt_shift(void)
     volatile unsigned short *p = VRAM;
     volatile unsigned short *end = VRAM + (GTXT_SCREEN_W * (GTXT_CONS_H - GTXT_CHAR_H));
     volatile unsigned short *tail = VRAM + (GTXT_SCREEN_W * GTXT_CONS_H);
+    int r, c;
+
+    /* Scroll the console region of the backing store up one row (always, so
+       it stays correct even when VRAM is not being painted). */
+    for (r = 0; r < GTXT_BOTTOM; r++)
+        for (c = 0; c < GTXT_COLS; c++)
+            GTXT_CELL_AT(r, c) = GTXT_CELL_AT(r + 1, c);
+    for (c = 0; c < GTXT_COLS; c++)
+        gtxt_cell_blank(GTXT_BOTTOM, c);
 
     if (gba_gfx_active())
         return;
@@ -97,6 +169,13 @@ gtxt_shift_full(void)
     volatile unsigned short *p = VRAM;
     volatile unsigned short *end = VRAM + (GTXT_SCREEN_W * (GTXT_SCREEN_H - GTXT_CHAR_H));
     volatile unsigned short *tail = VRAM + (GTXT_SCREEN_W * GTXT_SCREEN_H);
+    int r, c;
+
+    for (r = 0; r + 1 < GTXT_ROWS; r++)
+        for (c = 0; c < GTXT_COLS; c++)
+            GTXT_CELL_AT(r, c) = GTXT_CELL_AT(r + 1, c);
+    for (c = 0; c < GTXT_COLS; c++)
+        gtxt_cell_blank(GTXT_ROWS - 1, c);
 
     if (gba_gfx_active())
         return;
@@ -105,9 +184,6 @@ gtxt_shift_full(void)
     for (; p < tail; p++)
         *p = gtxt_bg;
 }
-
-/* Lowest character row the console may write to (just above any overlay). */
-#define GTXT_BOTTOM	((GTXT_CONS_H / GTXT_CHAR_H) - 1)
 
 /* Advance to the next line, scrolling the console region when at the bottom. */
 static void
@@ -134,6 +210,12 @@ gtxt_draw_cell(char c, int col, int row, unsigned short fg, unsigned short bg)
     int r, col2;
     unsigned char bits;
 
+    /* Record glyph+colour into the backing store first - even while the panel
+       is owned, so console output that advances unpainted can be restored
+       (gtxt_restore). */
+    if ((unsigned)row < GTXT_ROWS && (unsigned)col < GTXT_COLS)
+        GTXT_CELL_AT(row, col) =
+            GTXT_PACK(c, gtxt_pal_index(fg), gtxt_pal_index(bg));
     if (gba_gfx_active())		/* panel owned: console + swkbd stay silent */
         return;
     for (r = 0; r < GTXT_CHAR_H; r++) {
@@ -244,13 +326,43 @@ gtxt_cls(void)
 {
     volatile unsigned short *p = VRAM;
     volatile unsigned short *end = VRAM + (GTXT_SCREEN_W * GTXT_SCREEN_H);
+    int r, c;
 
+    for (r = 0; r < GTXT_ROWS; r++)
+        for (c = 0; c < GTXT_COLS; c++)
+            gtxt_cell_blank(r, c);
     if (!gba_gfx_active())
         for (; p < end; p++)
             *p = gtxt_bg;
     gtxt_curx = 0;
     gtxt_cury = GTXT_BOTTOM;	/* start at the bottom, like a terminal */
     gtxt_cursor_on = 0;		/* cleared along with the rest of VRAM */
+}
+
+/*
+ * Repaint the whole 240x160 screen (40x20 cells) from the backing store.
+ * Called when the graphics panel is released (gpanel_close) so the prior
+ * console text - including anything printed while the panel was owned, and in
+ * its original colours - is restored instead of the screen being left black.
+ * Every cell is repainted, so the app's last frame is fully overwritten (no
+ * separate clear needed); the keyboard band comes back too (swkbd may also
+ * repaint it).
+ */
+void
+gtxt_restore(void)
+{
+    int r, c;
+
+    if (gba_gfx_active())
+        return;			/* panel still owned: nothing to restore yet */
+    gtxt_cursor_on = 0;		/* cells repainted raw; idle() relights cursor */
+    for (r = 0; r < GTXT_ROWS; r++)
+        for (c = 0; c < GTXT_COLS; c++) {
+            unsigned short v = GTXT_CELL_AT(r, c);
+
+            gtxt_draw_cell(GTXT_UNCH(v), c, r,
+                gtxt_pal[GTXT_UNFI(v)], gtxt_pal[GTXT_UNBI(v)]);
+        }
 }
 
 void
