@@ -171,9 +171,9 @@ file /usr/include/sys/wait.h
 # Native C toolchain, so a program can be compiled ON the device:
 # cc drives cpp -> smlrc (Smaller C, arm backend) -> as (as_arm) -> ld
 # (ld_arm), linking /usr/lib/crt0.o + /usr/lib/libc.a into an OMAGIC a.out.
-# Arm/GBA-specific (the MIPS ports ship their own in md.pic32). /hello.c is
-# a tiny self-contained test program (no headers needed). Headers under
-# /usr/include can be added later for programs that #include them.
+# Arm/GBA-specific (the MIPS ports ship their own in md.pic32). Sample
+# sources to compile on the device (hello.c, ctest.c) are in
+# /usr/share/examples/gba, listed in mi.gba.
 #
 default
 filemode 0755
@@ -188,8 +188,6 @@ default
 dir /usr/lib
 file /usr/lib/crt0.o
 file /usr/lib/libc.a
-file /hello.c
-file /ctest.c
 
 #
 # Raw (character) sd disks - GBA-specific (char major 19 = SD_CMAJOR in

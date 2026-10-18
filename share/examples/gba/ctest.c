@@ -1,4 +1,7 @@
-/* Exercises shipped headers + expanded libc: cc /ctest.c -o /ctest && /ctest */
+/*
+ * Exercises shipped headers + expanded libc (needs a writable root, i.e. GBAED):
+ *   cc /usr/share/examples/gba/ctest.c -o /tmp/ctest && /tmp/ctest
+ */
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
