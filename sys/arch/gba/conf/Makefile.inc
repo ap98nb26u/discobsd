@@ -55,19 +55,17 @@ ${FSIMG}:	distrib/gba/md.gba distrib/gba/mi.gba
 		# unusable on target; this runtime is produced by host-run copies of
 		# this port's own tools (as_arm + smlrc) from the arm-dev/rt sources.
 		# The toolchain binaries (cc/cpp/as/ld/ar/smlrc) come from the normal
-		# usr.bin build. /hello.c is a tiny on-device smoke-test program.
+		# usr.bin build.
 		( cd ${TOPSRC}/usr.bin/as/arm-dev && sh build.sh )
 		$(MAKE) -C ${TOPSRC}/usr.bin/as/arm-dev/rt
 		mkdir -p ${DESTDIR}/usr/lib
 		cp ${TOPSRC}/usr.bin/as/arm-dev/rt/crt0.o ${DESTDIR}/usr/lib/crt0.o
 		cp ${TOPSRC}/usr.bin/as/arm-dev/rt/libc.a ${DESTDIR}/usr/lib/libc.a
-		cp ${TOPSRC}/distrib/gba/hello.c ${DESTDIR}/hello.c
-		cp ${TOPSRC}/distrib/gba/ctest.c ${DESTDIR}/ctest.c
-		# GBA-specific gpanel games (tetris, ...) -> /usr/games. These are
-		# cross-built a.out binaries (the pic32 share/examples/gpanel sources
-		# assume bigger panels / a joystick); the stock games/ tree already
-		# installed the text games into ${DESTDIR}/usr/games.
-		$(MAKE) -C ${TOPSRC}/distrib/gba/games DESTDIR=${DESTDIR} install
+		# GBA examples -> /usr/share/examples/gba: gpanel demos and test
+		# programs (tetris, ...), cross-built as a.out next to their
+		# sources, plus hello.c/ctest.c for the on-device cc.  The native
+		# cc cannot build gpanel programs yet, so the binaries are shipped.
+		$(MAKE) -C ${TOPSRC}/share/examples/gba DESTDIR=${DESTDIR} install
 		$(FSUTIL) --new --size=`expr $(FS_MBYTES) \* 1024` --manifest=distrib/gba/_manifest $@ ${DESTDIR}
 		cp $@ $(GBA_DEV_ROOTFS)
 		d=`mktemp -d`; mkdir -p $$d/etc; \

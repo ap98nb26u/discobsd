@@ -689,8 +689,8 @@ file /usr/libexec/updatedb
 file /usr/sbin/vipw
 
 #
-# Games (/usr/games): text games from games/ plus the GBA gpanel
-# tetris (distrib/gba/games).  See distrib/gba/games/Makefile.
+# Games (/usr/games): text games from games/.  The GBA gpanel tetris
+# is with the other GBA examples in /usr/share/examples/gba (below).
 #
 #
 # Dictionary for hangman (and any word game).
@@ -767,10 +767,53 @@ file /usr/games/rogue
 file /usr/games/snake
 file /usr/games/snscore
 file /usr/games/teachgammon
-file /usr/games/tetris
 file /usr/games/trek
 file /usr/games/worm
 file /usr/games/wump
+
+#
+# GBA examples (/usr/share/examples/gba): gpanel demos, test programs and
+# the beeptest PSG sound test, shipped as cross-built a.out binaries next
+# to their sources (the native cc cannot build gpanel programs yet), plus
+# hello.c/ctest.c to compile on the device.  See share/examples/gba/Makefile.
+#
+default
+dirmode 0775
+filemode 0664
+dir /usr/share/examples
+dir /usr/share/examples/gba
+file /usr/share/examples/gba/Makefile
+file /usr/share/examples/gba/hello.c
+file /usr/share/examples/gba/ctest.c
+file /usr/share/examples/gba/tetris.c
+file /usr/share/examples/gba/gball.c
+file /usr/share/examples/gba/gball5.c
+file /usr/share/examples/gba/gball5i.c
+file /usr/share/examples/gba/imgdemo.c
+file /usr/share/examples/gba/fontchart.c
+file /usr/share/examples/gba/fontsampler.c
+file /usr/share/examples/gba/gfxtest.c
+file /usr/share/examples/gba/gfxtest2.c
+file /usr/share/examples/gba/gfxtest3.c
+file /usr/share/examples/gba/gfxtest4.c
+file /usr/share/examples/gba/keytest.c
+file /usr/share/examples/gba/beeptest.c
+
+default
+filemode 0775
+file /usr/share/examples/gba/tetris
+file /usr/share/examples/gba/gball
+file /usr/share/examples/gba/gball5
+file /usr/share/examples/gba/gball5i
+file /usr/share/examples/gba/imgdemo
+file /usr/share/examples/gba/fontchart
+file /usr/share/examples/gba/fontsampler
+file /usr/share/examples/gba/gfxtest
+file /usr/share/examples/gba/gfxtest2
+file /usr/share/examples/gba/gfxtest3
+file /usr/share/examples/gba/gfxtest4
+file /usr/share/examples/gba/keytest
+file /usr/share/examples/gba/beeptest
 
 link /sbin/bootloader
 target /sbin/reboot
