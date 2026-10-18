@@ -13,6 +13,9 @@
  * gba_sound_init() must run before the first gba_beep().
  */
 #include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/systm.h>
+void timeout(void (*)(caddr_t), caddr_t, int);
 
 #include <machine/gba.h>
 #include <gba/dev/gba_sound.h>
@@ -39,6 +42,39 @@ gba_sound_init(void)
 	REG_SOUNDCNT_L = 0x1177;	/* L/R master vol 7; ch1 -> L(bit12)+R(bit8) */
 	REG_SOUNDCNT_H = 0x0002;	/* PSG volume ratio = 100% */
 	REG_SOUNDBIAS  = 0x0200;	/* default bias (32.768 kHz output) */
+}
+
+/*
+ * PSG start-up priming (not in GBATEK; measured on real GBA hardware, not
+ * reproduced by mGBA): after SOUNDCNT_X is enabled at boot, the first two
+ * channel-1 triggers produce no sound - whatever the gap between them, so
+ * it is a trigger count, not a settling time.  Without this the first
+ * console bell or the start of a program's first tones goes missing.
+ * Use those triggers up with PRIME_N short ones, 50ms apart, starting ~1s
+ * after boot (timed by callouts, armed from clkstart()).  One spare covers
+ * any extra swallowed trigger; on hardware it is a single faint click,
+ * and in an emulator all PRIME_N are.  Each tone lasts 4/256 s, since a
+ * 1/256 s length can expire before any sound comes out.
+ */
+#define PRIME_N		3
+
+static void
+gba_sound_prime_tick(caddr_t arg)
+{
+	int n = (int)arg;
+
+	REG_SOUND1CNT_L = 0x0000;
+	REG_SOUND1CNT_H = 0xF000 | 0x0080 | 60;		/* vol 15, length 4/256 s */
+	REG_SOUND1CNT_X = 0x8000 | 0x4000 | (BEEP_FREQ & 0x07FF);
+	if (--n > 0)
+		timeout(gba_sound_prime_tick, (caddr_t)n, hz / 20);
+}
+
+void
+gba_sound_prime(void)
+{
+	printf("sound: priming PSG ch1 (%d triggers)\n", PRIME_N);
+	timeout(gba_sound_prime_tick, (caddr_t)PRIME_N, hz);
 }
 
 void

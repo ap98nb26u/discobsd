@@ -11,8 +11,11 @@
 #include <sys/proc.h>
 
 #include <machine/gba.h>
+#include <gba/dev/gba_sound.h>
 
 void clkstart(void) {
+    /* Callouts are set up by now; see gba_sound.c. */
+    gba_sound_prime();
 }
 
 void cpu_initclocks(void) {

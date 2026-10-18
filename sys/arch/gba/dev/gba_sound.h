@@ -10,6 +10,7 @@
  * build on this later.
  */
 void gba_sound_init(void);	/* enable the sound hardware once, at boot */
+void gba_sound_prime(void);	/* absorb the post-enable dead triggers */
 void gba_beep(void);		/* short console-bell tone (PSG channel 1) */
 
 #endif /* KERNEL */
