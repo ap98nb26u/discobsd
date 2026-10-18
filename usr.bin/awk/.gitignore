@@ -4,3 +4,5 @@ proc
 proctab.c
 token.h
 y.tab.h
+awk.g.c
+awk.lx.c
