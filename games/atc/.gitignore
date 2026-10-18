@@ -1,2 +1,4 @@
 atc
 y.tab.h
+grammar.c
+lex.c
