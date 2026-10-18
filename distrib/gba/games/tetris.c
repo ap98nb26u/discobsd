@@ -173,6 +173,21 @@ void beep(int frq, int d)
   delay(d);   /* keep the game's timing; the tone self-terminates in <=250ms */
 }
 
+/*
+ * Short rising start jingle (via beep(), so same two rules).  Played before
+ * the first game beep, it also absorbs a real-hardware quirk seen after a
+ * cold power-on, where the first PSG tones can be lost (not reproduced in
+ * mGBA, and not every time on hardware): losing the start of the jingle is
+ * harmless, and the game beeps that follow are heard.
+ */
+static void
+start_jingle(void)
+{
+  beep(784, 150); delay(40);    /* G5 */
+  beep(1047, 150); delay(40);   /* C6 */
+  beep(1319, 300);              /* E6, held */
+}
+
 void boxb(unsigned x, unsigned y, unsigned w, unsigned h, unsigned short c)
 {
   box(x, y, w, h - 1, c, 1);
@@ -934,6 +949,7 @@ int main(void)
 
   // input comes from REG_KEYINPUT (see Joystick_* above); no device to open.
 
+  start_jingle();       // start music; also absorbs the cold-start PSG quirk
   srand(time(NULL));
 
   drawPreGameScreen();
