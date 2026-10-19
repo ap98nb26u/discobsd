@@ -1,17 +1,15 @@
 /*
  * asarm - minimal ARM (ARMv4T) assembler for the DiscoBSD/GBA toolchain.
  *
- * Development prototype (Phase 1b). Parses the exact assembly subset that
- * usr.bin/smlrc's cgarm.c emits and encodes it to ARM machine code. Here it
- * runs as a host tool producing a flat .text image (internal labels + literal
- * pools resolved; externals listed) so the encoder can be validated
- * byte-for-byte against arm-none-eabi-as and functionally in Unicorn. Once
- * solid, the encoder moves into usr.bin/as (+ tools/aoututils/as) with the
- * a.out object framing.
+ * Assembles the subset of ARM assembly that usr.bin/smlrc's cgarm.c emits
+ * (plus the hand-written runtime in arm-dev/rt) into a DiscoBSD a.out
+ * relocatable object, or with -b into a flat image for the test harnesses.
  *
- * Two modes:
+ * Modes:
  *   asarm -e "<one instruction>"   -> print the 8-hex-digit encoding (oracle)
- *   asarm <file.s> <out.bin>       -> assemble; write flat .text; report syms
+ *   asarm [-v] -o out.o file.s     -> assemble to an a.out object
+ *   asarm [-v] -b file.s out.bin   -> flat text+rodata+data(+bss) image
+ * -v lists the symbols (SYM/UND lines) on stderr.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,54 +17,141 @@
 #include <ctype.h>
 
 /*
- * Buffer sizes. as_arm keeps the whole input and all section output in these
- * fixed arrays, so together with its text and stack they must fit the target
- * user window (GBAED = 250 KB). They are therefore far smaller than a host
- * assembler would pick (the original 1 MB/section, 64 K-line values gave a
- * ~6 MB .bss that could not load - it ran off the end of the window and hung).
- * Big enough for small/medium programs; a very large unit (e.g. self-hosting
- * the compiler) would need a streaming rewrite rather than these arrays.
+ * Memory use.  as_arm runs in the target user window (GBAED = 250 KB), so it
+ * streams: the input is read twice (pass 1 sizes and labels, pass 2 emits),
+ * section bytes go straight to their place in the output file, and the text
+ * relocation records go to a temporary file in order.  What stays in memory
+ * is the symbol table (compiler labels ".L<n>" in a compact numeric table,
+ * other names in a hash table), one literal-pool group and the data-section
+ * relocations.  This lets it assemble the compiler itself (smlrc.c: about
+ * 38,000 lines and 146 KB of text).
  */
-#define MAXSYM   512
-#define MAXLIT   256
-#define MAXREL   512
-#define MAXLINES 4096
-#define TEXTMAX  (1<<14)
-
-/* symbols */
-struct sym { char name[64]; int addr; int defined; int global; };
-static struct sym syms[MAXSYM];
-static int nsym;
+#define NHASH    1024                 /* named-symbol hash buckets */
+#define MAXPEND  1024                 /* literals waiting for one pool */
+#define WBUF     256                  /* per-section output buffer */
 
 static const char *infile = "<expr>";
 static int lineno;
+static char *tmpname;                 /* text-relocation temp file, if open */
 
 static void fatal(const char *msg, const char *arg)
 {
     fprintf(stderr, "asarm: %s:%d: %s%s%s\n", infile, lineno, msg,
             arg ? " " : "", arg ? arg : "");
+    if (tmpname) remove(tmpname);
     exit(1);
 }
 
-/* ---- symbol table ---- */
-static struct sym *sym_find(const char *n)
+static void *xrealloc(void *p, size_t n)
+{
+    p = realloc(p, n);
+    if (!p) fatal("out of memory", "");
+    return p;
+}
+
+/*
+ * Symbols.  A symbol is named by a "ref".  A ref >= NUMREF is the compiler
+ * label ".L<ref-NUMREF>", kept in a numeric table (address and section, no
+ * name string).  A smaller ref indexes the named-symbol table, which keeps
+ * creation order (the a.out symbol-table order) and a hash chain.  Only
+ * named symbols can be global or undefined.
+ */
+#define NUMREF  0x40000000
+struct sym { char *name; int addr; int next; unsigned char defined, global, sec; };
+static struct sym *syms;
+static int nsym, maxsym;
+static int hashtab[NHASH];
+
+static int *lab_addr;                 /* .L<n> address, by n */
+static unsigned char *lab_sec;        /* section + 1; 0 = not defined */
+static int maxlab;
+
+static unsigned hashname(const char *n)
+{
+    unsigned h = 5381;
+    while (*n) h = h * 33 + (unsigned char)*n++;
+    return h % NHASH;
+}
+
+/* ".L<digits>" (no leading zero) -> the number; anything else -> -1 */
+static int numlabel(const char *n)
+{
+    int v = 0;
+    if (n[0] != '.' || n[1] != 'L' || !isdigit((unsigned char)n[2])) return -1;
+    if (n[2] == '0' && n[3]) return -1;
+    for (n += 2; *n; n++) {
+        if (!isdigit((unsigned char)*n) || v > 100000000) return -1;
+        v = v * 10 + (*n - '0');
+    }
+    return v;
+}
+
+static int named_find(const char *n)
 {
     int i;
-    for (i = 0; i < nsym; i++)
+    for (i = hashtab[hashname(n)]; i >= 0; i = syms[i].next)
         if (!strcmp(syms[i].name, n))
-            return &syms[i];
-    return NULL;
+            return i;
+    return -1;
 }
-static struct sym *sym_get(const char *n)
+
+static int named_get(const char *n)
 {
-    struct sym *s = sym_find(n);
-    if (s) return s;
-    if (nsym >= MAXSYM) fatal("too many symbols", n);
-    s = &syms[nsym++];
-    strncpy(s->name, n, sizeof(s->name)-1);
-    s->name[sizeof(s->name)-1] = 0;
-    s->addr = 0; s->defined = 0; s->global = 0;
-    return s;
+    int i = named_find(n);
+    unsigned h;
+    if (i >= 0) return i;
+    if (nsym == maxsym) {
+        maxsym = maxsym ? maxsym * 2 : 256;
+        syms = xrealloc(syms, maxsym * sizeof(struct sym));
+    }
+    i = nsym++;
+    syms[i].name = xrealloc(NULL, strlen(n) + 1);
+    strcpy(syms[i].name, n);
+    syms[i].addr = 0; syms[i].defined = 0; syms[i].global = 0; syms[i].sec = 0;
+    h = hashname(n);
+    syms[i].next = hashtab[h];
+    hashtab[h] = i;
+    return i;
+}
+
+/* Look up a symbol.  With create, an unknown name becomes a new undefined
+   named symbol; without, it gives -1. */
+static int sym_ref(const char *n, int create)
+{
+    int v = numlabel(n), i;
+    if (v >= 0 && v < maxlab && lab_sec[v]) return NUMREF + v;
+    i = named_find(n);
+    if (i >= 0 || !create) return i;
+    return named_get(n);
+}
+
+static int ref_defined(int r)
+{
+    if (r < 0) return 0;
+    return r >= NUMREF ? 1 : syms[r].defined;
+}
+static int ref_addr(int r) { return r >= NUMREF ? lab_addr[r - NUMREF] : syms[r].addr; }
+static int ref_sec(int r)  { return r >= NUMREF ? lab_sec[r - NUMREF] - 1 : syms[r].sec; }
+
+/* define a label at (sec, off); pass 1 only */
+static void sym_define(const char *n, int sec, int off)
+{
+    int v = numlabel(n);
+    if (v >= 0 && named_find(n) < 0) {
+        if (v >= maxlab) {
+            int m = maxlab ? maxlab : 1024, k;
+            while (m <= v) m *= 2;
+            lab_addr = xrealloc(lab_addr, m * sizeof(int));
+            lab_sec = xrealloc(lab_sec, m);
+            for (k = maxlab; k < m; k++) lab_sec[k] = 0;
+            maxlab = m;
+        }
+        lab_addr[v] = off;
+        lab_sec[v] = sec + 1;
+        return;
+    }
+    v = named_get(n);
+    syms[v].defined = 1; syms[v].addr = off; syms[v].sec = sec;
 }
 
 /* ---- tokenizing helpers over a single instruction/operand string ---- */
@@ -402,30 +487,16 @@ static unsigned encode(char *mnem, char *ops, int addr, char *extname, int *extk
 /* label lookup for branch encoding (pass 2). */
 static int find_label_addr(const char *n, int *known)
 {
-    struct sym *s = sym_find(n);
-    if (s && s->defined) { *known = 1; return s->addr; }
+    int r = sym_ref(n, 0);
+    if (ref_defined(r)) { *known = 1; return ref_addr(r); }
     *known = 0; return 0;
 }
 
-/* ================= full two-pass file assembler ==================== */
+/* ================= two-pass streaming file assembler ================== */
 enum { SEC_TEXT, SEC_RODATA, SEC_DATA, SEC_BSS, NSEC };
 static int secoff[NSEC];              /* running offset within each section */
 static int secbase[NSEC];             /* final base address of each section */
-static unsigned char secbuf[NSEC][TEXTMAX];
-
-/* per-section: store section id in the symbol */
-struct symx { int sec; };             /* parallel to syms[] */
-static struct symx symx[MAXSYM];
-
-/* literal pool: each ldr= in source order gets a slot (text-local offset). */
-struct pool { unsigned val; char sym[64]; int issym; int slotoff; int emitted; int ldroff; };
-static struct pool pool[MAXLIT];
-static int npool;                     /* total ldr= seen */
-static int poolflush;                 /* index of first not-yet-placed entry */
-
-static char *lines[MAXLINES];
-static int nlines;
-
+static int secsize[NSEC];             /* sizes found by pass 1 */
 static int cursec;
 static int objmode;                   /* emit a.out object instead of flat bin */
 static int verbose;                   /* -v: print the symbol table to stderr */
@@ -438,6 +509,7 @@ static int verbose;                   /* -v: print the symbol table to stderr */
 #define RSEG_DATA 0x30
 #define RSEG_BSS  0x40
 #define RSEG_EXT  0x70
+#define RSMASK    0x70
 #define N_UNDF 0x00
 #define N_TEXT 0x02
 #define N_DATA 0x03
@@ -445,64 +517,153 @@ static int verbose;                   /* -v: print the symbol table to stderr */
 #define N_EXT  0x20
 #define OBJ_RMAGIC 0406               /* relocatable object, MID=0 */
 
-/* relocations recorded in pass 2 (object mode) */
-struct areloc { int sec; int off; int kind; char sym[64]; };
-static struct areloc rels[MAXREL];
-static int nrel;
-static struct sym *sym_get(const char *n);   /* fwd */
-static void addrel(int sec, int off, int kind, const char *sym)
+/*
+ * Section output.  Pass 2 produces every section strictly in order, and
+ * pass 1 has fixed the sizes, so each section's bytes go to a fixed place
+ * in the output file through a small buffer.  put() is the one way bytes
+ * are added (it also advances the offset in pass 1, where nothing is
+ * written); bss has no file image.
+ */
+static FILE *outf;
+static long filebase[NSEC];
+static unsigned char wbuf[NSEC][WBUF];
+static int wlen[NSEC];
+static long wstart[NSEC];             /* section offset of wbuf[sec][0] */
+
+static void sec_flush(int sec)
 {
-    sym_get(sym);   /* ensure the referenced symbol is in the table (may be
-                       an undefined external that must land in the symtab) */
-    if (nrel >= MAXREL) fatal("too many relocations", sym);
-    rels[nrel].sec=sec; rels[nrel].off=off; rels[nrel].kind=kind;
-    strncpy(rels[nrel].sym,sym,63); rels[nrel].sym[63]=0; nrel++;
+    if (wlen[sec] && (fseek(outf, filebase[sec] + wstart[sec], SEEK_SET) < 0 ||
+        fwrite(wbuf[sec], 1, wlen[sec], outf) != (size_t)wlen[sec]))
+        fatal("write error", "");
+    wstart[sec] += wlen[sec];
+    wlen[sec] = 0;
 }
 
-/* resolve a symbol name to a final address (pass 2). *known set. */
-static int sym_addr_final(const char *n, int *known)
-{
-    struct sym *s = sym_find(n);
-    if (s && s->defined) { *known=1; return s->addr; }
-    *known=0; return 0;
-}
-
-/* trim leading blanks */
-static char *skipws(char *p){ while(*p==' '||*p=='\t')p++; return p; }
-
-static int curldr;   /* running index into pool[] during a pass */
-
-/* place the literals seen since the last flush at the current text offset
-   (pass 1 assigns the slots, pass 2 writes the values). */
-static void flush_pool(int pass)
+static void put(int sec, unsigned v, int n, int pass)
 {
     int k;
-    for(k=poolflush;k<curldr;k++){
-        if(pass==1) pool[k].slotoff=secoff[SEC_TEXT];
-        if(pass==2){ unsigned v=pool[k].val; if(pool[k].issym){int kn; v=sym_addr_final(pool[k].sym,&kn); if(objmode)addrel(SEC_TEXT,pool[k].slotoff,R_ABS32,pool[k].sym);} unsigned char*b=&secbuf[SEC_TEXT][pool[k].slotoff]; b[0]=v;b[1]=v>>8;b[2]=v>>16;b[3]=v>>24; }
-        secoff[SEC_TEXT]+=4;
+    if (pass == 2 && sec != SEC_BSS) {
+        if (wstart[sec] + wlen[sec] != secoff[sec])
+            fatal("internal: section output out of order", "");
+        for (k = 0; k < n; k++) {
+            wbuf[sec][wlen[sec]++] = (v >> (8 * k)) & 0xFF;
+            if (wlen[sec] == WBUF) sec_flush(sec);
+        }
     }
-    poolflush=curldr;
+    secoff[sec] += n;
 }
 
 /*
- * Literal-pool islands.  An "ldr rd, =x" reaches its pool slot with a 12-bit
- * pc offset (4 KB), but the compiler emits .ltorg only at the end of each
- * function, so a big function would leave its early literals out of reach.
- * After an unconditional "b label" (code never falls through, so data may
- * follow), place the pending literals if the oldest is more than ISLAND
- * bytes back.  The test uses only offsets that are the same in both passes,
- * so pass 1 and pass 2 place the islands at the same spots.
+ * Relocations.  The a.out format has one record per 4-byte word of text and
+ * of data (1 byte: none / local segment, 4 bytes: external symbol).  Text
+ * records are produced in order during pass 2 and go to a temp file, with
+ * an external's NAMED-SYMBOL INDEX in place of its final symbol number (the
+ * order of undefined symbols is known only at the end); they are renumbered
+ * when copied into the object.  Data and rodata share one record stream
+ * (rodata follows data), so their few relocations are kept in memory.
+ * As before, the first relocation for a word wins and one at an offset that
+ * is not word-aligned is dropped.
+ */
+static FILE *trf;                     /* text relocation records */
+static int trnext;                    /* text offset of the next record */
+struct drel { int doff, seq, kind, ref; };
+static struct drel *drels;
+static int ndrel, maxdrel;
+
+static void rec(FILE *f, int r, int kind, const int *map)
+{
+    if (ref_defined(r)) {
+        int seg = ref_sec(r);
+        fputc(((seg == SEC_TEXT) ? RSEG_TEXT : (seg == SEC_BSS) ? RSEG_BSS : RSEG_DATA) | kind, f);
+    } else {
+        int idx = map ? map[r] : r;
+        fputc(RSEG_EXT | kind, f);
+        fputc(idx & 0xff, f); fputc((idx >> 8) & 0xff, f); fputc((idx >> 16) & 0xff, f);
+    }
+}
+
+static void addrel(int sec, int off, int kind, const char *name)
+{
+    int r = sym_ref(name, 1);         /* an external enters the table here */
+    if (sec == SEC_TEXT) {
+        if (off & 3 || off < trnext) return;
+        while (trnext < off) { fputc(0, trf); trnext += 4; }
+        rec(trf, r, kind, NULL);
+        trnext = off + 4;
+    } else if (sec == SEC_DATA || sec == SEC_RODATA) {
+        if (ndrel == maxdrel) {
+            maxdrel = maxdrel ? maxdrel * 2 : 64;
+            drels = xrealloc(drels, maxdrel * sizeof(struct drel));
+        }
+        drels[ndrel].doff = sec == SEC_DATA ? off : secsize[SEC_DATA] + off;
+        drels[ndrel].seq = ndrel;
+        drels[ndrel].kind = kind;
+        drels[ndrel].ref = r;
+        ndrel++;
+    }
+}
+
+static int sym_addr_final(const char *n, int *known)
+{
+    return find_label_addr(n, known);
+}
+
+static char *skipws(char *p){ while(*p==' '||*p=='\t')p++; return p; }
+
+/*
+ * Literal pools.  "ldr rd, =x" loads x from a pool slot, pc-relative.  The
+ * literals since the last flush form a group that is placed at the next
+ * .ltorg (or island, below).  Pass 1 records only where each group lands;
+ * pass 2 knows a literal's slot from that and its index in the group, and
+ * keeps the group's values until it writes them.
+ */
+struct pend { unsigned val; char *name; };     /* name: symbol literal */
+static struct pend pend[MAXPEND];
+static int npend;
+static int pend_first;                /* text offset of the group's first ldr */
+static int *grp_off;                  /* pass 1: where each group is placed */
+static int ngrp, maxgrp, cgrp;
+
+static void flush_pool(int pass)
+{
+    int k;
+    if (!npend) return;
+    if (pass == 1) {
+        if (ngrp == maxgrp) {
+            maxgrp = maxgrp ? maxgrp * 2 : 64;
+            grp_off = xrealloc(grp_off, maxgrp * sizeof(int));
+        }
+        grp_off[ngrp++] = secoff[SEC_TEXT];
+    } else
+        cgrp++;
+    for (k = 0; k < npend; k++) {
+        unsigned v = pend[k].val;
+        if (pass == 2 && pend[k].name) {
+            int kn;
+            v = sym_addr_final(pend[k].name, &kn);
+            if (objmode) addrel(SEC_TEXT, secoff[SEC_TEXT], R_ABS32, pend[k].name);
+            free(pend[k].name);
+        }
+        put(SEC_TEXT, v, 4, pass);
+    }
+    npend = 0;
+}
+
+/*
+ * Literal-pool islands.  An ldr reaches its slot with a 12-bit pc offset
+ * (4 KB), but the compiler emits .ltorg only at the end of each function,
+ * so a big function would leave its early literals out of reach.  After an
+ * unconditional "b label" (code never falls through, so data may follow),
+ * place the group if its first literal is more than ISLAND bytes back.  The
+ * test uses only offsets that are the same in both passes, so pass 1 and
+ * pass 2 place the islands at the same spots.
  */
 #define ISLAND 1024
 static void maybe_island(int pass)
 {
-    if(poolflush<curldr && secoff[SEC_TEXT]-pool[poolflush].ldroff > ISLAND)
+    if (npend && secoff[SEC_TEXT] - pend_first > ISLAND)
         flush_pool(pass);
 }
-
-/* is this token a directive/label/instruction? dispatch in a pass. */
-/* pass: 1 = size/labels, 2 = emit. */
 
 static void data_bytes(int sz, const char *args, int pass);
 
@@ -528,10 +689,7 @@ static void do_line(char *raw, int pass)
         while (q<colon){ if(*q==' '||*q=='\t'||*q==','){ok=0;break;} q++; }
         if(!ok) break;
         *colon=0;
-        if (pass==1) {
-            struct sym *s=sym_get(sp);
-            s->defined=1; s->addr=secoff[cursec]; symx[s-syms].sec=cursec;
-        }
+        if (pass==1) sym_define(sp, cursec, secoff[cursec]);
         p = skipws(colon+1);
         if(!*p) return;
     }
@@ -547,14 +705,21 @@ static void do_line(char *raw, int pass)
         else if(!strcmp(dir,"bss")) cursec=SEC_BSS;
         else if(!strcmp(dir,"section")){ if(strstr(args,"rodata"))cursec=SEC_RODATA; else if(strstr(args,"data"))cursec=SEC_DATA; else if(strstr(args,"bss"))cursec=SEC_BSS; else cursec=SEC_TEXT; }
         else if(!strcmp(dir,"syntax")||!strcmp(dir,"arm")||!strcmp(dir,"thumb")||!strcmp(dir,"file")||!strcmp(dir,"ident")||!strcmp(dir,"size")||!strcmp(dir,"type")) return;
-        else if(!strcmp(dir,"globl")){ if(pass==1){ struct sym*s=sym_get(args); s->global=1; } }
-        else if(!strcmp(dir,"align")){ int a=atoi(args); int m=(1<<a)-1; while(secoff[cursec]&m){ if(pass==2)secbuf[cursec][secoff[cursec]]=0; secoff[cursec]++; } }
+        else if(!strcmp(dir,"globl")){
+            if(pass==1){
+                int v=numlabel(args);
+                if(v>=0 && v<maxlab && lab_sec[v]) fatal("local label cannot be global", args);
+                int k=named_get(args);   /* may move syms[] */
+                syms[k].global=1;
+            }
+        }
+        else if(!strcmp(dir,"align")){ int a=atoi(args); int m=(1<<a)-1; while(secoff[cursec]&m) put(cursec,0,1,pass); }
         else if(!strcmp(dir,"word")) data_bytes(4,args,pass);
         else if(!strcmp(dir,"short")||!strcmp(dir,"hword")) data_bytes(2,args,pass);
         else if(!strcmp(dir,"byte")) data_bytes(1,args,pass);
-        else if(!strcmp(dir,"space")){ int n=atoi(args); int k; for(k=0;k<n;k++){ if(pass==2)secbuf[cursec][secoff[cursec]]=0; secoff[cursec]++; } }
+        else if(!strcmp(dir,"space")){ int n=atoi(args); int k; for(k=0;k<n;k++) put(cursec,0,1,pass); }
         else if(!strcmp(dir,"ascii")){ /* "..." possibly with escapes */
-            char *q=strchr(args,'"'); if(q){ q++; while(*q && *q!='"'){ int ch; if(*q=='\\'){ q++; if(*q=='n')ch='\n'; else if(*q=='t')ch='\t'; else if(*q=='0'||(*q>='0'&&*q<='7')){ ch=strtol(q,&q,8); goto put;} else ch=*q; } else ch=*q; q++; put: if(pass==2)secbuf[cursec][secoff[cursec]]=ch; secoff[cursec]++; } } }
+            char *q=strchr(args,'"'); if(q){ q++; while(*q && *q!='"'){ int ch; if(*q=='\\'){ q++; if(*q=='n')ch='\n'; else if(*q=='t')ch='\t'; else if(*q=='0'||(*q>='0'&&*q<='7')){ ch=strtol(q,&q,8); goto putch;} else ch=*q; } else ch=*q; q++; putch: put(cursec,ch,1,pass); } } }
         else if(!strcmp(dir,"ltorg")) flush_pool(pass); /* literals since last flush */
         else { /* ignore unknown directives */ }
         return;
@@ -570,40 +735,40 @@ static void do_line(char *raw, int pass)
         /* ldr rd, =value  -> becomes a pc-relative load into a pool slot */
         if((!strcmp(mnem,"ldr")) && strchr(ops,'=')){
             char *eq=strchr(ops,'='); char *comma=strchr(ops,',');
-            char rds[8]; int rd; long val=0; int issym=0; char symn[64];
+            char rds[8]; int rd; unsigned w=0;
             *comma=0; strncpy(rds,skipws(ops),7); rds[7]=0; rd=reg_num(rds);
             char *v=skipws(eq+1);
-            if(isdigit((unsigned char)*v)||*v=='-'||*v=='+') { val=strtol(v,NULL,0); issym=0; }
-            else { issym=1; strncpy(symn,v,63); symn[63]=0; }
-            if(pass==1){ if(npool>=MAXLIT) fatal("literal pool full",""); pool[npool].val=val; pool[npool].issym=issym; if(issym)strcpy(pool[npool].sym,symn); pool[npool].ldroff=secoff[SEC_TEXT]; npool++; }
-            {
-                int slot = pool[curldr].slotoff;   /* known in pass2 (set at ltorg in pass1) */
-                if(pass==2){
-                    int instr_addr = secbase[SEC_TEXT]+secoff[SEC_TEXT];
-                    int slot_addr  = secbase[SEC_TEXT]+slot;
-                    int off = slot_addr - (instr_addr+8);
-                    unsigned w = 0xE5900000u | (15<<16) | (rd<<12); /* ldr rd,[pc,#..] */
-                    if(off<0){ w=0xE5100000u | (15<<16)|(rd<<12); off=-off; }
-                    if(off>4095) fatal("literal pool out of range (no unconditional branch within 4 KB)", ops);
-                    w |= (off&0xFFF);
-                    unsigned char*b=&secbuf[SEC_TEXT][secoff[SEC_TEXT]]; b[0]=w;b[1]=w>>8;b[2]=w>>16;b[3]=w>>24;
-                }
-                curldr++;
-                secoff[SEC_TEXT]+=4;
+            if(npend>=MAXPEND) fatal("too many literals before a pool","");
+            if(!npend) pend_first=secoff[SEC_TEXT];
+            if(pass==2){
+                int slot = grp_off[cgrp] + 4*npend;
+                int off = (secbase[SEC_TEXT]+slot) - (secbase[SEC_TEXT]+secoff[SEC_TEXT]+8);
+                if(isdigit((unsigned char)*v)||*v=='-'||*v=='+') { pend[npend].val=strtol(v,NULL,0); pend[npend].name=NULL; }
+                else { char *e=v+strlen(v); while(e>v && (e[-1]==' '||e[-1]=='\t')) e--;
+                       pend[npend].val=0; pend[npend].name=xrealloc(NULL,(e-v)+1);
+                       memcpy(pend[npend].name,v,e-v); pend[npend].name[e-v]=0; }
+                w = 0xE5900000u | (15<<16) | (rd<<12); /* ldr rd,[pc,#..] */
+                if(off<0){ w=0xE5100000u | (15<<16)|(rd<<12); off=-off; }
+                if(off>4095) fatal("literal pool out of range (no unconditional branch within 4 KB)", ops);
+                w |= (off&0xFFF);
             }
+            npend++;
+            put(SEC_TEXT,w,4,pass);
             return;
         }
 
         /* normal instruction */
-        if(pass==2){
-            char extname[64]; int extkind;
-            int addr = secbase[cursec]+secoff[cursec];
-            unsigned w = encode(mnem, ops, addr, extname, &extkind);
-            unsigned char*b=&secbuf[cursec][secoff[cursec]]; b[0]=w;b[1]=w>>8;b[2]=w>>16;b[3]=w>>24;
-            if(objmode && extkind==1 && extname[0])
-                addrel(SEC_TEXT, secoff[SEC_TEXT], R_PC24, extname);
+        {
+            unsigned w=0;
+            if(pass==2){
+                char extname[64]; int extkind;
+                int addr = secbase[cursec]+secoff[cursec];
+                w = encode(mnem, ops, addr, extname, &extkind);
+                if(objmode && extkind==1 && extname[0])
+                    addrel(SEC_TEXT, secoff[SEC_TEXT], R_PC24, extname);
+            }
+            put(cursec,w,4,pass);
         }
-        secoff[cursec]+=4;
         if(cursec==SEC_TEXT && !strcmp(mnem,"b")) maybe_island(pass);
     }
 }
@@ -621,141 +786,155 @@ static void data_bytes(int sz, const char *args, int pass)
             if(pass==2){ int kn; v=sym_addr_final(nm,&kn)+ofs;
                 if(objmode && sz==4) addrel(cursec, secoff[cursec], R_ABS32, nm); }
         }
-        if(pass==2){ unsigned char*b=&secbuf[cursec][secoff[cursec]]; int k; for(k=0;k<sz;k++)b[k]=(v>>(8*k))&0xFF; }
-        secoff[cursec]+=sz;
+        put(cursec,(unsigned)v,sz,pass);
     }
 }
 
 static void put4(FILE*f,unsigned v){ fputc(v&0xff,f);fputc((v>>8)&0xff,f);fputc((v>>16)&0xff,f);fputc((v>>24)&0xff,f); }
 
-static int emitidx[MAXSYM];   /* symtab emit-index per syms[] entry */
-
-/* find a reloc at a given segment offset; is_text selects TEXT vs DATA space.
-   Returns the rels[] index or -1. */
-static int find_reloc(int is_text, int segoff)
+static int drel_cmp(const void *a, const void *b)
 {
-    int i, datasz=secoff[SEC_DATA];
-    for(i=0;i<nrel;i++){
-        if(is_text){ if(rels[i].sec==SEC_TEXT && rels[i].off==segoff) return i; }
-        else {
-            int doff = (rels[i].sec==SEC_DATA)?rels[i].off : (rels[i].sec==SEC_RODATA? datasz+rels[i].off : -1);
-            if(doff==segoff) return i;
-        }
-    }
-    return -1;
+    const struct drel *x = a, *y = b;
+    if (x->doff != y->doff) return x->doff < y->doff ? -1 : 1;
+    return x->seq - y->seq;
 }
 
-/* emit the per-word reloc record for one word; return bytes written */
-static int emit_word_reloc(FILE*f, int is_text, int segoff)
+static void list_syms(void)
 {
-    int ri=find_reloc(is_text,segoff);
-    if(ri<0){ fputc(0x00,f); return 1; }            /* RABS */
-    {
-        struct sym*s=sym_find(rels[ri].sym);
-        int kind=rels[ri].kind;
-        if(s && s->defined){
-            int seg = symx[s-syms].sec;
-            int sf = (seg==SEC_TEXT)?RSEG_TEXT : (seg==SEC_BSS)?RSEG_BSS : RSEG_DATA;
-            fputc(sf|kind,f); return 1;
-        } else {
-            int idx = s?emitidx[s-syms]:0;
-            fputc(RSEG_EXT|kind,f);
-            fputc(idx&0xff,f); fputc((idx>>8)&0xff,f); fputc((idx>>16)&0xff,f);
-            return 4;
-        }
-    }
+    int i;
+    for(i=0;i<nsym;i++) if(syms[i].defined){
+        if(objmode) fprintf(stderr,"SYM %s %d sec=%d g=%d\n",syms[i].name,syms[i].addr,syms[i].sec,syms[i].global);
+        else fprintf(stderr,"SYM %s %d\n",syms[i].name,syms[i].addr); }
+    for(i=0;i<maxlab;i++) if(lab_sec[i]){
+        if(objmode) fprintf(stderr,"SYM .L%d %d sec=%d g=0\n",i,lab_addr[i],lab_sec[i]-1);
+        else fprintf(stderr,"SYM .L%d %d\n",i,lab_addr[i]); }
+    for(i=0;i<nsym;i++) if(!syms[i].defined) fprintf(stderr,"UND %s\n",syms[i].name);
 }
 
-/* write a DiscoBSD a.out relocatable object */
-static void write_object(const char*out)
+/* finish a DiscoBSD a.out relocatable object: sections are already in place */
+static void write_object(void)
 {
-    int textsz=secoff[SEC_TEXT];
-    int datasz=secoff[SEC_DATA]+secoff[SEC_RODATA];
+    int textsz=secsize[SEC_TEXT];
+    int datasz=secsize[SEC_DATA]+secsize[SEC_RODATA];
     int datapad=(datasz+3)&~3;
-    int bsssz=(secoff[SEC_BSS]+3)&~3;
-    int order[MAXSYM], no=0, i, off;
-    FILE*f=fopen(out,"wb"); if(!f){perror(out);exit(1);}
+    int bsssz=(secsize[SEC_BSS]+3)&~3;
+    int *emitidx, no=0, i, rt=0, rd=0, st=0, c, off, p;
+    FILE*f=outf;
 
+    /* symbol order: defined globals, then undefined, each in creation order */
+    emitidx=xrealloc(NULL,(nsym+1)*sizeof(int));
     for(i=0;i<nsym;i++) emitidx[i]=-1;
-    for(i=0;i<nsym;i++) if(syms[i].defined&&syms[i].global){ emitidx[i]=no; order[no++]=i; }
-    for(i=0;i<nsym;i++) if(!syms[i].defined){ emitidx[i]=no; order[no++]=i; }
+    for(i=0;i<nsym;i++) if(syms[i].defined&&syms[i].global) emitidx[i]=no++;
+    for(i=0;i<nsym;i++) if(!syms[i].defined) emitidx[i]=no++;
 
-    { int k; for(k=0;k<32;k++) fputc(0,f); }                 /* header placeholder */
-    fwrite(secbuf[SEC_TEXT],1,textsz,f);
-    fwrite(secbuf[SEC_DATA],1,secoff[SEC_DATA],f);
-    fwrite(secbuf[SEC_RODATA],1,secoff[SEC_RODATA],f);
-    { for(i=datasz;i<datapad;i++) fputc(0,f); }
-    { int rt=0; for(off=0;off<textsz;off+=4) rt+=emit_word_reloc(f,1,off); while(rt&3){fputc(0,f);rt++;}
-      { int rd=0; for(off=0;off<datapad;off+=4) rd+=emit_word_reloc(f,0,off); while(rd&3){fputc(0,f);rd++;}
-        { int st=0, j;
-          for(j=0;j<no;j++){ i=order[j]; int len=strlen(syms[i].name);
-            int seg=symx[i].sec, nt;
-            if(!syms[i].defined) nt=N_UNDF|N_EXT;
-            else { nt=(seg==SEC_TEXT)?N_TEXT:(seg==SEC_BSS)?N_BSS:N_DATA; if(syms[i].global)nt|=N_EXT; }
-            fputc(len,f); fputc(nt,f); put4(f,syms[i].defined?syms[i].addr:0);
-            fwrite(syms[i].name,1,len,f); st+=1+1+4+len; }
-          /* header */
-          fseek(f,0,SEEK_SET);
-          put4(f,OBJ_RMAGIC); put4(f,textsz); put4(f,datapad); put4(f,bsssz);
-          put4(f,rt); put4(f,rd); put4(f,st); put4(f,0);
+    fseek(f,32+textsz+datasz,SEEK_SET);
+    for(i=datasz;i<datapad;i++) fputc(0,f);
+
+    /* text relocations: copy the temp records, renumbering externals */
+    while(trnext<textsz){ fputc(0,trf); trnext+=4; }
+    rewind(trf);
+    while((c=getc(trf))!=EOF){
+        fputc(c,f); rt++;
+        if((c&RSMASK)==RSEG_EXT){
+            int idx=getc(trf); idx|=getc(trf)<<8; idx|=getc(trf)<<16;
+            idx=emitidx[idx];
+            fputc(idx&0xff,f); fputc((idx>>8)&0xff,f); fputc((idx>>16)&0xff,f); rt+=3;
         }
-      }
     }
-    fclose(f);
-    if(verbose){
-      for(i=0;i<nsym;i++) if(syms[i].defined) fprintf(stderr,"SYM %s %d sec=%d g=%d\n",syms[i].name,syms[i].addr,symx[i].sec,syms[i].global);
-      for(i=0;i<nsym;i++) if(!syms[i].defined) fprintf(stderr,"UND %s\n",syms[i].name);
+    while(rt&3){fputc(0,f);rt++;}
+
+    /* data(+rodata) relocations, by data-space offset */
+    if(ndrel) qsort(drels,ndrel,sizeof(struct drel),drel_cmp);
+    for(off=0,p=0;off<datapad;off+=4){
+        while(p<ndrel && drels[p].doff<off) p++;
+        if(p<ndrel && drels[p].doff==off){
+            int r=drels[p].ref;
+            rec(f,r,drels[p].kind,emitidx);
+            rd += ref_defined(r) ? 1 : 4;
+            while(p<ndrel && drels[p].doff==off) p++;
+        } else { fputc(0,f); rd++; }
     }
+    while(rd&3){fputc(0,f);rd++;}
+
+    /* symbols */
+    for(i=0;i<nsym;i++) if(syms[i].defined&&syms[i].global) {
+        int len=strlen(syms[i].name), seg=syms[i].sec;
+        int nt=((seg==SEC_TEXT)?N_TEXT:(seg==SEC_BSS)?N_BSS:N_DATA)|N_EXT;
+        fputc(len,f); fputc(nt,f); put4(f,syms[i].addr); fwrite(syms[i].name,1,len,f); st+=6+len; }
+    for(i=0;i<nsym;i++) if(!syms[i].defined) {
+        int len=strlen(syms[i].name);
+        fputc(len,f); fputc(N_UNDF|N_EXT,f); put4(f,0); fwrite(syms[i].name,1,len,f); st+=6+len; }
+
+    fseek(f,0,SEEK_SET);
+    put4(f,OBJ_RMAGIC); put4(f,textsz); put4(f,datapad); put4(f,bsssz);
+    put4(f,rt); put4(f,rd); put4(f,st); put4(f,0);
+    free(emitidx);
 }
 
 static int assemble(const char *in, const char *out)
 {
-    FILE *f=fopen(in,"r"); if(!f){perror(in);return 1;}
+    FILE *f;
     char buf[512];
+    int i, sec;
+
+    for(i=0;i<NHASH;i++) hashtab[i]=-1;
+    f=fopen(in,"r"); if(!f){perror(in);return 1;}
     infile=in;
-    while(fgets(buf,sizeof(buf),f)){ if(nlines>=MAXLINES) fatal("too many input lines",""); lines[nlines]=strdup(buf); nlines++; }
-    fclose(f);
 
-    /* pass 1: sizes, labels, pool slot offsets */
-    cursec=SEC_TEXT; curldr=0; poolflush=0; npool=0;
-    { int i; for(i=0;i<nlines;i++){ lineno=i+1; do_line(lines[i],1); } }
-    /* flush any trailing pool entries at end of text */
-    flush_pool(1);
+    /* pass 1: sizes, labels, literal-pool placement */
+    cursec=SEC_TEXT; npend=0;
+    lineno=0;
+    while(fgets(buf,sizeof(buf),f)){ lineno++; do_line(buf,1); }
+    flush_pool(1);                    /* trailing literals at end of text */
+    for(sec=0;sec<NSEC;sec++) secsize[sec]=secoff[sec];
 
-    /* compute section bases and finalize symbol addresses */
+    /* section bases; symbol addresses become final */
     if(objmode){
         /* segment-relative: text@0, data@0, rodata folded after data, bss@0 */
         secbase[SEC_TEXT]=0; secbase[SEC_DATA]=0;
-        secbase[SEC_RODATA]=secoff[SEC_DATA]; secbase[SEC_BSS]=0;
+        secbase[SEC_RODATA]=secsize[SEC_DATA]; secbase[SEC_BSS]=0;
+        filebase[SEC_TEXT]=32;
+        filebase[SEC_DATA]=32+secsize[SEC_TEXT];
+        filebase[SEC_RODATA]=32+secsize[SEC_TEXT]+secsize[SEC_DATA];
     } else {
         secbase[SEC_TEXT]=0;
-        secbase[SEC_RODATA]=secbase[SEC_TEXT]+secoff[SEC_TEXT];
-        secbase[SEC_DATA]=secbase[SEC_RODATA]+secoff[SEC_RODATA];
-        secbase[SEC_BSS]=secbase[SEC_DATA]+secoff[SEC_DATA];
+        secbase[SEC_RODATA]=secbase[SEC_TEXT]+secsize[SEC_TEXT];
+        secbase[SEC_DATA]=secbase[SEC_RODATA]+secsize[SEC_RODATA];
+        secbase[SEC_BSS]=secbase[SEC_DATA]+secsize[SEC_DATA];
+        filebase[SEC_TEXT]=0;
+        filebase[SEC_RODATA]=secsize[SEC_TEXT];
+        filebase[SEC_DATA]=secsize[SEC_TEXT]+secsize[SEC_RODATA];
     }
-    { int i; for(i=0;i<nsym;i++) if(syms[i].defined) syms[i].addr += secbase[symx[i].sec]; }
+    for(i=0;i<nsym;i++) if(syms[i].defined) syms[i].addr += secbase[syms[i].sec];
+    for(i=0;i<maxlab;i++) if(lab_sec[i]) lab_addr[i] += secbase[lab_sec[i]-1];
 
     /* pass 2: emit */
-    { int i;
-      memset(secoff,0,sizeof(secoff)); cursec=SEC_TEXT; curldr=0; poolflush=0;
-      for(i=0;i<nlines;i++){ lineno=i+1; do_line(lines[i],2); }
-      flush_pool(2);
+    outf=fopen(out,"w+"); if(!outf){perror(out);return 1;}
+    if(objmode){
+        tmpname=xrealloc(NULL,strlen(out)+6);
+        strcpy(tmpname,out); strcat(tmpname,".rtmp");
+        trf=fopen(tmpname,"w+"); if(!trf){perror(tmpname);return 1;}
+    }
+    memset(secoff,0,sizeof(secoff)); cursec=SEC_TEXT; npend=0; cgrp=0;
+    rewind(f); lineno=0;
+    while(fgets(buf,sizeof(buf),f)){ lineno++; do_line(buf,2); }
+    flush_pool(2);
+    fclose(f);
+    for(sec=0;sec<NSEC;sec++){
+        if(sec!=SEC_BSS) sec_flush(sec);
+        if(secoff[sec]!=secsize[sec]) fatal("internal: pass 2 size differs from pass 1","");
     }
 
-    if(objmode){ write_object(out); return 0; }
-
-    /* flat mode: concatenate text+rodata+data (bss appended as zeros) into out */
-    {
-        FILE *of=fopen(out,"wb"); if(!of){perror(out);return 1;}
-        fwrite(secbuf[SEC_TEXT],1,secoff[SEC_TEXT],of);
-        fwrite(secbuf[SEC_RODATA],1,secoff[SEC_RODATA],of);
-        fwrite(secbuf[SEC_DATA],1,secoff[SEC_DATA],of);
-        { int k; for(k=0;k<secoff[SEC_BSS];k++) fputc(0,of); }
-        fclose(of);
+    if(objmode){
+        write_object();
+        fclose(trf); remove(tmpname); tmpname=NULL;
+    } else {
+        /* flat image: text, rodata, data, then bss as zeros */
+        fseek(outf,secsize[SEC_TEXT]+secsize[SEC_RODATA]+secsize[SEC_DATA],SEEK_SET);
+        for(i=0;i<secsize[SEC_BSS];i++) fputc(0,outf);
     }
-    /* report symbols to stderr (only with -v; the harness passes it) */
-    if(verbose){ int i; for(i=0;i<nsym;i++) if(syms[i].defined) fprintf(stderr,"SYM %s %d\n",syms[i].name,syms[i].addr);
-      for(i=0;i<nsym;i++) if(!syms[i].defined) fprintf(stderr,"UND %s\n",syms[i].name); }
+    if(fclose(outf)!=0) fatal("write error","");
+    if(verbose) list_syms();
     return 0;
 }
 
