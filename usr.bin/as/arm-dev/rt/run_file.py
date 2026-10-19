@@ -5,7 +5,7 @@
 # Loads the a.out like the GBA kernel does (text+data at 0x02001800, bss
 # zeroed) into the GBAED user window (250 KB, up to the end of EWRAM), and
 # serves the syscalls the native libc uses through the simulated-SWI
-# trampoline vector at 0x03007E00: exit, read, write, open, close, unlink,
+# trampoline vector at 0x03007E00: exit, read, write, open, close, unlink, chmod,
 # stat, lstat, fstat, lseek, sbrk.  Guest paths are resolved inside --root (default: current dir), so
 # a program can read and write real host files there.  fd 1/2 go to the
 # host's stdout/stderr.  Exit status is the guest's exit code.
@@ -118,6 +118,8 @@ def hook(uc, addr, size, ud):
             else:
                 if r0 > 2: os.close(fds[r0])
                 del fds[r0]
+        elif sysno == 15:                                  # chmod
+            os.chmod(hpath(cstr(r0)), r1 & 0o7777)
         elif sysno == 10:                                  # unlink
             os.unlink(hpath(cstr(r0)))
         elif sysno in (38, 40):                            # stat, lstat
