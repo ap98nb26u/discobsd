@@ -16,10 +16,6 @@ _exit:
 	b	_exit			@ not reached
 	.ltorg
 
-	.globl	exit
-exit:
-	b	_exit
-
 	.globl	write
 write:
 	push	{lr}

@@ -9,7 +9,7 @@ _start:
 	str	r2, [r3]		@ environ = envp
 	@ r0=argc, r1=argv, r2=envp are already the args for main(argc,argv,envp)
 	bl	main
-	bl	_exit			@ _exit(main's return); does not return
+	bl	exit			@ exit(main's return): flush stdio, _exit
 .Lhang:
 	b	.Lhang
 	.ltorg
