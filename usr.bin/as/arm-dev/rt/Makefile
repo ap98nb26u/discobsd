@@ -44,7 +44,17 @@ test: crt0.o libc.a
 	cd t.host && ./stdiotest > out
 	for f in out t1 t2 t3; do cmp t.native/$$f t.host/$$f || exit 1; done
 	@echo "stdiotest: native libc matches the host libc"
+	$(CPP) divtest.c -o divtest.i
+	$(SMLRC) divtest.i divtest.s
+	$(ASARM) -o divtest.o divtest.s
+	$(LDARM) -e _start -o divtest.out crt0.o divtest.o -L. -lc
+	python3 run_file.py divtest.out > t.native/div
+	gcc -w -DHOST -o t.host/divtest divtest.c
+	t.host/divtest > t.host/div
+	cmp t.native/div t.host/div
+	@echo "divtest: native division matches the host"
 
 clean:
-	rm -f *.o libc.s stdio.i stdio.s libc.a stdiotest.i stdiotest.s stdiotest.out
+	rm -f *.o libc.s stdio.i stdio.s libc.a stdiotest.i stdiotest.s stdiotest.out \
+	    divtest.i divtest.s divtest.out
 	rm -rf t.native t.host

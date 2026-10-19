@@ -151,19 +151,34 @@ sbrk:
 	.ltorg
 
 	@ ---- EABI integer division (repeated subtraction; correct, slow) ----
-	@ __aeabi_uidivmod: r0=N, r1=D -> r0=N/D, r1=N%D
+	@ __aeabi_uidivmod: r0=N, r1=D -> r0=N/D, r1=N%D  (D=0 -> 0, 0)
+	@ Shift-and-subtract: shift D left (with a quotient bit in r3) until it
+	@ reaches N or its top bit, then walk it back down, subtracting where
+	@ it fits.  At most 32+32 steps, whatever the quotient (the old loop
+	@ subtracted D once per unit of quotient).  No flag-setting S suffix or
+	@ tst: as_arm does not emit them, so the top bit is tested with cmp/blt.
 	.globl	__aeabi_uidivmod
 __aeabi_uidivmod:
 	cmp	r1, #0
 	beq	.Ludz
 	mov	r2, #0			@ quotient
-.Lus:
+	mov	r3, #1			@ current quotient bit
+.Lua:
+	cmp	r1, r0
+	bhs	.Lub			@ D >= N: aligned
+	cmp	r1, #0
+	blt	.Lub			@ D's top bit set: cannot shift further
+	lsl	r1, r1, #1
+	lsl	r3, r3, #1
+	b	.Lua
+.Lub:
 	cmp	r0, r1
-	blo	.Lud			@ N < D -> done
-	sub	r0, r0, r1
-	add	r2, r2, #1
-	b	.Lus
-.Lud:
+	subhs	r0, r0, r1		@ N -= D where it fits
+	orrhs	r2, r2, r3		@ and record that quotient bit
+	lsr	r1, r1, #1
+	lsr	r3, r3, #1
+	cmp	r3, #0
+	bne	.Lub
 	mov	r1, r0			@ remainder
 	mov	r0, r2			@ quotient
 	bx	lr

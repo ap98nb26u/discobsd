@@ -10,3 +10,6 @@ mgbarun
 /rt/stdiotest.out
 /rt/t.native
 /rt/t.host
+/rt/divtest.i
+/rt/divtest.s
+/rt/divtest.out
