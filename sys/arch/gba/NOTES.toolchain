@@ -429,6 +429,23 @@ device `as` assembles smlrc.s identically under run_file.py.
 On real GBAED hardware the new libc and streaming as build and run
 hello.c and ctest.c through the on-device cc.
 
-Remaining for an on-device self-compile: ld_arm still reads every object
-whole and builds the output in memory (smlrc.o is 173 KB), so it needs the
-same streaming treatment; then run cc on smlrc.c on real GBAED hardware.
+ld_arm streaming rewrite: pass 1 reads only headers and symbol tables
+(archive members are pulled in the same order as before); pass 2 reads
+each segment and its relocation records side by side through two file
+handles, a word at a time, and writes the relocated words straight out.
+Global symbols are hashed with variable-length names; each object keeps
+its sizes and a symbol-number -> global map.  Output is byte-identical to
+the previous ld_arm (hello, stdiotest, smlrc; a.out and -b).  Device ld:
+bss 78.7 KB -> 2.2 KB.
+
+Self-host rehearsal in Unicorn with the DEVICE binaries (run_file.py):
+device cpp + smlrc + as + ld build smlrc.c into smlrc1 (151,676 bytes);
+smlrc1 compiles smlrc.c to the same .s; as + ld turn that into smlrc2,
+byte-identical to smlrc1 - a fixed point.  The defines smlrc.c needs come
+on the command line (cc passes -D through to cpp):
+  -D__SMALLER_C_32__ -D__SMALLER_C_SCHAR__ -DARM -D_RETROBSD
+  -DNO_ANNOTATIONS -DNO_PREPROCESSOR -DNO_PPACK -DNO_EXTRA_WARNS -DSTATIC
+  -DSYNTAX_STACK_MAX=3200   (smlrc.c #includes cgarm.c from its directory)
+
+Remaining: run that self-compile on real GBAED hardware (needs smlrc.c and
+cgarm.c on the device).
