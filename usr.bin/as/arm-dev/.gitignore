@@ -13,3 +13,6 @@ mgbarun
 /rt/divtest.i
 /rt/divtest.s
 /rt/divtest.out
+/rt/strtest.i
+/rt/strtest.s
+/rt/strtest.out

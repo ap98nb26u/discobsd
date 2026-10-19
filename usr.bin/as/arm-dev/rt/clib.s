@@ -220,6 +220,141 @@ __aeabi_idivmod:
 __aeabi_idiv:
 	b	__aeabi_idivmod		@ returns quotient in r0
 
+	@ ---- hot string/memory/stdio routines, hand-written ----
+	@ smlrc's own code (and the C versions these replace) is unoptimized;
+	@ profiling the self-built smlrc showed strcmp/memmove/strchr/strlen
+	@ and per-character stdio as a large share of its run time.  Only
+	@ instructions as_arm emits are used: no S suffix, no tst, no
+	@ conditional loads/stores, no register offsets.
+
+	@ int strcmp(const char *a, const char *b): compares as unsigned char
+	.globl	strcmp
+strcmp:
+.Lscl:
+	ldrb	r2, [r0], #1
+	ldrb	r3, [r1], #1
+	cmp	r2, #0
+	beq	.Lsce
+	cmp	r2, r3
+	beq	.Lscl
+.Lsce:
+	sub	r0, r2, r3
+	bx	lr
+
+	@ size_t strlen(const char *s)
+	.globl	strlen
+strlen:
+	mov	r1, r0
+.Lsll:
+	ldrb	r2, [r1], #1
+	cmp	r2, #0
+	bne	.Lsll
+	sub	r0, r1, r0
+	sub	r0, r0, #1
+	bx	lr
+
+	@ char *strchr(const char *s, int c): c==0 finds the terminator
+	.globl	strchr
+strchr:
+	and	r1, r1, #255
+.Lchl:
+	ldrb	r2, [r0], #1
+	cmp	r2, r1
+	beq	.Lchf
+	cmp	r2, #0
+	bne	.Lchl
+	mov	r0, #0
+	bx	lr
+.Lchf:
+	sub	r0, r0, #1
+	bx	lr
+
+	@ void *memmove(void *d, const void *s, size_t n); memcpy is the same.
+	@ Copies a word at a time when d, s (and, going backwards, n) are
+	@ word-aligned; otherwise a byte at a time.  Returns d (r0 kept).
+	.globl	memcpy
+memcpy:
+	.globl	memmove
+memmove:
+	cmp	r0, r1
+	bhi	.Lmvb			@ d > s: copy backwards (overlap-safe)
+	mov	r3, r0
+	orr	r12, r3, r1
+	and	r12, r12, #3
+	cmp	r12, #0
+	bne	.Lmfb			@ unaligned: bytes
+.Lmfw:
+	cmp	r2, #4
+	blo	.Lmfb
+	ldr	r12, [r1], #4
+	str	r12, [r3], #4
+	sub	r2, r2, #4
+	b	.Lmfw
+.Lmfb:
+	cmp	r2, #0
+	beq	.Lmvd
+	ldrb	r12, [r1], #1
+	strb	r12, [r3], #1
+	sub	r2, r2, #1
+	b	.Lmfb
+.Lmvb:
+	add	r1, r1, r2
+	add	r3, r0, r2
+	orr	r12, r3, r1
+	and	r12, r12, #3
+	cmp	r12, #0
+	bne	.Lmbb			@ unaligned ends: bytes
+.Lmbw:
+	cmp	r2, #4
+	blo	.Lmbb
+	ldr	r12, [r1, #-4]!
+	str	r12, [r3, #-4]!
+	sub	r2, r2, #4
+	b	.Lmbw
+.Lmbb:
+	cmp	r2, #0
+	beq	.Lmvd
+	ldrb	r12, [r1, #-1]!
+	strb	r12, [r3, #-1]!
+	sub	r2, r2, #1
+	b	.Lmbb
+.Lmvd:
+	bx	lr
+
+	@ int fputc(int c, FILE *p) / int fgetc(FILE *p): the buffered fast
+	@ path of the <stdio.h> putc/getc macros (struct _iobuf: _cnt at 0,
+	@ _ptr at 4); when the buffer is full/empty, tail-call _flsbuf(c, p) /
+	@ _filbuf(p) in stdio.c with the arguments still in r0/r1.
+	.globl	fputc
+fputc:
+	ldr	r2, [r1]
+	sub	r2, r2, #1
+	str	r2, [r1]
+	cmp	r2, #0
+	blt	.Lfpc
+	ldr	r3, [r1, #4]
+	strb	r0, [r3], #1
+	str	r3, [r1, #4]
+	and	r0, r0, #255
+	bx	lr
+.Lfpc:
+	b	_flsbuf
+
+	.globl	fgetc
+fgetc:
+	ldr	r1, [r0]
+	sub	r1, r1, #1
+	str	r1, [r0]
+	cmp	r1, #0
+	blt	.Lfgc
+	ldr	r2, [r0, #4]
+	ldrb	r3, [r2], #1
+	str	r2, [r0, #4]
+	mov	r0, r3
+	bx	lr
+.Lfgc:
+	b	_filbuf
+
 	.data
 	.globl	errno
 errno:
