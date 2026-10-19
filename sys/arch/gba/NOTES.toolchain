@@ -447,5 +447,14 @@ on the command line (cc passes -D through to cpp):
   -DNO_ANNOTATIONS -DNO_PREPROCESSOR -DNO_PPACK -DNO_EXTRA_WARNS -DSTATIC
   -DSYNTAX_STACK_MAX=3200   (smlrc.c #includes cgarm.c from its directory)
 
-Remaining: run that self-compile on real GBAED hardware (needs smlrc.c and
-cgarm.c on the device).
+On the device: share/examples/gba/selfhost/selfhost.sh, installed in
+/usr/share/examples/gba/selfhost with copies of smlrc.c and cgarm.c, runs
+the stages by hand (cpp, smlrc, as, ld; not cc, so stage 2 can use the new
+compiler) and cmp's smlrc1 against smlrc2.
+
+SELF-HOSTED ON REAL GBAED HARDWARE (2026-10-19/20): selfhost.sh printed
+"smlrc1 and smlrc2 are identical".  Stage 1 (the cross-built smlrc, gcc
+-Os) took 3 min 41 s.  Stage 2 (smlrc1, built by Smaller C itself:
+unoptimized, division by repeated subtraction) took 1 h 23 min, about 20x
+slower, close to the 15x seen in Unicorn.  One "sd: close: card-ready wait
+timed out" warning appeared during stage 2 without affecting the result.
