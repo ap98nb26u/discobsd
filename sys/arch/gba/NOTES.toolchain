@@ -458,3 +458,17 @@ SELF-HOSTED ON REAL GBAED HARDWARE (2026-10-19/20): selfhost.sh printed
 unoptimized, division by repeated subtraction) took 1 h 23 min, about 20x
 slower, close to the 15x seen in Unicorn.  One "sd: close: card-ready wait
 timed out" warning appeared during stage 2 without affecting the result.
+(That warning was the sd_close_rw() post-CMD12 wait; fixed in 98daf379.)
+
+Division speed-up (2026-10-20): clib.s's __aeabi_uidivmod subtracted the
+divisor once per unit of quotient (e.g. 0xffffffff/1 = 4 billion steps),
+which dominated smlrc1's run time.  It is now shift-and-subtract (align
+the divisor, then walk it back down: at most 32+32 steps), using only
+instructions as_arm emits (cond-suffixed sub/orr, cmp/blt for the top
+bit; no S suffix or tst).  rt/divtest.c, run by `make test`, checks
+signed and unsigned / and % over edge-value pairs against the host.  In
+Unicorn smlrc1 now compiles smlrc.c in 11.7 s instead of 32 s (2.7x),
+with the same output.
+On real GBAED, selfhost.sh stage 2 dropped from 1 h 23 min to 7 min
+50 s (10.6x), still a fixed point.  Stage 1 (cross-built smlrc) is
+unchanged at 3 min 43 s.
