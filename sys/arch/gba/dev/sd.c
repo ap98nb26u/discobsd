@@ -168,9 +168,8 @@ static uint8_t sd_open_settle;
  * Set by boot() (machdep.c) around its final sync() before a reboot/
  * halt, so sd_close_rw()'s card-ready wait below can afford to wait
  * much longer than it safely can during ordinary runtime. That wait's
- * retry bound (currently 800 iterations, ~2.4s worst case) is a
- * deliberately tight compromise - see the long comment in
- * sd_close_rw() - between two failure modes that were both observed
+ * retry budget is a compromise - see the comment in sd_close_rw() -
+ * between two failure modes that were both observed
  * on real hardware: too short and a genuinely still-busy card (SD
  * program time after a write can run into the hundreds of ms,
  * observed worse after sustained heavy rewrite of the same blocks,
@@ -388,58 +387,41 @@ sd_close_rw(void)
     ed_sd_mode(ED_SD_MODE2);
 
     /*
-     * ed_sd_dat_rd() (ed.c) already retries internally with its own
-     * bound (added this session) before giving up - looping this
-     * many more times around it multiplies the two bounds together,
-     * the same "outer x inner" mistake ed_sd_wait_f0() had (see its
-     * comment in ed.c) and just as capable of turning a bounded wait
-     * into a many-hour real-hardware hang when the card genuinely
-     * isn't responding. Cut sharply for the same reason.
+     * Wait for the card to release BUSY after CMD12 (DAT0 high, a poll
+     * reads back 0xff).  After a multi-block write this is the card's
+     * real program time, which can be long under sustained writes.
+     * Like sd_write_sectors()'s per-block wait, tell the two failure
+     * modes apart with ed_sd_dat_rd_wedged (see ed.c):
      *
-     * DBG: bumped from 50 - vm_swap.c's new swapin checksum-verify
-     * caught real GBAED hardware handing back the *previous*
-     * generation's data for a just-rewritten block (checksum matched
-     * an earlier write to the same blkno exactly, not garbage),
-     * meaning this "wait for card ready" loop was returning before
-     * the card had actually finished committing the write to flash -
-     * each ed_sd_dat_rd() covers only what the FPGA's own SPI-shift
-     * busy flag bounds (microseconds), not the card's real internal
-     * program-time busy state (DAT0 held low, can be many ms,
-     * especially after heavy sustained rewrite of the same blocks as
-     * this session's fork/exec-heavy respawn loop does). 50 iterations
-     * of that was nowhere near enough headroom.
+     *  - card responsive but still busy: each poll returns promptly, so
+     *    keep polling, with a generous budget (polls are cheap);
+     *  - card/FPGA wedged: each poll runs ed_sd_dat_rd()'s own inner
+     *    BUSY wait to its cap, so bail at once - a large outer bound
+     *    must not multiply that into a long hang (the "outer x inner"
+     *    mistake ed_sd_wait_f0() had).
+     *
+     * This wait used to be a single bound of 800 polls, the same value
+     * the per-block wait outgrew for the same reason.  Real GBAED
+     * hardware still hit it on a responsive card during a long
+     * compile (smlrc self-build, 2026-10-19): the write was then
+     * redone by card_write()'s retry, so nothing was lost, but each
+     * hit printed a warning and rewrote the whole transfer.
+     * sd_shutdown_flush widens the budget for the final pre-reboot
+     * flush, where a longer wait is nearly free (see its declaration).
      */
-    /*
-     * DBG: dialed back from 5000 - that fixed the checksum-mismatch
-     * corruption (confirmed: zero mismatches across two full test
-     * rounds after the bump), but real GBAED hardware then hung for
-     * several minutes partway through a later boot, before any
-     * newproc/swap activity had even logged - consistent with this
-     * same loop now burning its full worst case (5000 iterations *
-     * ed_sd_dat_rd()'s own up-to-50000-cycle inner wait, ~15s) instead
-     * of failing fast the way the original i=50 did (~150ms worst
-     * case). 800 keeps most of the added headroom (16x the original)
-     * while capping a genuine no-response case at ~2.4s instead of
-     * ~15s. The printf below exists so a real timeout here is no
-     * longer silent - if this fires, that's confirmation this exact
-     * wait is the hang, not a guess.
-     */
-    /*
-     * During the final pre-reboot/halt flush (sd_shutdown_flush set by
-     * boot(), machdep.c) wait far longer than is safe during ordinary
-     * runtime - see the comment on sd_shutdown_flush's declaration
-     * above for why this asymmetry is the right tradeoff.
-     */
-    i = sd_shutdown_flush ? 8000 : 800;
-    while (--i) {
-        if (ed_sd_dat_rd() == 0xff)
-            break;
-    }
-    if (i == 0) {
-        printf("sd: close: card-ready wait timed out\n");
+    {
+        uint16_t bound = sd_shutdown_flush ? 30000 : 8000;
+
+        for (i = bound; --i; ) {
+            if (ed_sd_dat_rd() == 0xff)
+                return 0;
+            if (ed_sd_dat_rd_wedged)            /* wedge: fail fast */
+                break;
+        }
+        printf("sd: close: card-ready wait timed out%s\n",
+            ed_sd_dat_rd_wedged ? " (wedged)" : "");
         return SD_ERR_CMD_TIMEOUT;
     }
-    return 0;
 }
 
 static uint8_t
