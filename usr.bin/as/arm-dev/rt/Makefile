@@ -53,8 +53,17 @@ test: crt0.o libc.a
 	t.host/divtest > t.host/div
 	cmp t.native/div t.host/div
 	@echo "divtest: native division matches the host"
+	$(CPP) strtest.c -o strtest.i
+	$(SMLRC) strtest.i strtest.s
+	$(ASARM) -o strtest.o strtest.s
+	$(LDARM) -e _start -o strtest.out crt0.o strtest.o -L. -lc
+	python3 run_file.py strtest.out > t.native/str
+	gcc -w -DHOST -o t.host/strtest strtest.c
+	t.host/strtest > t.host/str
+	cmp t.native/str t.host/str
+	@echo "strtest: native string/memory routines match the host"
 
 clean:
 	rm -f *.o libc.s stdio.i stdio.s libc.a stdiotest.i stdiotest.s stdiotest.out \
-	    divtest.i divtest.s divtest.out
+	    divtest.i divtest.s divtest.out strtest.i strtest.s strtest.out
 	rm -rf t.native t.host

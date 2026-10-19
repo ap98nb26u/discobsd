@@ -146,29 +146,9 @@ int _filbuf(struct _iobuf *p)
     return *p->_base & 255;
 }
 
-int fgetc(struct _iobuf *p)
-{
-    int c;
-
-    p->_cnt = p->_cnt - 1;
-    if (p->_cnt >= 0) {
-        c = *p->_ptr & 255;
-        p->_ptr = p->_ptr + 1;
-        return c;
-    }
-    return _filbuf(p);
-}
-
-int fputc(int c, struct _iobuf *p)
-{
-    p->_cnt = p->_cnt - 1;
-    if (p->_cnt >= 0) {
-        *p->_ptr = c;
-        p->_ptr = p->_ptr + 1;
-        return c & 255;
-    }
-    return _flsbuf(c, p);
-}
+/* fgetc() and fputc() (the getc/putc fast paths) are in clib.s. */
+int fgetc(struct _iobuf *p);
+int fputc(int c, struct _iobuf *p);
 
 int fputs(char *s, struct _iobuf *p)
 {
@@ -316,34 +296,22 @@ int exit(int status)
  * and the conversions d i u o x X c s p %.  %p prints (nil) for a null
  * pointer, else 0x-prefixed hex, like the cross libc's doprnt.
  */
-int _nout;
-
-int _out(int c, struct _iobuf *fp)
-{
-    _nout = _nout + 1;
-    return fputc(c, fp);
-}
-
-int _pad(int c, int n, struct _iobuf *fp)
-{
-    while (n > 0) {
-        _out(c, fp);
-        n = n - 1;
-    }
-    return 0;
-}
-
+/* fputc is the hand-written fast path in clib.s, so the engine calls it
+   directly per character and counts the output itself (a C helper per
+   character cost a full smlrc function frame each time). */
 int _doprnt(char *fmt, char *ap, struct _iobuf *fp)
 {
     char buf[16];
     char *s, *pre, *dig;
     int c, v, left, zero, plus, space, width, prec, len, base, isnum, plen;
+    int nout;
     unsigned u;
 
-    _nout = 0;
+    nout = 0;
     while (*fmt) {
         if (*fmt != '%') {
-            _out(*fmt, fp);
+            fputc(*fmt, fp);
+            nout = nout + 1;
             fmt = fmt + 1;
             continue;
         }
@@ -434,20 +402,23 @@ int _doprnt(char *fmt, char *ap, struct _iobuf *fp)
 
         plen = strlen(pre);
         width = width - len - plen;
+        if (width < 0)
+            width = 0;
+        nout = nout + width + len + plen;
         if (!left && !zero)
-            _pad(' ', width, fp);
+            for (v = 0; v < width; v++) fputc(' ', fp);
         while (*pre) {
-            _out(*pre, fp);
+            fputc(*pre, fp);
             pre = pre + 1;
         }
         if (!left && zero)
-            _pad('0', width, fp);
+            for (v = 0; v < width; v++) fputc('0', fp);
         for (v = 0; v < len; v++)
-            _out(s[v], fp);
+            fputc(s[v], fp);
         if (left)
-            _pad(' ', width, fp);
+            for (v = 0; v < width; v++) fputc(' ', fp);
     }
-    return _nout;
+    return nout;
 }
 
 int vfprintf(struct _iobuf *fp, char *fmt, char *ap)

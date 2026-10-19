@@ -1,6 +1,6 @@
 # Run a native DiscoBSD/GBA OMAGIC a.out in Unicorn with file I/O.
 #
-#   python3 run_file.py [--root DIR] [--max N] prog.out [args...]
+#   python3 run_file.py [--root DIR] [--max N] [--profile FILE] prog.out [args...]
 #
 # Loads the a.out like the GBA kernel does (text+data at 0x02001800, bss
 # zeroed) into the GBAED user window (250 KB, up to the end of EWRAM), and
@@ -9,6 +9,8 @@
 # stat, lstat, fstat, lseek, sbrk.  Guest paths are resolved inside --root (default: current dir), so
 # a program can read and write real host files there.  fd 1/2 go to the
 # host's stdout/stderr.  Exit status is the guest's exit code.
+# --profile FILE writes "<block address> <times run> <bytes>" lines (basic
+# blocks, ARM code assumed) for finding the hot spots.
 import os, sys, struct
 from unicorn import *
 from unicorn.arm_const import *
@@ -21,9 +23,11 @@ HANDLER = 0x00E00000
 args = sys.argv[1:]
 root = "."
 maxinsn = 0
+proffile = None
 while args and args[0].startswith("--"):
     if args[0] == "--root": root = args[1]; args = args[2:]
     elif args[0] == "--max": maxinsn = int(args[1]); args = args[2:]
+    elif args[0] == "--profile": proffile = args[1]; args = args[2:]
     else: sys.exit("unknown option " + args[0])
 prog = args[0]
 
@@ -152,6 +156,13 @@ def hook(uc, addr, size, ud):
     uc.reg_write(UC_ARM_REG_PC, lr + 4)
 
 mu.hook_add(UC_HOOK_CODE, hook, begin=HANDLER, end=HANDLER)
+prof = {}
+if proffile:
+    def bhook(uc, addr, size, ud):
+        e = prof.get(addr)
+        if e: e[0] += 1
+        else: prof[addr] = [1, size]
+    mu.hook_add(UC_HOOK_BLOCK, bhook)
 mu.reg_write(UC_ARM_REG_SP, sp)
 mu.reg_write(UC_ARM_REG_R0, len(ptrs))
 mu.reg_write(UC_ARM_REG_R1, argv)
@@ -164,6 +175,9 @@ except UcError as e:
         e, mu.reg_read(UC_ARM_REG_PC), mu.reg_read(UC_ARM_REG_LR),
         mu.reg_read(UC_ARM_REG_SP), mu.reg_read(UC_ARM_REG_R11)))
     sys.exit(125)
+if proffile:
+    with open(proffile, "w") as pf:
+        for a in sorted(prof): pf.write("%08x %d %d\n" % (a, prof[a][0], prof[a][1]))
 if status[0] is None:
     sys.stderr.write("[run_file] stopped without exit (pc=%08x)\n"
                      % mu.reg_read(UC_ARM_REG_PC))
