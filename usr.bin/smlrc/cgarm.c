@@ -14,7 +14,10 @@
  *     [fp+8 .. fp+20] = incoming register params r0-r3, spilled
  *     [fp+24 ..]      = stack params (5th+), AAPCS-compatible
  *     [fp-1 .. ]      = locals (CurFxnMinLocalOfs, negative)
- * fp = entry_sp - 24; callee-saved r4-r10 are pushed just below the frame.
+ * fp = entry_sp - 24.  Below the locals, the function saves exactly the
+ * callee-saved registers (r4-r10, its temp-register stack) it uses; the
+ * prolog is written with a fixed-width placeholder and back-patched at the
+ * epilog, once the frame size and the registers used are known.
  * This is AAPCS-compatible for the register half (interops with the
  * gcc-built libc for calls of up to 4 args).
  *
@@ -39,6 +42,7 @@ int GenWreg = ArmWReg;      /* current working register */
 int GenLreg, GenRreg;       /* operands after GenPopReg() */
 int GenLeaf;
 fpos_t GenPrologPos;
+int GenUsedRegs;            /* r4..r10 the current function names (bit mask) */
 int CanUseTempRegs;
 int TempsUsed;
 
@@ -55,7 +59,11 @@ void prn(int r)             /* print an ARM register name */
   case 13: printf2("sp"); break;
   case 14: printf2("lr"); break;
   case 15: printf2("pc"); break;
-  default: printf2("r%d", r); break;
+  default:
+    if (r >= ArmTmp0 && r < ArmTmp0 + ArmMaxTemps)
+      GenUsedRegs |= 1 << r;
+    printf2("r%d", r);
+    break;
   }
 }
 
@@ -533,20 +541,73 @@ void GenJumpIfNotZero(int label)
 }
 
 /* --- function frame ------------------------------------------------------ */
+/*
+ * The prolog's frame setup is written as this placeholder, then replaced
+ * (same length, padded with a blank line) by GenUpdateFrameSize() at the
+ * epilog: the locals allocation (immediate when encodable, nothing when
+ * empty) followed by a push of only the r4-r10 the body used, so the saved
+ * registers sit below the locals.  The placeholder is the longest possible
+ * replacement.
+ */
+#define PROLOG_PLACEHOLDER \
+  "\tldr\tip, =0x00000000\n\tsub\tsp, sp, ip\n\tpush\t{r4, r5, r6, r7, r8, r9, r10}\n"
+
 STATIC
-void GenWriteFrameSize(void)
+void GenRegList(char* buf)  /* "{r4, r6}" from GenUsedRegs */
 {
-  /* fixed-width so the single-pass prolog can be back-patched in place */
-  printf2("\tldr\tip, =0x%08X\n", (unsigned)(-CurFxnMinLocalOfs));
+  int r, first = 1;
+  strcpy(buf, "{");
+  for (r = ArmTmp0; r < ArmTmp0 + ArmMaxTemps; r++)
+    if (GenUsedRegs & (1 << r))
+    {
+      if (!first)
+        strcpy(buf + strlen(buf), ", ");
+      sprintf(buf + strlen(buf), "r%d", r);
+      first = 0;
+    }
+  strcpy(buf + strlen(buf), "}");
+}
+
+STATIC
+int GenUsedRegCnt(void)
+{
+  int r, n = 0;
+  for (r = ArmTmp0; r < ArmTmp0 + ArmMaxTemps; r++)
+    if (GenUsedRegs & (1 << r))
+      n++;
+  return n;
 }
 
 STATIC
 void GenUpdateFrameSize(void)
 {
   fpos_t pos;
+  char buf[160], list[48];
+  int frame = -CurFxnMinLocalOfs;
+  int len, room = strlen(PROLOG_PLACEHOLDER);
+
+  buf[0] = 0;
+  if (frame && ArmImm8r((unsigned)frame))
+    sprintf(buf, "\tsub\tsp, sp, #%d\n", frame);
+  else if (frame)
+    sprintf(buf, "\tldr\tip, =0x%08X\n\tsub\tsp, sp, ip\n", (unsigned)frame);
+  if (GenUsedRegs)
+  {
+    GenRegList(list);
+    sprintf(buf + strlen(buf), "\tpush\t%s\n", list);
+  }
+  len = strlen(buf);
+  if (len < room)
+  {
+    while (len < room - 1)
+      buf[len++] = ' ';
+    buf[len++] = '\n';
+    buf[len] = 0;
+  }
+
   fgetpos(OutFile, &pos);
   fsetpos(OutFile, &GenPrologPos);
-  GenWriteFrameSize();
+  printf2("%s", buf);
   fsetpos(OutFile, &pos);
 }
 
@@ -562,19 +623,34 @@ void GenFxnProlog(void)
   puts2("\tstr\tr2, [sp, #16]");
   puts2("\tstr\tr3, [sp, #20]");
   puts2("\tmov\tr11, sp");
-  puts2("\tpush\t{r4, r5, r6, r7, r8, r9, r10}");
   GenLeaf = 1;
+  GenUsedRegs = 0;
   fgetpos(OutFile, &GenPrologPos);
-  GenWriteFrameSize();
-  puts2("\tsub\tsp, sp, ip");   /* allocate locals (ip = size, 0 when none) */
+  printf2("%s", PROLOG_PLACEHOLDER);   /* back-patched by GenUpdateFrameSize */
 }
 
 STATIC
 void GenFxnEpilog(void)
 {
+  char list[48];
+  int regs = GenUsedRegs;
+
   GenUpdateFrameSize();
-  puts2("\tsub\tsp, r11, #28");
-  puts2("\tpop\t{r4, r5, r6, r7, r8, r9, r10}");
+  if (regs)
+  {
+    /* the saved registers are just below the locals */
+    int at = -CurFxnMinLocalOfs + 4 * GenUsedRegCnt();
+    if (ArmImm8r((unsigned)at))
+      printf2("\tsub\tsp, r11, #%d\n", at);
+    else
+    {
+      GenMovImm(ArmIP, at);
+      puts2("\tsub\tsp, r11, ip");
+    }
+    GenUsedRegs = regs;               /* GenMovImm prints no r4-r10 */
+    GenRegList(list);
+    printf2("\tpop\t%s\n", list);
+  }
   puts2("\tldr\tlr, [r11, #4]");
   puts2("\tldr\tip, [r11, #0]");
   puts2("\tadd\tsp, r11, #24");
