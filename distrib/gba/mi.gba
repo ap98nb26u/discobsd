@@ -815,6 +815,17 @@ file /usr/share/examples/gba/gfxtest4
 file /usr/share/examples/gba/keytest
 file /usr/share/examples/gba/beeptest
 
+# Self-hosting check: rebuild smlrc on the device (selfhost.sh, GBAED).
+default
+dirmode 0775
+filemode 0664
+dir /usr/share/examples/gba/selfhost
+file /usr/share/examples/gba/selfhost/smlrc.c
+file /usr/share/examples/gba/selfhost/cgarm.c
+default
+filemode 0775
+file /usr/share/examples/gba/selfhost/selfhost.sh
+
 link /sbin/bootloader
 target /sbin/reboot
 link /sbin/fastboot

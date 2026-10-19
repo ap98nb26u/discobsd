@@ -8,6 +8,8 @@
 # cross-builds those programs with the tree toolchain and installs the
 # a.out binaries next to their sources.  hello.c and ctest.c are left as
 # source only: they are meant to be compiled on the device (`cc hello.c`).
+# selfhost/ gets selfhost.sh plus copies of the compiler's own sources
+# (usr.bin/smlrc/smlrc.c and cgarm.c), so smlrc can be rebuilt on the device.
 # The GBA FSIMG rule (sys/arch/gba/conf/Makefile.inc) runs `make install`
 # here, and distrib/gba/mi.gba lists what goes into the image.
 TOPSRC!=cd ../../..; pwd
@@ -95,3 +97,7 @@ install:	all
 		for s in ${SRCONLY} Makefile; do \
 			cp $$s ${DESTDIR}${EXDIR}/$$s; \
 		done
+		mkdir -p ${DESTDIR}${EXDIR}/selfhost
+		${INSTALL} -m 755 selfhost/selfhost.sh ${DESTDIR}${EXDIR}/selfhost/selfhost.sh
+		cp ${TOPSRC}/usr.bin/smlrc/smlrc.c ${TOPSRC}/usr.bin/smlrc/cgarm.c \
+			${DESTDIR}${EXDIR}/selfhost/
