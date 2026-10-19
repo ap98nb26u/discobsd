@@ -113,14 +113,15 @@ static int parse_imm(const char *s, long *out)
 }
 
 /* encode a 32-bit constant into ARM data-processing rotate:imm8; -1 if it
-   does not fit. */
+   does not fit.  The CPU computes imm8 ROR (2*rot), so imm8 is v rotated
+   LEFT by 2*rot: rotate v left by 2*i until it fits in 8 bits, then rot = i. */
 static int enc_imm8r(unsigned v)
 {
     int i;
     for (i = 0; i < 16; i++) {
         unsigned r = i ? ((v << (2*i)) | (v >> (32-2*i))) : v;
         if ((r & 0xFFFFFF00u) == 0)
-            return (i ? (16 - i) : 0) << 8 | (r & 0xFF);
+            return i << 8 | (r & 0xFF);
     }
     return -1;
 }
@@ -417,7 +418,7 @@ struct symx { int sec; };             /* parallel to syms[] */
 static struct symx symx[MAXSYM];
 
 /* literal pool: each ldr= in source order gets a slot (text-local offset). */
-struct pool { unsigned val; char sym[64]; int issym; int slotoff; int emitted; };
+struct pool { unsigned val; char sym[64]; int issym; int slotoff; int emitted; int ldroff; };
 static struct pool pool[MAXLIT];
 static int npool;                     /* total ldr= seen */
 static int poolflush;                 /* index of first not-yet-placed entry */
@@ -469,9 +470,39 @@ static int sym_addr_final(const char *n, int *known)
 /* trim leading blanks */
 static char *skipws(char *p){ while(*p==' '||*p=='\t')p++; return p; }
 
+static int curldr;   /* running index into pool[] during a pass */
+
+/* place the literals seen since the last flush at the current text offset
+   (pass 1 assigns the slots, pass 2 writes the values). */
+static void flush_pool(int pass)
+{
+    int k;
+    for(k=poolflush;k<curldr;k++){
+        if(pass==1) pool[k].slotoff=secoff[SEC_TEXT];
+        if(pass==2){ unsigned v=pool[k].val; if(pool[k].issym){int kn; v=sym_addr_final(pool[k].sym,&kn); if(objmode)addrel(SEC_TEXT,pool[k].slotoff,R_ABS32,pool[k].sym);} unsigned char*b=&secbuf[SEC_TEXT][pool[k].slotoff]; b[0]=v;b[1]=v>>8;b[2]=v>>16;b[3]=v>>24; }
+        secoff[SEC_TEXT]+=4;
+    }
+    poolflush=curldr;
+}
+
+/*
+ * Literal-pool islands.  An "ldr rd, =x" reaches its pool slot with a 12-bit
+ * pc offset (4 KB), but the compiler emits .ltorg only at the end of each
+ * function, so a big function would leave its early literals out of reach.
+ * After an unconditional "b label" (code never falls through, so data may
+ * follow), place the pending literals if the oldest is more than ISLAND
+ * bytes back.  The test uses only offsets that are the same in both passes,
+ * so pass 1 and pass 2 place the islands at the same spots.
+ */
+#define ISLAND 1024
+static void maybe_island(int pass)
+{
+    if(poolflush<curldr && secoff[SEC_TEXT]-pool[poolflush].ldroff > ISLAND)
+        flush_pool(pass);
+}
+
 /* is this token a directive/label/instruction? dispatch in a pass. */
 /* pass: 1 = size/labels, 2 = emit. */
-static int curldr;   /* running index into pool[] during a pass */
 
 static void data_bytes(int sz, const char *args, int pass);
 
@@ -524,12 +555,7 @@ static void do_line(char *raw, int pass)
         else if(!strcmp(dir,"space")){ int n=atoi(args); int k; for(k=0;k<n;k++){ if(pass==2)secbuf[cursec][secoff[cursec]]=0; secoff[cursec]++; } }
         else if(!strcmp(dir,"ascii")){ /* "..." possibly with escapes */
             char *q=strchr(args,'"'); if(q){ q++; while(*q && *q!='"'){ int ch; if(*q=='\\'){ q++; if(*q=='n')ch='\n'; else if(*q=='t')ch='\t'; else if(*q=='0'||(*q>='0'&&*q<='7')){ ch=strtol(q,&q,8); goto put;} else ch=*q; } else ch=*q; q++; put: if(pass==2)secbuf[cursec][secoff[cursec]]=ch; secoff[cursec]++; } } }
-        else if(!strcmp(dir,"ltorg")){ /* flush literals seen since last .ltorg */
-            int k;
-            for(k=poolflush;k<curldr;k++){ pool[k].slotoff=secoff[SEC_TEXT]; secoff[SEC_TEXT]+=4; }
-            if(pass==2){ for(k=poolflush;k<curldr;k++){ unsigned v=pool[k].val; if(pool[k].issym){int kn; v=sym_addr_final(pool[k].sym,&kn); if(objmode)addrel(SEC_TEXT,pool[k].slotoff,R_ABS32,pool[k].sym);} unsigned char*b=&secbuf[SEC_TEXT][pool[k].slotoff]; b[0]=v;b[1]=v>>8;b[2]=v>>16;b[3]=v>>24; } }
-            poolflush=curldr;
-        }
+        else if(!strcmp(dir,"ltorg")) flush_pool(pass); /* literals since last flush */
         else { /* ignore unknown directives */ }
         return;
     }
@@ -549,7 +575,7 @@ static void do_line(char *raw, int pass)
             char *v=skipws(eq+1);
             if(isdigit((unsigned char)*v)||*v=='-'||*v=='+') { val=strtol(v,NULL,0); issym=0; }
             else { issym=1; strncpy(symn,v,63); symn[63]=0; }
-            if(pass==1){ if(npool>=MAXLIT) fatal("literal pool full",""); pool[npool].val=val; pool[npool].issym=issym; if(issym)strcpy(pool[npool].sym,symn); npool++; }
+            if(pass==1){ if(npool>=MAXLIT) fatal("literal pool full",""); pool[npool].val=val; pool[npool].issym=issym; if(issym)strcpy(pool[npool].sym,symn); pool[npool].ldroff=secoff[SEC_TEXT]; npool++; }
             {
                 int slot = pool[curldr].slotoff;   /* known in pass2 (set at ltorg in pass1) */
                 if(pass==2){
@@ -558,6 +584,7 @@ static void do_line(char *raw, int pass)
                     int off = slot_addr - (instr_addr+8);
                     unsigned w = 0xE5900000u | (15<<16) | (rd<<12); /* ldr rd,[pc,#..] */
                     if(off<0){ w=0xE5100000u | (15<<16)|(rd<<12); off=-off; }
+                    if(off>4095) fatal("literal pool out of range (no unconditional branch within 4 KB)", ops);
                     w |= (off&0xFFF);
                     unsigned char*b=&secbuf[SEC_TEXT][secoff[SEC_TEXT]]; b[0]=w;b[1]=w>>8;b[2]=w>>16;b[3]=w>>24;
                 }
@@ -577,6 +604,7 @@ static void do_line(char *raw, int pass)
                 addrel(SEC_TEXT, secoff[SEC_TEXT], R_PC24, extname);
         }
         secoff[cursec]+=4;
+        if(cursec==SEC_TEXT && !strcmp(mnem,"b")) maybe_island(pass);
     }
 }
 
@@ -692,7 +720,7 @@ static int assemble(const char *in, const char *out)
     cursec=SEC_TEXT; curldr=0; poolflush=0; npool=0;
     { int i; for(i=0;i<nlines;i++){ lineno=i+1; do_line(lines[i],1); } }
     /* flush any trailing pool entries at end of text */
-    { int k; for(k=poolflush;k<curldr;k++){ pool[k].slotoff=secoff[SEC_TEXT]; secoff[SEC_TEXT]+=4; } poolflush=curldr; }
+    flush_pool(1);
 
     /* compute section bases and finalize symbol addresses */
     if(objmode){
@@ -711,7 +739,7 @@ static int assemble(const char *in, const char *out)
     { int i;
       memset(secoff,0,sizeof(secoff)); cursec=SEC_TEXT; curldr=0; poolflush=0;
       for(i=0;i<nlines;i++){ lineno=i+1; do_line(lines[i],2); }
-      { int k; for(k=poolflush;k<curldr;k++){ unsigned v=pool[k].val; if(pool[k].issym){int kn;v=sym_addr_final(pool[k].sym,&kn); if(objmode)addrel(SEC_TEXT,pool[k].slotoff,R_ABS32,pool[k].sym);} unsigned char*b=&secbuf[SEC_TEXT][pool[k].slotoff]; b[0]=v;b[1]=v>>8;b[2]=v>>16;b[3]=v>>24; } }
+      flush_pool(2);
     }
 
     if(objmode){ write_object(out); return 0; }
