@@ -3,3 +3,10 @@ ldarm
 smlrc-arm
 mgbarun
 /rt/libc.s
+/rt/stdio.i
+/rt/stdio.s
+/rt/stdiotest.i
+/rt/stdiotest.s
+/rt/stdiotest.out
+/rt/t.native
+/rt/t.host

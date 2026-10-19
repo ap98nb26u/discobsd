@@ -9,7 +9,10 @@
 
 ASARM = ../asarm
 SMLRC = ../smlrc-arm
+LDARM = ../ldarm
 AR    = ../../../../tools/bin/ar
+# smlrc-arm is built with NO_PREPROCESSOR; strip comments/#defines first.
+CPP   = gcc -E -P -undef -nostdinc
 
 all: crt0.o libc.a
 
@@ -20,9 +23,28 @@ clib.o: clib.s
 libc.o: libc.c
 	$(SMLRC) libc.c libc.s
 	$(ASARM) -o $@ libc.s
-libc.a: clib.o libc.o
+stdio.o: stdio.c
+	$(CPP) stdio.c -o stdio.i
+	$(SMLRC) stdio.i stdio.s
+	$(ASARM) -o $@ stdio.s
+libc.a: clib.o libc.o stdio.o
 	rm -f $@
-	$(AR) rc $@ clib.o libc.o
+	$(AR) rc $@ clib.o libc.o stdio.o
+
+# Check the native libc against the host's: build stdiotest.c both ways, run
+# the native one in Unicorn (run_file.py), compare output and files written.
+test: crt0.o libc.a
+	$(CPP) stdiotest.c -o stdiotest.i
+	$(SMLRC) stdiotest.i stdiotest.s
+	$(ASARM) -o stdiotest.o stdiotest.s
+	$(LDARM) -e _start -o stdiotest.out crt0.o stdiotest.o -L. -lc
+	rm -rf t.native t.host && mkdir t.native t.host
+	cd t.native && python3 ../run_file.py ../stdiotest.out > out
+	gcc -w -DHOST -o t.host/stdiotest stdiotest.c
+	cd t.host && ./stdiotest > out
+	for f in out t1 t2 t3; do cmp t.native/$$f t.host/$$f || exit 1; done
+	@echo "stdiotest: native libc matches the host libc"
 
 clean:
-	rm -f *.o libc.s libc.a
+	rm -f *.o libc.s stdio.i stdio.s libc.a stdiotest.i stdiotest.s stdiotest.out
+	rm -rf t.native t.host
