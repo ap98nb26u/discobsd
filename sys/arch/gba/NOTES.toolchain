@@ -376,3 +376,59 @@ REMAINING for a complete Phase 1:
 Reproduce: pip install --user --break-system-packages unicorn; build smlrc-arm
 (NOTES 7), asarm (`gcc -O1 -o asarm asarm.c`), ldarm (`gcc -O1 -o ldarm
 ldarm.c`); harnesses run.py/run_asarm.py/run_ld.py in usr.bin/as/arm-dev/.
+
+## 12. Toward self-hosting smlrc: native stdio + streaming as_arm (2026-10-19)
+
+Goal: compile smlrc.c ON the GBA with its own toolchain.  smlrc itself
+already streams (one pass, output written as it goes, fgetpos/fsetpos to
+back-patch frame sizes) and fits the 250 KB window.  This step makes the
+native libc able to run it, and as_arm able to assemble it.
+
+Native libc (usr.bin/as/arm-dev/rt): new stdio.c.  FILE has the same
+layout as struct _iobuf in the shipped <stdio.h>, with _iob[], _filbuf
+and _flsbuf, so the header's getc/putc/putchar macros and stdin/stdout/
+stderr work too.  fopen/fclose/fgetc/fputc/fputs/fflush/fseek/ftell/
+fgetpos/fsetpos, buffered files (BUFSIZ 1024, malloc'd per slot),
+unbuffered stdout/stderr, exit() flushes (crt0 now calls exit, not _exit).
+printf family (printf/fprintf/sprintf/vfprintf/vprintf/vsprintf) with
+flags - 0 + space #, width/precision (and *), l/h, and d i u o x X c s p %
+(%p as the cross libc: "(nil)" or 0x-hex).  ctype functions (isalpha,
+isdigit, isalnum, isspace, ... over the existing _ctype_ table).  smlrc-arm
+is built NO_PREPROCESSOR, so rt/Makefile runs stdio.c through the host cpp.
+`make test` in rt builds stdiotest.c natively and with the host compiler,
+runs the native one in Unicorn (rt/run_file.py: OMAGIC loader in the
+GBAED window, file syscalls on host files) and compares output and files.
+
+as_arm bugs found on the way (both affect any large program):
+- enc_imm8r() wrote the rotate field as 16-i instead of i, so every
+  rotated immediate (outside 0..255) was wrong except rot 8: e.g.
+  `mov r0,#0x80000000` gave 8, `mvn r4,#-2147483648` (= 0x7fffffff) gave
+  a small value.  Now matches arm-none-eabi-as.
+- `ldr rd,=x` masked an out-of-range pool offset with & 0xFFF.  cgarm
+  emits .ltorg only at function end, so functions over 4 KB (smlrc has 5,
+  exprval is 23 KB) loaded garbage (457 such loads in smlrc).  as_arm now
+  places literal-pool islands after an unconditional `b` when the oldest
+  pending literal is over 1 KB back (same decision in both passes), and
+  fails with a clear error if a literal is still out of reach.
+
+as_arm streaming rewrite: input read twice (no line array); section bytes
+written in order straight to their file offset (sizes known after pass 1);
+text relocation records streamed to <out>.rtmp with external symbols
+renumbered when copied in; data relocations, one literal group and the
+symbol table stay in memory (.L<n> labels in a numeric table, other names
+hashed).  No fixed limits on lines/symbols/relocs/section size.  Output is
+byte-identical to the previous as_arm (with the two fixes) for smlrc.s,
+the rt sources and tests, in object and flat (-b) mode.  Device `as`:
+bss 184.5 KB -> 13.6 KB; peak heap for smlrc.s about 40 KB.
+
+Validated in Unicorn (host): native smlrc (smlrc.c compiled by smlrc-arm,
+assembled, linked with crt0 + the new libc.a; 177 KB in the 250 KB window)
+compiles stdio.c and smlrc.c itself to output byte-identical to the host
+smlrc-arm (smlrc.c: 38,155 lines, ~32 s in Unicorn).  The cross-built
+device `as` assembles smlrc.s identically under run_file.py.
+On real GBAED hardware the new libc and streaming as build and run
+hello.c and ctest.c through the on-device cc.
+
+Remaining for an on-device self-compile: ld_arm still reads every object
+whole and builds the output in memory (smlrc.o is 173 KB), so it needs the
+same streaming treatment; then run cc on smlrc.c on real GBAED hardware.
