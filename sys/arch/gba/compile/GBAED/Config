@@ -33,6 +33,7 @@ options         "TTYEDIT_HISTORY=8"         # command-history lines (up/down)
 
 #options        "GLOBAL_DEBUG"              # Enable debugging
 options         "DIAGNOSTIC"                # Enable diagnostics
+options         "HANGDUMP"                  # L+R+SELECT: print where the kernel is (hang debugging)
 
 # Real-time clock / timezone.
 #

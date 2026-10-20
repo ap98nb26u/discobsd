@@ -33,6 +33,7 @@ options         "TTYEDIT_HISTORY=4"         # command-history lines (up/down)
 
 #options        "GLOBAL_DEBUG"              # Enable debugging
 options         "DIAGNOSTIC"                # Enable diagnostics
+options         "HANGDUMP"                  # L+R+SELECT: print where the kernel is (hang debugging)
 
 device           mr0                        # read-only Memory disk in ROM
 
