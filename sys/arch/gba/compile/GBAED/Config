@@ -104,3 +104,8 @@ options         "NSD=1"                     # One SD slot on the EverDrive.
 
 # Real-time clock, reached through the EverDrive's GPIO RTC routing.
 device          rtc0    at ed0
+
+# Pseudo-terminals, for telnet logins through slipd (usr.sbin/slipd).
+# Their tty structures live in the last 1K of EWRAM (KEWRAM in
+# kern_gbaed.ldscript) - IWRAM has no room left.
+service         pty     2

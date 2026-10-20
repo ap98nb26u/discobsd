@@ -123,6 +123,14 @@ bss_loop:
     strlt r2, [r0], #4
     blt bss_loop
 
+    @ --- clear the kernel .bss kept in EWRAM (GBAED; empty on GBA) ---
+    ldr r0, =__ewram_bss_start
+    ldr r1, =__ewram_bss_end
+ewram_bss_loop:
+    cmp r0, r1
+    strlt r2, [r0], #4
+    blt ewram_bss_loop
+
     @ カーネルスタックを u に合わせる
     ldr r0, =u
     add sp, r0, #3072 @ USIZE

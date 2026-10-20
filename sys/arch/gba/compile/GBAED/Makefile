@@ -6,6 +6,8 @@ PARAM += -DMR_ENABLED
 PARAM += -DED_ENABLED
 PARAM += -DSD_ENABLED
 PARAM += -DRTC_ENABLED
+PARAM += -DPTY_ENABLED
+PARAM += -DPTY_NUNITS=2
 PARAM += -DNSD=1
 PARAM += -DSERIAL_CONSOLE
 PARAM += -DCONS_MINOR=0
@@ -77,14 +79,14 @@ OBJS = exec_aout.o exec_conf.o exec_elf.o exec_script.o exec_subr.o \
 	kern_prot.o kern_prot2.o kern_resource.o kern_sig.o kern_sig2.o \
 	kern_subr.o kern_synch.o kern_sysctl.o kern_time.o subr_prf.o \
 	subr_rmap.o sys_generic.o sys_inode.o sys_pipe.o sys_process.o \
-	syscalls.o tty.o tty_subr.o tty_tty.o ufs_alloc.o ufs_bio.o \
-	ufs_bmap.o ufs_dsort.o ufs_fio.o ufs_inode.o ufs_mount.o \
-	ufs_namei.o ufs_subr.o ufs_syscalls.o ufs_syscalls2.o \
-	vfs_vnops.o vm_sched.o vm_swap.o vm_swp.o cons.o mem.o swap.o \
-	clock.o conf.o machdep.o mpu.o sig_machdep.o syscall.o sysctl.o \
-	mrams.o ed.o sd.o rtc.o mgba_uart.o gba_text.o gba_font.o \
-	swkbd.o gba_sound.o gba_audio.o gba_gpanel.o sram.o \
-	gba_sio_uart.o 
+	syscalls.o tty.o tty_pty.o tty_subr.o tty_tty.o ufs_alloc.o \
+	ufs_bio.o ufs_bmap.o ufs_dsort.o ufs_fio.o ufs_inode.o \
+	ufs_mount.o ufs_namei.o ufs_subr.o ufs_syscalls.o \
+	ufs_syscalls2.o vfs_vnops.o vm_sched.o vm_swap.o vm_swp.o cons.o \
+	mem.o swap.o clock.o conf.o machdep.o mpu.o sig_machdep.o \
+	syscall.o sysctl.o mrams.o ed.o sd.o rtc.o mgba_uart.o \
+	gba_text.o gba_font.o swkbd.o gba_sound.o gba_audio.o \
+	gba_gpanel.o sram.o gba_sio_uart.o 
 
 CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/kern/exec_script.c $S/kern/exec_subr.c $S/kern/init_main.c \
@@ -96,11 +98,11 @@ CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/kern/kern_synch.c $S/kern/kern_sysctl.c $S/kern/kern_time.c \
 	$S/kern/subr_prf.c $S/kern/subr_rmap.c $S/kern/sys_generic.c \
 	$S/kern/sys_inode.c $S/kern/sys_pipe.c $S/kern/sys_process.c \
-	$S/kern/syscalls.c $S/kern/tty.c $S/kern/tty_subr.c \
-	$S/kern/tty_tty.c $S/kern/ufs_alloc.c $S/kern/ufs_bio.c \
-	$S/kern/ufs_bmap.c $S/kern/ufs_dsort.c $S/kern/ufs_fio.c \
-	$S/kern/ufs_inode.c $S/kern/ufs_mount.c $S/kern/ufs_namei.c \
-	$S/kern/ufs_subr.c $S/kern/ufs_syscalls.c \
+	$S/kern/syscalls.c $S/kern/tty.c $S/kern/tty_pty.c \
+	$S/kern/tty_subr.c $S/kern/tty_tty.c $S/kern/ufs_alloc.c \
+	$S/kern/ufs_bio.c $S/kern/ufs_bmap.c $S/kern/ufs_dsort.c \
+	$S/kern/ufs_fio.c $S/kern/ufs_inode.c $S/kern/ufs_mount.c \
+	$S/kern/ufs_namei.c $S/kern/ufs_subr.c $S/kern/ufs_syscalls.c \
 	$S/kern/ufs_syscalls2.c $S/kern/vfs_vnops.c $S/kern/vm_sched.c \
 	$S/kern/vm_swap.c $S/kern/vm_swp.c $S/dev/cons.c $S/dev/mem.c \
 	$S/dev/swap.c $S/arch/gba/gba/clock.c $S/arch/gba/gba/conf.c \
@@ -282,6 +284,9 @@ syscalls.o: $S/kern/syscalls.c
 	${COMPILE_C}
 
 tty.o: $S/kern/tty.c
+	${COMPILE_C}
+
+tty_pty.o: $S/kern/tty_pty.c
 	${COMPILE_C}
 
 tty_subr.o: $S/kern/tty_subr.c
