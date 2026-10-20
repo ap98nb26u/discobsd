@@ -20,7 +20,10 @@ set vblank_flag, which nothing read, so it was removed -- on-screen
 input and the cursor blink are polled via REG_VCOUNT/lbolt, not a VBLANK
 IRQ. Keypad, SIO (serial), DMA-completion, HBlank and VCount interrupts
 are all UNUSED -- input and video timing are polled (swkbd.c reads
-REG_KEYINPUT and REG_VCOUNT directly).
+REG_KEYINPUT and REG_VCOUNT directly).  Exception: SERIAL_CONSOLE builds
+(GBAED) also enable the SIO interrupt (bit7) as a backstop - in UART mode
+it fires on send-full, receive-EMPTY or error, never on a byte arriving,
+so the receive FIFO is still emptied by polling (gba_sio_uart.c).
 
 (GBA REG_IE bit numbering: bit0=VBLANK, bit1=HBlank, bit2=VCount,
 bit3=Timer0, bit12=Keypad -- see gba.h IRQ_* defines.)
@@ -35,6 +38,23 @@ Timer0 config (clock.c):
     REG_TM0CNT_L = 65536 - (16777216 / 1024 / HZ)   ; HZ=100 -> 65372
     REG_TM0CNT_H = 0x00C3   ; 0x03=/1024 prescale, 0x40=IRQ, 0x80=start
     16.78 MHz / 1024 -> 100 Hz, drives hardclock().
+
+Timer2 + Timer3 (clock.c), no IRQ: Timer2 runs like Timer0 (/1024, same
+reload) and Timer3 counts its overflows (count-up), i.e. one per tick in
+real time even while IME=0.  The Timer0 ISR replays missed hardclock()s
+from Timer3's delta; swkbd.c and gba_audio.c read it too.
+    GOTCHA: Timer2 is NOT a free-running 16-bit counter.  With the
+    hardclock reload it counts 65373..65535 and wraps every 10 ms, so
+    a plain (uint16_t)(now - then) of TM2CNT_L jumps by ~65000 at a
+    wrap.  For finer-than-tick timing use Timer3 * 163 + (Timer2 -
+    65373) - gba_sio_uart.c gsio_now()/gsio_since().  Getting this
+    wrong once made /dev/sio end every burst read within 10 ms and
+    look as if 115200 were too fast for the UART.
+
+/dev/sio burst reads (gba_sio_uart.c sioread()) keep IME=0 until the
+line goes quiet or the read is full: up to ~140 ms at 115200 for a
+1600-byte read.  Ticks are caught up afterwards, but swkbd/console
+polling waits and PCM playback would skip meanwhile.
 
 Dispatch path:
     1. GBA BIOS reads the user IRQ vector at 0x03007FFC and jumps there.
