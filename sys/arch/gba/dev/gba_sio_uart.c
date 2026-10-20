@@ -504,6 +504,14 @@ sioread(dev_t dev, struct uio *uio, int flag)
      * FIFO to overrun.  Bytes go FIFO -> ring -> buf every time, so that
      * what the ring already held comes out ahead of what is still
      * arriving.
+     *
+     * Cost: a read keeps interrupts off until the line has been quiet
+     * for the quiet time or uio_resid bytes are in - for slipd's 1600
+     * byte reads of back-to-back packets, up to ~140 ms at 115200 (~420
+     * ms at 38400).  The clock catches the missed ticks up from Timer3
+     * afterwards, but the software keyboard and the console poll wait
+     * that long, and PCM playback (/dev/audio, fed from the Timer0
+     * interrupt) would skip.  Cap the burst here if that ever matters.
      */
     n = 0;
     ime = REG_IME_;
