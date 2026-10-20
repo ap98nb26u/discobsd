@@ -14,28 +14,61 @@ in WSL2 (whose kernel has no SLIP driver):
   slip_tun.py     SLIP-frames IPv4 packets between the TCP connection and
                   a TUN interface.  --fake answers pings itself (no GBA).
 
-One-time setup (as root, in WSL2):
+One-time setup:
 
-    ip tuntap add dev gba0 mode tun user $USER
-    ip addr add 192.168.7.1 peer 192.168.7.2 dev gba0
-    ip link set gba0 up
+ - WSL2 (as root):  the TUN interface, and a telnet client
+       ip tuntap add dev gba0 mode tun user $USER
+       ip addr add 192.168.7.1 peer 192.168.7.2 dev gba0
+       ip link set gba0 up
+       apt install telnet
+   gba0 does not survive a WSL restart (wsl --shutdown, a Windows
+   reboot); run the three ip commands again then.
+ - Windows: copy com_bridge.ps1 to a Windows drive, e.g. C:\Users\Public
+   (PowerShell will not run a script from \\wsl.localhost).
+ - FTDI cables: Device Manager -> the COM port -> Port Settings ->
+   Advanced -> Latency Timer 1 ms (default 16) shortens round trips.
 
-FTDI cables: Device Manager -> the COM port -> Port Settings -> Advanced
--> Latency Timer 1 ms (default 16) shortens round trips.
+Logging in over telnet:
 
-Running:
+ 1. GBA, on the serial console (Tera Term on COM3, 115200) or the LCD:
+    log in as root and start the IP host in the background:
+        slipd &
+    It takes the UART off the serial console while it runs (the console
+    keeps working on the LCD).  `slipd -t 600 &` instead exits after 10
+    minutes without traffic, which gives the serial console back.
+ 2. Disconnect Tera Term (File -> Disconnect), so COM3 is free.
+ 3. WSL2, terminal 1:    python3 tools/gbanet/slip_tun.py
+    Windows (or from WSL2 through powershell.exe), terminal 2:
+        powershell -ExecutionPolicy Bypass -File C:\Users\Public\com_bridge.ps1
+    It prints "com_bridge: COM3 at 115200 ..."; -Baud must match
+    slipd's rate (default 115200 for both, the serial console's too).
+ 4. WSL2:  ping 192.168.7.2      (RTT about 50-60 ms)
+           telnet 192.168.7.2   then log in as root.
+    Two sessions can be open at once ("slipd: no free terminal" for a
+    third); each runs on its own pty (ttyp0, ttyp1) with TERM=vt100 and
+    the client's window size, so vi works.  Expect a few seconds for
+    the login prompt and ~0.5 s per command: login, the shell and each
+    command are swapped in and out of the GBA's single user window.
+    `exit` logs out and closes the connection; if a session stops
+    responding, Ctrl-] then `quit` leaves the telnet client.
+ 5. Other TCP services:  nc 192.168.7.2 7 (echo), 9 (discard),
+    19 (chargen).
 
- 1. On the GBA (serial console or LCD):   slipd &
-    It takes the UART off the serial console while it runs and sets the
-    line to 115200 (-b to change).  `slipd -t 60` exits after 60 s
-    without traffic, which gives the serial console back.
- 2. In WSL2:      python3 slip_tun.py
- 3. In Windows:   powershell -ExecutionPolicy Bypass -File com_bridge.ps1
-    (from a copy on a Windows drive: scripts on \\wsl.localhost do not
-    run).  -Baud must match slipd's rate (default 115200 for both, the
-    serial console's rate too).
- 4. ping 192.168.7.2
- 5. TCP services:  nc 192.168.7.2 7 (echo), 9 (discard), 19 (chargen)
+Stopping:
+
+ 1. `exit` every telnet session.
+ 2. Stop slipd: `kill <pid>` from a telnet session (ps -ax shows it),
+    or let `slipd -t N` time out.  The serial console comes back.
+ 3. Stop slip_tun.py (Ctrl-C); com_bridge.ps1 then exits by itself
+    (or Ctrl-C it), freeing COM3 for Tera Term again.
+    Packets still in flight when slipd exits reach the console as
+    input: expect a line or two of garbage and "syntax error" there,
+    and press Enter / Ctrl-C before typing a command.
+
+If the GBA stops answering: hold L+R+SELECT (kernels built with
+options HANGDUMP, the default) - it prints the interrupted pc and every
+process's state on the LCD without stopping anything; no output means
+the kernel is stuck with interrupts off.
 
 Testing slipd without a GBA: `slip_tun.py --pty` runs SLIP on a pty
 instead of TCP and prints its name; `make slipd-host` in usr.sbin/slipd
