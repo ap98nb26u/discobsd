@@ -677,6 +677,7 @@ file /sbin/mknod
 file /usr/sbin/mkpasswd
 file /sbin/mount
 file /usr/sbin/pstat
+file /usr/sbin/slipd
 mode 02755
 file /sbin/reboot
 file /sbin/shutdown
