@@ -85,11 +85,13 @@ struct tty {
     short           t_edlen;            /* current edited length */
     short           t_edparm;           /* numeric param of an ESC[n~ seq */
     char            t_edesc;            /* incoming ESC-sequence state 0/1/2 */
+    short           t_edhpos;           /* history recall depth, 0 = new line */
     /*
      * Command history (up/down recall) lives in one shared ring in
-     * kern/tty.c, NOT here: this port has a single interactive console but
-     * two struct tty instances (uartttys + cons.c's cnttys), so a per-tty
-     * TTYEDIT_HISTORYx256B array would be allocated - and wasted - twice.
+     * kern/tty.c, NOT here: a per-tty TTYEDIT_HISTORYx256B array would cost
+     * 2K for every struct tty (uartttys, cons.c's cnttys, the ptys), while
+     * there are only a few interactive terminals.  Only the recall position
+     * is per tty, so one terminal's up/down does not move another's.
      */
 #endif
 /* be careful of tchars & co. */
