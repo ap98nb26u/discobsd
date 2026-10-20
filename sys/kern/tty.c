@@ -269,6 +269,7 @@ void ttyflush (tp, rw)
          */
         tp->t_edlen = tp->t_edcur = 0;
         tp->t_edesc = 0;
+        tp->t_edhpos = 0;
 #endif
         ttwakeup (tp);
     }
@@ -1023,15 +1024,15 @@ ttbreakc (c, tp)
 #define TTYEDIT_HISTORY 8	/* command-history lines (up/down); -D overrides */
 #endif
 /*
- * Shared command-history ring: recently committed console lines, recalled by
- * the up/down cursor keys. One ring for the machine (a single interactive
- * console), so it is deliberately not per-tty - see the note in <sys/tty.h>.
+ * Shared command-history ring: recently committed lines, recalled by the
+ * up/down cursor keys. One ring for the machine, so it is deliberately not
+ * per-tty - see the note in <sys/tty.h>; each tty keeps its own recall
+ * depth (t_edhpos) into it.
  */
 static char          ted_hist[TTYEDIT_HISTORY][256];
 static unsigned char ted_hlen[TTYEDIT_HISTORY];	/* length of each stored line */
 static unsigned char ted_hcount;		/* valid entries, 0..HISTORY */
 static unsigned char ted_hnext;			/* ring slot the next push uses */
-static short         ted_hpos;			/* recall depth: 0 = new line */
 
 /* Move the on-screen cursor left n columns (a backspace does not erase). */
 static void
@@ -1097,7 +1098,7 @@ ted_commit(struct tty *tp, int c)
                 ted_hcount++;
         }
     }
-    ted_hpos = 0;
+    tp->t_edhpos = 0;
     tp->t_edlen = tp->t_edcur = 0;
     tp->t_edesc = 0;
 }
@@ -1164,10 +1165,10 @@ ted_hist_up(struct tty *tp)
 {
     int idx;
 
-    if (ted_hpos >= ted_hcount)			/* nothing older */
+    if (tp->t_edhpos >= ted_hcount)			/* nothing older */
         return;
-    ted_hpos++;
-    idx = (ted_hnext + TTYEDIT_HISTORY - ted_hpos) % TTYEDIT_HISTORY;
+    tp->t_edhpos++;
+    idx = (ted_hnext + TTYEDIT_HISTORY - tp->t_edhpos) % TTYEDIT_HISTORY;
     ted_set_line(tp, ted_hist[idx], ted_hlen[idx]);
 }
 
@@ -1177,14 +1178,14 @@ ted_hist_down(struct tty *tp)
 {
     int idx;
 
-    if (ted_hpos <= 0)				/* already on the new line */
+    if (tp->t_edhpos <= 0)				/* already on the new line */
         return;
-    ted_hpos--;
-    if (ted_hpos == 0) {
+    tp->t_edhpos--;
+    if (tp->t_edhpos == 0) {
         ted_set_line(tp, tp->t_edbuf, 0);	/* clear back to a new line */
         return;
     }
-    idx = (ted_hnext + TTYEDIT_HISTORY - ted_hpos) % TTYEDIT_HISTORY;
+    idx = (ted_hnext + TTYEDIT_HISTORY - tp->t_edhpos) % TTYEDIT_HISTORY;
     ted_set_line(tp, ted_hist[idx], ted_hlen[idx]);
 }
 
