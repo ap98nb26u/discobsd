@@ -9,11 +9,12 @@
  * with the echo, discard and chargen services (svc.c).  The peer is a Linux TUN
  * interface (tools/gbanet/slip_tun.py), which needs no SLIP driver.
  *
- * -b sets the line rate (9600, 38400, 57600 or 115200; default 38400) -
- * the peer must match.  The GBA UART has no receive interrupt and a 4-byte
- * FIFO (see gba_sio_uart.c); 115200 runs cleanly too when the peer pads
- * each packet with about 40 SLIP END bytes (slip_tun.py --lead 40).  -q sets how long the line must stay quiet
- * before a read of a burst ends (default 10 ms, to ride over the USB serial
+ * -b sets the line rate (9600, 38400, 57600 or 115200; default 115200,
+ * the serial console's own rate) - the peer must match.  The GBA UART has
+ * no receive interrupt and a 4-byte FIFO (see gba_sio_uart.c); at 115200
+ * the peer must pad each packet with about 40 SLIP END bytes, as
+ * slip_tun.py does, to cover slipd waking up.  -q sets how long the line
+ * must stay quiet before a read of a burst ends (default 10 ms, to ride over the USB serial
  * adapter's pauses).  -v logs each packet to stderr
  * (the LCD console).  -l keeps every rejected frame (reason, length and
  * bytes, in hex) and writes them to logfile on exit, for finding where
@@ -365,7 +366,7 @@ int
 main(int argc, char **argv)
 {
 	static unsigned char buf[MTU + 100];	/* a whole packet per read */
-	int idle = 0, baud = 38400, quiet = 10, i, n;
+	int idle = 0, baud = 115200, quiet = 10, i, n;
 	unsigned long kst[2];
 	char *logfile = NULL, *dev = "/dev/sio";
 	time_t lasttick = 0, lastrx;

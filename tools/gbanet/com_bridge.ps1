@@ -1,7 +1,7 @@
 # com_bridge.ps1 - copy bytes between a Windows serial port and a TCP port.
 #
 #   powershell -ExecutionPolicy Bypass -File com_bridge.ps1 [-Port COM3]
-#       [-Baud 38400] [-TcpHost localhost] [-TcpPort 5555] [-NoFlow]
+#       [-Baud 115200] [-TcpHost localhost] [-TcpPort 5555] [-NoFlow]
 #
 # Opens the serial port wired to the GBA's link port (UART mode, 8N1),
 # connects to slip_tun.py in WSL2 (WSL2 forwards Windows' localhost to it),
@@ -15,7 +15,7 @@
 # The port is held while this runs; stop it (Ctrl-C) to use Tera Term again.
 param(
     [string]$Port = "COM3",
-    [int]$Baud = 38400,             # slipd's default; the console is 115200
+    [int]$Baud = 115200,            # slipd's default and the console's
     [string]$TcpHost = "localhost",
     [int]$TcpPort = 5555,
     [switch]$NoFlow

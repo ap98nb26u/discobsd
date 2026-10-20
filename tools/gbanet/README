@@ -27,13 +27,13 @@ Running:
 
  1. On the GBA (serial console or LCD):   slipd &
     It takes the UART off the serial console while it runs and sets the
-    line to 38400 (-b to change).  `slipd -t 60` exits after 60 s
+    line to 115200 (-b to change).  `slipd -t 60` exits after 60 s
     without traffic, which gives the serial console back.
  2. In WSL2:      python3 slip_tun.py
  3. In Windows:   powershell -ExecutionPolicy Bypass -File com_bridge.ps1
     (from a copy on a Windows drive: scripts on \\wsl.localhost do not
-    run).  -Baud must match slipd's rate (default 38400 for both); the
-    serial console itself is 115200.
+    run).  -Baud must match slipd's rate (default 115200 for both, the
+    serial console's rate too).
  4. ping 192.168.7.2
  5. TCP services:  nc 192.168.7.2 7 (echo), 9 (discard), 19 (chargen)
 
@@ -44,8 +44,8 @@ throws away P% of the packets each way, to exercise TCP's retransmission.
 
 Line rate: the GBA UART has a 4-byte receive FIFO and no "byte arrived"
 interrupt, so bytes coming to the GBA are only safe while it polls.
-slip_tun.py puts extra END bytes before each packet (--lead, default 12),
+slip_tun.py puts extra END bytes before each packet (--lead, default 40),
 so bytes lost while slipd wakes up fall on padding.  Measured with TCP:
-38400 gives about 2.3 KB/s to the GBA and 2.8 KB/s from it; 115200 with
---lead 40 (12 is too short there) about 5.4 and 6.5 KB/s, no retransmits
-over 100 KB.
+115200 gives about 5.4 KB/s to the GBA and 6.5 KB/s from it, with no
+retransmits over 100 KB (--lead 12 was too short at this rate); 38400
+about 2.3 and 2.8 KB/s.
