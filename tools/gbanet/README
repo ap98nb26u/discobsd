@@ -1,0 +1,43 @@
+GBA SLIP networking - host side
+===============================
+
+The GBA (GBAED build) runs a small IP host, /usr/sbin/slipd, on its
+link-cable UART through /dev/sio.  These two scripts connect it to a
+Linux IP interface when the link cable is on a Windows PC and Linux runs
+in WSL2 (whose kernel has no SLIP driver):
+
+    GBA --link cable/USB serial (COM3)-- com_bridge.ps1 (Windows)
+        --TCP localhost:5555-- slip_tun.py (WSL2) --TUN gba0-- Linux IP
+
+  com_bridge.ps1  copies bytes between the serial port and TCP.  Windows
+                  PowerShell 5.1 and .NET only.  RTS/CTS handshaking on.
+  slip_tun.py     SLIP-frames IPv4 packets between the TCP connection and
+                  a TUN interface.  --fake answers pings itself (no GBA).
+
+One-time setup (as root, in WSL2):
+
+    ip tuntap add dev gba0 mode tun user $USER
+    ip addr add 192.168.7.1 peer 192.168.7.2 dev gba0
+    ip link set gba0 up
+
+FTDI cables: Device Manager -> the COM port -> Port Settings -> Advanced
+-> Latency Timer 1 ms (default 16) shortens round trips.
+
+Running:
+
+ 1. On the GBA (serial console or LCD):   slipd &
+    It takes the UART off the serial console while it runs and sets the
+    line to 38400 (-b to change).  `slipd -t 60` exits after 60 s
+    without traffic, which gives the serial console back.
+ 2. In WSL2:      python3 slip_tun.py
+ 3. In Windows:   powershell -ExecutionPolicy Bypass -File com_bridge.ps1
+    (from a copy on a Windows drive: scripts on \\wsl.localhost do not
+    run).  -Baud must match slipd's rate (default 38400 for both); the
+    serial console itself is 115200.
+ 4. ping 192.168.7.2
+
+Line rate: the GBA UART has a 4-byte receive FIFO and no "byte arrived"
+interrupt, so bytes coming to the GBA are only safe while it polls.  At
+115200 bytes were lost even then; 38400 runs cleanly (ping up to 1000
+bytes, no loss).  slip_tun.py also puts 12 extra END bytes before each
+packet (--lead), so a byte lost while slipd wakes up falls on padding.
