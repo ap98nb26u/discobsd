@@ -147,6 +147,47 @@ volatile int timer0_flag;
  */
 volatile unsigned irq_last_lr;
 
+#ifdef HANGDUMP
+volatile unsigned irq_last_pc;		/* interrupted pc + 4, see locore0.S */
+
+/*
+ * options HANGDUMP: hold L+R+SELECT to have the Timer0 interrupt print
+ * where it interrupted (pc; look it up with addr2line on unix.elf), the
+ * running process and what every process sleeps on - for a hang where
+ * nothing else responds.  Silence means the kernel is stuck with
+ * interrupts off.  It prints once per press, to the LCD (and the serial
+ * console unless /dev/sio has it), from the interrupt; nothing stops.
+ * Side effects: the text lands in whatever the console shows, the same
+ * keys also work the software keyboard (SELECT shows/hides it, L/R
+ * toggle shift/ctrl), and /dev/sio input or PCM may hiccup while it
+ * prints with interrupts off.
+ */
+static void
+gba_hang_dump(void)
+{
+    static int shown;
+    extern void gtxt_blank(int);
+    unsigned k = ~REG_KEYINPUT & 0x3FF;
+    struct proc *p = u.u_procp;
+
+    if (k != 0x304) {			/* L, R, SELECT */
+        shown = 0;
+        return;
+    }
+    if (shown++)
+        return;
+    gtxt_blank(0);
+    printf("HANG pc=%x lr=%x noproc=%d pid=%d stat=%d wchan=%x pri=%d\n",
+        irq_last_pc - 4, irq_last_lr, noproc, p ? p->p_pid : -1,
+        p ? p->p_stat : -1, p ? (unsigned)p->p_wchan : 0,
+        p ? p->p_pri : -1);
+    for (p = allproc; p; p = p->p_nxt)
+        printf(" %d:%d/%x/%x", p->p_pid, p->p_stat, (unsigned)p->p_wchan,
+            p->p_flag);
+    printf("\n");
+}
+#endif /* HANGDUMP */
+
 static void check_irq_pc(void)
 {
     extern char __swap_start[], __swap_end[];
@@ -352,6 +393,9 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
          * sound DMA once per interrupt. Cheap no-op when nothing is playing.
          */
         audio_tick();
+#ifdef HANGDUMP
+        gba_hang_dump();
+#endif
 #ifdef SERIAL_CONSOLE
         /*
          * While /dev/sio is open, leave console polling to idle(), where

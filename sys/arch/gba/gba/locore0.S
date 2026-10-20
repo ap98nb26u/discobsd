@@ -163,6 +163,14 @@ gba_intr_handler:
     @ catches - see the comment there.
     ldr r0, =irq_last_lr
     str lr, [r0]
+#ifdef HANGDUMP
+    @ The interrupted code's own pc+4 is the lr the BIOS IRQ dispatch
+    @ pushed ({r0-r3, r12, lr}, lr at +20) just above our 14 words; keep
+    @ it for the L+R+SELECT dump (gba_hang_dump, machdep.c).
+    ldr r1, [sp, #(14*4 + 20)]
+    ldr r0, =irq_last_pc
+    str r1, [r0]
+#endif
 
     @ change to SYS mode
     mrs r0, cpsr
