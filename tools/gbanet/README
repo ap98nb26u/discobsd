@@ -35,9 +35,17 @@ Running:
     run).  -Baud must match slipd's rate (default 38400 for both); the
     serial console itself is 115200.
  4. ping 192.168.7.2
+ 5. TCP services:  nc 192.168.7.2 7 (echo), 9 (discard), 19 (chargen)
+
+Testing slipd without a GBA: `slip_tun.py --pty` runs SLIP on a pty
+instead of TCP and prints its name; `make slipd-host` in usr.sbin/slipd
+builds slipd for Linux, run as `./slipd-host -d /dev/pts/N`.  --drop P
+throws away P% of the packets each way, to exercise TCP's retransmission.
 
 Line rate: the GBA UART has a 4-byte receive FIFO and no "byte arrived"
-interrupt, so bytes coming to the GBA are only safe while it polls.  At
-115200 bytes were lost even then; 38400 runs cleanly (ping up to 1000
-bytes, no loss).  slip_tun.py also puts 12 extra END bytes before each
-packet (--lead), so a byte lost while slipd wakes up falls on padding.
+interrupt, so bytes coming to the GBA are only safe while it polls.
+slip_tun.py puts extra END bytes before each packet (--lead, default 12),
+so bytes lost while slipd wakes up fall on padding.  Measured with TCP:
+38400 gives about 2.3 KB/s to the GBA and 2.8 KB/s from it; 115200 with
+--lead 40 (12 is too short there) about 5.4 and 6.5 KB/s, no retransmits
+over 100 KB.

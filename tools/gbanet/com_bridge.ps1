@@ -55,9 +55,10 @@ try {
             $k = $ns.Read($buf, 0, [Math]::Min($a, $buf.Length))
             $sp.Write($buf, 0, $k)
             $idle = $false
-        } elseif ($tc.Client.Poll(0, [System.Net.Sockets.SelectMode]::SelectRead)) {
+        } elseif ($tc.Client.Poll(0, [System.Net.Sockets.SelectMode]::SelectRead) -and
+                  $tc.Available -eq 0) {
             break                       # readable with nothing to read: closed
-        }
+        }                               # (data that came in between: next pass)
         if ($idle) { Start-Sleep -Milliseconds 1 }
     }
 } finally {
