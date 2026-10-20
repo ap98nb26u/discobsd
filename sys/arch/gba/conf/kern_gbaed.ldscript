@@ -90,9 +90,14 @@ MEMORY {
      * mrams build's 64K), so a single resident process can be up to 250K and
      * far more can be parked in SD swap. kern_gba.ldscript keeps the 64K
      * USERRAM + 186K EWRAM SWAP split. Keep LENGTH here in sync with
-     * machparam.h's -DGBAED USER_DATA_SIZE and MAXMEM (all 250K) by hand.
+     * machparam.h's -DGBAED USER_DATA_SIZE and MAXMEM (all 249K) by hand.
+     *
+     * The last 1K of EWRAM (KEWRAM) is kernel .bss that IWRAM has no room
+     * for: the pseudo-terminals (tty_pty.o, for telnet logins through
+     * slipd).  USERRAM was 250K before that.
      */
-    USERRAM (rw!x) : ORIGIN = 0x02001800, LENGTH = 250K  /* 0x0200 1800 - 0x0204 0000 (to EWRAM end) */
+    USERRAM (rw!x) : ORIGIN = 0x02001800, LENGTH = 249K  /* 0x0200 1800 - 0x0203 FC00 */
+    KEWRAM  (rw!x) : ORIGIN = 0x0203FC00, LENGTH = 1K    /* 0x0203 FC00 - 0x0204 0000 (to EWRAM end) */
 }
 
 __kernel_flash_start	= ORIGIN(FLASH);
@@ -179,6 +184,17 @@ SECTIONS {
     } > IWRAM AT > FLASH
 
     _sidata = LOADADDR(.data);
+
+    /*
+     * Kernel .bss kept out of IWRAM (see KEWRAM above); listed before .bss
+     * so these input sections land here.  locore0.S zeroes it at boot.
+     */
+    .ewram_bss (NOLOAD) : {
+        __ewram_bss_start = .;
+        *tty_pty.o(.bss .bss.* COMMON)
+        . = ALIGN(4);
+        __ewram_bss_end = .;
+    } > KEWRAM
 
     .bss : {
         __bss_start__ = .;

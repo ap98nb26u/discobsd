@@ -56,11 +56,12 @@
 /*
  * GBAED runs its swap on the real SD card, so the EWRAM swap-staging region
  * the mrams build needs is free to become user RAM: USERRAM fills all of
- * EWRAM after the u/u0 area (see kern_gbaed.ldscript). -DGBAED is set only in
+ * EWRAM after the u/u0 area but the last 1K, which holds the pseudo-ttys
+ * (see kern_gbaed.ldscript). -DGBAED is set only in
  * the GBAED kernel build (sys/arch/gba/compile/GBAED/Makefile PARAM); the
  * plain GBA build and all userland keep the 64K value.
  */
-#define MAXMEM		(250*1024)
+#define MAXMEM		(249*1024)
 #else
 #define MAXMEM		(64*1024)
 #endif
@@ -129,7 +130,7 @@
  */
 #define USER_DATA_START         (0x02001800)
 #ifdef GBAED
-#define USER_DATA_SIZE          (250 * 1024)    /* GBAED: match kern_gbaed.ldscript USERRAM/MAXMEM. */
+#define USER_DATA_SIZE          (249 * 1024)    /* GBAED: match kern_gbaed.ldscript USERRAM/MAXMEM. */
 #else
 #define USER_DATA_SIZE          (64 * 1024)     /* GBA/mrams: match kern_gba.ldscript USERRAM/MAXMEM. */
 #endif

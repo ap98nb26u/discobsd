@@ -102,6 +102,10 @@ u			= ORIGIN(UAREA);
 u_end			= ORIGIN(UAREA) + LENGTH(UAREA);
 _estack			= u_end;
 
+/* No kernel .bss in EWRAM on this build (see kern_gbaed.ldscript). */
+__ewram_bss_start	= 0;
+__ewram_bss_end		= 0;
+
 ENTRY(_start)
 
 SECTIONS {

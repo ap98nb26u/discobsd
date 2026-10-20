@@ -537,7 +537,6 @@ syscall_handler(int sys_num, struct trapframe *frame)
 		u.u_frame->tf_r0 = u.u_error;	/* $a1 - result. */
 		break;
 	}
-out:
 	SIO_KEEPALIVE();
 	/*
 	 * Instruction-set-aware exec entry.
