@@ -49,8 +49,9 @@ def open_tun(name):
 # Extra END bytes before each packet (SLIP ignores empty frames).  The GBA
 # can drop a byte in the gap between waking its reader and the read()
 # taking over the line (/dev/sio, gba_sio_uart.c); padding makes that
-# byte one of these.
-LEAD = 12
+# byte one of these.  40 covers about 3.5 ms at 115200; 12 was too few
+# there (lost bytes at packet starts) though enough at 38400.
+LEAD = 40
 
 
 def slip_encode(pkt, lead=LEAD):
