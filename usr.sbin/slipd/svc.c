@@ -4,6 +4,7 @@
  *	echo (7)	sends back what it receives
  *	discard (9)	takes and drops everything (receive throughput)
  *	chargen (19)	sends a rotating character pattern (send throughput)
+ *	telnet (23)	a login on a pseudo-terminal (telnet.c)
  */
 #include <string.h>
 #include "slipd.h"
@@ -65,4 +66,5 @@ svc_init(void)
 	tcp_listen(&echo_svc);
 	tcp_listen(&discard_svc);
 	tcp_listen(&chargen_svc);
+	telnet_init();
 }

@@ -21,6 +21,7 @@
 #define MAXRETRY	8
 #define RTO_MAX		16
 #define TIMEWAIT	2		/* seconds in TIME_WAIT */
+#define FINWAIT2	60		/* seconds to wait for the peer's FIN */
 
 #define TH_FIN	0x01
 #define TH_SYN	0x02
@@ -274,6 +275,12 @@ tcp_write(struct tcb *tp, const unsigned char *b, int n)
 	return n;		/* tcp_poll() sends it, in full-sized segments */
 }
 
+unsigned char *
+tcp_peer(struct tcb *tp)
+{
+	return tp->raddr;
+}
+
 int
 tcp_room(struct tcb *tp)
 {
@@ -451,15 +458,26 @@ tcp_input(unsigned char *ip, int hlen, int n)
 	tp->snd_wnd = get16(th + 14);
 
 	if (tp->fin_pending == 2) {		/* our FIN was acknowledged */
-		if (tp->state == FIN_WAIT_1)
+		if (tp->state == FIN_WAIT_1) {
 			newstate(tp, FIN_WAIT_2);
-		else if (tp->state == CLOSING) {
+			tp->tw_until = now() + FINWAIT2;
+		} else if (tp->state == CLOSING) {
 			newstate(tp, TIME_WAIT);
 			tp->tw_until = now() + TIMEWAIT;
 		} else if (tp->state == LAST_ACK) {
 			drop(tp);
 			return;
 		}
+	}
+
+	/*
+	 * An empty segment from before rcv_nxt is a keepalive or a window
+	 * probe: answer it with an ACK (our current window), or the peer
+	 * probes forever - e.g. after we closed with a zero window.
+	 */
+	if (dlen == 0 && !(flags & TH_FIN) && SEQ_LT(seq, tp->rcv_nxt)) {
+		send_ack(tp);
+		return;
 	}
 
 	/* data, in order only */
@@ -538,9 +556,9 @@ tcp_timer(void)
 
 		if (tp->state == CLOSED)
 			continue;
-		if (tp->state == TIME_WAIT) {
+		if (tp->state == TIME_WAIT || tp->state == FIN_WAIT_2) {
 			if (t >= tp->tw_until)
-				drop(tp);
+				drop(tp);	/* FIN_WAIT_2: peer never closed */
 			continue;
 		}
 		if (tp->rexmt_at && t >= tp->rexmt_at) {

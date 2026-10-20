@@ -6,7 +6,7 @@
  * Opens /dev/sio (which takes the UART off the serial console while it is
  * open) and answers as the IP address addr (default 192.168.7.2) on a
  * point-to-point SLIP link.  It speaks IPv4, ICMP echo (ping) and TCP,
- * with the echo, discard and chargen services (svc.c).  The peer is a Linux TUN
+ * with the echo, discard, chargen and telnet services (svc.c).  The peer is a Linux TUN
  * interface (tools/gbanet/slip_tun.py), which needs no SLIP driver.
  *
  * -b sets the line rate (9600, 38400, 57600 or 115200; default 115200,
@@ -27,10 +27,15 @@
  *
  * -d uses another device in place of /dev/sio - e.g. a pty, to run slipd
  * on a Linux host against tools/gbanet/slip_tun.py --pty for testing.
+ *
+ * telnet (port 23) runs login(1) on a pseudo-terminal per connection, up
+ * to two at once (telnet.c); -L runs another program there instead, e.g.
+ * /bin/sh on a test host.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
@@ -52,6 +57,7 @@
 #define IPPROTO_ICMP_	1
 
 static int sio = -1;
+fd_set svc_ready;
 int verbose;
 unsigned char myaddr[4] = { 192, 168, 7, 2 };
 
@@ -358,7 +364,7 @@ parse_addr(const char *s, unsigned char *a)
 static void
 usage(void)
 {
-	fprintf(stderr, "usage: slipd [-v] [-a addr] [-b baud] [-q ms] [-t seconds] [-l logfile] [-d dev]\n");
+	fprintf(stderr, "usage: slipd [-v] [-a addr] [-b baud] [-q ms] [-t seconds] [-l logfile] [-d dev] [-L login]\n");
 	exit(1);
 }
 
@@ -373,6 +379,7 @@ main(int argc, char **argv)
 	int is_sio;
 	struct timeval tv;
 	fd_set rf;
+	int maxfd;
 
 	for (i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-v"))
@@ -388,6 +395,8 @@ main(int argc, char **argv)
 			quiet = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "-d") && i + 1 < argc)
 			dev = argv[++i];
+		else if (!strcmp(argv[i], "-L") && i + 1 < argc)
+			login_prog = argv[++i];
 		else if (!strcmp(argv[i], "-l") && i + 1 < argc) {
 			logfile = argv[++i];
 			badlog = malloc(BADLOG);
@@ -418,14 +427,21 @@ main(int argc, char **argv)
 	for (;;) {
 		FD_ZERO(&rf);
 		FD_SET(sio, &rf);
+		maxfd = telnet_fds(&rf, sio);
 		tv.tv_sec = txlen ? 0 : 1;	/* TCP timers run once a second */
 		tv.tv_usec = 0;
-		n = select(sio + 1, &rf, NULL, NULL, &tv);
+		n = select(maxfd + 1, &rf, NULL, NULL, &tv);
 		if (n < 0) {
+			if (errno == EINTR) {	/* SIGCHLD: a login ended */
+				FD_ZERO(&svc_ready);
+				tcp_poll();
+				continue;
+			}
 			perror("slipd: select");
 			break;
 		}
-		if (n > 0) {
+		svc_ready = rf;
+		if (n > 0 && FD_ISSET(sio, &rf)) {
 			n = read(sio, buf, sizeof(buf));
 			if (n < 0) {
 				perror("slipd: read");

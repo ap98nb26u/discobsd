@@ -52,5 +52,14 @@ void	*tcp_appdata(struct tcb *tp);
 void	tcp_setappdata(struct tcb *tp, void *d);
 int	tcp_unsent(struct tcb *tp);
 
+unsigned char *tcp_peer(struct tcb *tp);
+
 /* svc.c */
 void	svc_init(void);
+
+/* telnet.c */
+#include <sys/types.h>
+extern char	*login_prog;
+extern fd_set	svc_ready;		/* slipd.c: what the last select() found */
+void	telnet_init(void);
+int	telnet_fds(fd_set *fs, int max);
