@@ -18,15 +18,22 @@ The TUN device is made once, as root, owned by the user who runs this:
     sudo ip link set gba0 up
 
 --fake answers ICMP echo requests to the peer address itself, to check
-the TUN side without a GBA.  -v prints a line per packet.
+the TUN side without a GBA.  --pty speaks SLIP on a pseudo-terminal
+instead of TCP and prints its name, so slipd built for the host
+(usr.sbin/slipd: make slipd-host; ./slipd-host -d /dev/pts/N) can be
+tested without a GBA.  -v prints a line per packet.
 """
 import argparse
 import fcntl
+import pty
+import tty
 import os
+import random
 import select
 import socket
 import struct
 import sys
+import time
 
 END, ESC, ESC_END, ESC_ESC = 0xC0, 0xDB, 0xDC, 0xDD
 TUNSETIFF = 0x400454CA
@@ -105,7 +112,9 @@ def describe(pkt):
     elif proto == 6 and len(pkt) >= ihl + 14:
         sp, dp, sq, ak, off, fl = struct.unpack("!HHIIBB", pkt[ihl:ihl + 14])
         names = "".join(n for bit, n in ((2, "S"), (16, "A"), (1, "F"), (4, "R"), (8, "P")) if fl & bit)
-        extra = " tcp %d->%d [%s] seq %d ack %d" % (sp, dp, names, sq, ak)
+        win, = struct.unpack("!H", pkt[ihl + 14:ihl + 16])
+        dlen = len(pkt) - ihl - (off >> 4) * 4
+        extra = " tcp %d->%d [%s] seq %d ack %d win %d data %d" % (sp, dp, names, sq, ak, win, dlen)
     elif proto == 17:
         extra = " udp"
     return "%s -> %s proto %d len %d%s" % (src, dst, proto, len(pkt), extra)
@@ -138,10 +147,13 @@ def main():
     ap.add_argument("-v", action="store_true", help="print a line per packet")
     ap.add_argument("-x", action="store_true", help="also print each packet's bytes")
     ap.add_argument("--lead", type=int, default=LEAD, help="SLIP END bytes before each packet")
+    ap.add_argument("--pty", action="store_true", help="SLIP on a pty (host slipd test)")
+    ap.add_argument("--drop", type=float, default=0, help="drop this %% of packets each way (testing)")
     a = ap.parse_args()
 
     tun = open_tun(a.tun)
-    log = (lambda *m: print(*m, flush=True)) if a.v else (lambda *m: None)
+    t0 = time.time()
+    log = (lambda *m: print("%8.3f" % (time.time() - t0), *m, flush=True)) if a.v else (lambda *m: None)
 
     if a.fake:
         print("fake mode on %s: answering pings" % a.tun, flush=True)
@@ -152,6 +164,35 @@ def main():
             if r:
                 log("<tun", describe(r))
                 os.write(tun, r)
+
+    if a.pty:
+        master, slave = pty.openpty()
+        tty.setraw(slave)
+        print("tun %s ready; SLIP on %s" % (a.tun, os.ttyname(slave)), flush=True)
+        dec = SlipDecoder()
+        while True:
+            r, _, _ = select.select([tun, master], [], [])
+            if tun in r:
+                pkt = os.read(tun, 2048)
+                if pkt and pkt[0] >> 4 == 4:
+                    if random.random() * 100 < a.drop:
+                        log("-> gba DROPPED", describe(pkt))
+                        continue
+                    log("-> gba", describe(pkt))
+                    os.write(master, slip_encode(pkt, a.lead))
+            if master in r:
+                try:
+                    data = os.read(master, 4096)
+                except OSError:
+                    data = b""
+                if not data:
+                    continue
+                for pkt in dec.feed(data):
+                    if random.random() * 100 < a.drop:
+                        log("<- gba DROPPED", describe(pkt))
+                        continue
+                    log("<- gba", describe(pkt))
+                    os.write(tun, pkt)
 
     host, port = a.listen.rsplit(":", 1)
     ls = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -183,7 +224,10 @@ def main():
                         log("<- gba", describe(pkt))
                         if a.x:
                             print("   ", pkt.hex(" "), flush=True)
-                        os.write(tun, pkt)
+                        try:
+                            os.write(tun, pkt)
+                        except OSError as e:     # a garbled frame: drop it
+                            log("<- gba rejected:", e)
         except (ConnectionError, OSError) as e:
             print("bridge error:", e, flush=True)
         conn.close()
