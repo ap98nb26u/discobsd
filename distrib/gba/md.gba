@@ -190,6 +190,16 @@ file /usr/lib/crt0.o
 file /usr/lib/libc.a
 
 #
+# The link-cable UART as a raw byte stream for SLIP (char major 20); while
+# open it is taken off the serial console.  SERIAL_CONSOLE (GBAED) builds.
+#
+default
+filemode 0600
+cdev /dev/sio
+major 20
+minor 0
+
+#
 # Raw (character) sd disks - GBA-specific (char major 19 = SD_CMAJOR in
 # sys/arch/gba/gba/conf.c; only this port has that cdevsw slot). Same minor
 # encoding as the shared block sd* nodes (unit<<3 | partition). They let

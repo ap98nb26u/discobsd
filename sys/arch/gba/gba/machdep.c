@@ -249,6 +249,10 @@ console_input_poll(void)
     console_poll_busy = 0;
 }
 
+#ifdef SERIAL_CONSOLE
+extern int gsio_fastpoll_on;            /* gba_sio_uart.c: /dev/sio open */
+#endif
+
 IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
 {
     uint16_t flag = REG_IF;
@@ -256,14 +260,33 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
 
     check_irq_pc();
 #ifdef SERIAL_CONSOLE
-    if (flag & IRQ_SERIAL) {    // serial byte received (or send done)
+    if (flag & IRQ_SERIAL) {    // SIO: overrun/error, send full, receive empty
         extern void gsio_rx_isr(void);
         ack |= IRQ_SERIAL;
-        gsio_rx_isr();          /* capture the byte the instant it lands */
+        gsio_rx_isr();          /* drain what the FIFO holds (no rx IRQ) */
     }
 #endif
     if (flag & IRQ_TIMER0) { // TIMER0
         ack |= IRQ_TIMER0;
+#ifdef SERIAL_CONSOLE
+        /*
+         * While /dev/sio is open, Timer0 runs at ~4 kHz (gsio_fastpoll())
+         * just to keep the SIO receive FIFO drained: UART mode has no
+         * "data arrived" interrupt, and a full FIFO loses the next byte.
+         * The 100 Hz work below runs only when Timer3 - the free-running
+         * 100 Hz tick counter - has moved, so the clock, audio and console
+         * polling keep their normal rate.
+         */
+        if (gsio_fastpoll_on) {
+            static uint16_t tm3_seen;
+            extern void gsio_rx_isr(void);
+
+            gsio_rx_isr();
+            if (REG_TM3CNT_L == tm3_seen)
+                goto timer0_done;
+            tm3_seen = REG_TM3CNT_L;
+        }
+#endif
         myticks++;
         timer0_flag = 1;
         need_resched = 1;
@@ -317,12 +340,28 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
                     hardclock((caddr_t)0, 0);
             } while (--elapsed);
         }
+#ifdef SERIAL_CONSOLE
+        if (gsio_fastpoll_on) {
+            extern void gsio_rx_isr(void);
+            gsio_rx_isr();      /* keep the SIO FIFO drained (see above) */
+        }
+#endif
 
         /*
          * Keep DirectSound PCM fed: advance the play position and wrap the
          * sound DMA once per interrupt. Cheap no-op when nothing is playing.
          */
         audio_tick();
+#ifdef SERIAL_CONSOLE
+        /*
+         * While /dev/sio is open, leave console polling to idle(), where
+         * interrupts are on: swkbd_poll() and the tty work can take longer
+         * than the SIO FIFO lasts with interrupts off.  (^C and the
+         * software keyboard then only respond while the system idles.)
+         */
+        if (gsio_fastpoll_on)
+            goto timer0_done;
+#endif
 
         /*
          * Sample console input here too, not just in idle(), so ^C and
@@ -336,6 +375,9 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
          */
         console_input_poll();
     }
+#ifdef SERIAL_CONSOLE
+timer0_done:
+#endif
     /* Acknowledge the sources we handled; if somehow none matched, clear
      * whatever was pending so the interrupt can't latch up. */
     REG_IF = ack ? ack : flag;
@@ -362,9 +404,11 @@ void irq_enable(void)
 	 * polled via REG_VCOUNT/lbolt, not the VBLANK IRQ. Leaving it out
 	 * so the only interrupt that fires is the one that has real work.
 	 *
-	 * IRQ_SERIAL (bit7) is added on the serial-console build so a byte
-	 * arriving on the link cable is captured immediately by gsio_rx_isr()
-	 * (gba_sio_uart.c) instead of being polled for and lost - see there.
+	 * IRQ_SERIAL (bit7) is added on the serial-console build. In UART mode
+	 * it fires on an error (an overrun), a full send buffer or an EMPTY
+	 * receive buffer - never on a byte arriving - and gsio_rx_isr()
+	 * (gba_sio_uart.c) drains the FIFO; receive is otherwise polled - see
+	 * there.
 	 */
 #ifdef SERIAL_CONSOLE
 	REG_IE = IRQ_TIMER0 | IRQ_SERIAL;

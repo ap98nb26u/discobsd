@@ -25,6 +25,7 @@
 #include <gba/dev/mrams.h>
 #endif
 #include <gba/dev/uart.h>
+#include <gba/dev/gba_sio_uart.h>
 
 #ifdef SD_ENABLED
 #include <gba/dev/sd.h>
@@ -268,6 +269,15 @@ const struct cdevsw cdevsw[] = {
 		sdopen,		sdclose,	sdread,		sdwrite,
 		sdioctl,	nullstop,	0,		seltrue,
 		sdstrategy,	0,		0,
+#else
+		NOCDEV
+#endif
+	},
+	{	/* 20 - sio: the link-cable UART as a raw byte stream, /dev/sio */
+#ifdef SERIAL_CONSOLE
+		sioopen,	sioclose,	sioread,	siowrite,
+		sioioctl,	nullstop,	0,		sioselect,
+		nostrategy,	0,		0,
 #else
 		NOCDEV
 #endif
