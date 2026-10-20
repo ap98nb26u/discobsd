@@ -6,8 +6,15 @@
 TOPSRC!=cd ..; pwd
 include ${TOPSRC}/share/mk/sys.mk
 
+# GBA-only: slipd needs the link-cable UART's /dev/sio.
+MDSUBDIR!=if [ x"${MACHINE}" = x"gba" ] ; then \
+		echo "slipd" ; \
+	else \
+		echo "" ; \
+	fi
+
 SUBDIR=	chroot cron disktool iostat mkpasswd pstat talloc \
-	update vipw
+	update vipw ${MDSUBDIR}
 
 # TODO: devupdate
 
