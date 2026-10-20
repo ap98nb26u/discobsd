@@ -321,11 +321,15 @@ uart_poll_input(void)
         extern int gsio_rx_pop(void);
         int rc;
 
+        if (gsio_owned)
+            sio_poll();		/* /dev/sio has the port: wake its reader */
+        else {
         gsio_rx_service();	/* empty the hardware FIFO into the ring */
         for (n = 0; n < 64 && (rc = gsio_rx_pop()) >= 0; n++) {
             /* A serial byte is console activity: wake the screen-saver. */
             console_activity();
             ttyinput(rc, tp);
+        }
         }
     }
 #endif
@@ -422,7 +426,8 @@ static void agb_puts(const char *s) {
 void uartputc(dev_t dev, char c) {
     gtxt_putc(c);
 #ifdef SERIAL_CONSOLE
-    gsio_putc((unsigned char)c);
+    if (!gsio_owned)		/* not while /dev/sio has the port */
+        gsio_putc((unsigned char)c);
 #endif
 
 #ifdef AGBPRINT

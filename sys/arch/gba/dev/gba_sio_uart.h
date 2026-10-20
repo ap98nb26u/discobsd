@@ -18,6 +18,24 @@ int             gsio_getc_bounded(void);
 void            gsio_putc(unsigned char c);
 int             gsio_avail(void);
 
+/* /dev/sio: the SIO as a raw byte stream (SERIAL_CONSOLE builds) */
+struct uio;
+/* ioctl: set the line rate while /dev/sio is open (restored on close) */
+#define SIOSETBAUD      _IOW('G', 1, int)
+/* ioctl: burst-read end after this many quiet ms (1..100, default 2) */
+#define SIOSETQUIET     _IOW('G', 2, int)
+/* ioctl: unsigned long [2] = { bytes received, receive errors } */
+#define SIOGETSTAT      _IOR('G', 3, unsigned long[2])
+extern int      gsio_owned;
+void            sio_poll(void);
+void            gsio_rx_service(void);
+int             sioopen(dev_t dev, int flag, int mode);
+int             sioclose(dev_t dev, int flag, int mode);
+int             sioread(dev_t dev, struct uio *uio, int flag);
+int             siowrite(dev_t dev, struct uio *uio, int flag);
+int             sioioctl(dev_t dev, u_int cmd, caddr_t addr, int flag);
+int             sioselect(dev_t dev, int rw);
+
 #endif /* KERNEL */
 
 #endif /* _GBA_DEV_SIO_UART_H_ */

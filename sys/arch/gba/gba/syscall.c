@@ -320,11 +320,27 @@ int sys_write(const char *s)
     return 0;
 }
 
+#ifdef SERIAL_CONSOLE
+/*
+ * A syscall runs with interrupts off, so while /dev/sio is open (and its
+ * fast FIFO polling is on) empty the SIO receive FIFO on the way in and
+ * out of each one: the 4-byte FIFO overruns after ~350 us at 115200.
+ * See gsio_fastpoll() in gba_sio_uart.c.
+ */
+extern int gsio_fastpoll_on;
+extern void gsio_rx_service(void);
+#define SIO_KEEPALIVE()	do { if (gsio_fastpoll_on) gsio_rx_service(); } while (0)
+#else
+#define SIO_KEEPALIVE()	do { } while (0)
+#endif
+
 void
 syscall_handler(int sys_num, struct trapframe *frame)
 {
 	time_t syst;
 	int code;
+
+	SIO_KEEPALIVE();
 
 	//volatile struct trapframe *f = frame;
 
@@ -522,6 +538,7 @@ syscall_handler(int sys_num, struct trapframe *frame)
 		break;
 	}
 out:
+	SIO_KEEPALIVE();
 	/*
 	 * Instruction-set-aware exec entry.
 	 *

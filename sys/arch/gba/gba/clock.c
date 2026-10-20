@@ -74,6 +74,6 @@ void cpu_initclocks(void) {
     // GBA全体の割り込み許可レジスタ
     REG_IE |= IRQ_TIMER0;
 #ifdef SERIAL_CONSOLE
-    REG_IE |= IRQ_SERIAL;	/* link-cable RX byte -> gsio_rx_isr() */
+    REG_IE |= IRQ_SERIAL;	/* SIO error/empty -> gsio_rx_isr(); no rx IRQ */
 #endif
 }
