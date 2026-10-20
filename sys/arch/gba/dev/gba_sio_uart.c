@@ -80,37 +80,82 @@
  * fast timer poll, burst reads and syscall hooks); if four bytes arrive
  * before the next poll, the fifth overruns and is lost, and the error
  * interrupt that follows merely drains the four.  At 115200 that is 350 us,
- * and even an interrupts-off polling loop was measured losing bytes there;
- * at 38400 (1 ms of FIFO) SLIP runs cleanly.  Typing is slow enough either
- * way; a fast paste into the console can drop characters.
+ * at 38400 about 1 ms.  /dev/sio keeps up at both (see sioread()); typing
+ * on the console is slow enough either way, but a fast paste into it can
+ * drop characters.
  *
  * When the ring is full, bytes are left in the FIFO instead of dropped.  The
  * receiver deasserts SD (RTS) while its FIFO is full (GBATEK, SIO UART mode),
  * so a peer that honours CTS - the FT232R cable with hardware handshaking -
  * pauses until the ring drains (the byte already on the wire may still be
  * lost: RTS only drops once the FIFO is full).
+ *
+ * The ring lives in spare VRAM, not IWRAM: IWRAM is full, and a ring that
+ * fills while the reader is held up - swapped out while update(8) or
+ * cron(8) runs, say - costs a byte.  2048 bytes is half a second at 38400.
+ * VRAM takes no byte writes, so each entry is a halfword.  0x06016000 is
+ * above everything the port draws to (Mode 3/5 frame buffers end by
+ * 0x06014000, the console backing store at 0x06015000 by 0x06015640, and
+ * there are no sprites) and the 4 KB end well short of VRAM's 0x06018000.
  */
-#define GSIO_RXBUF	64			/* must stay a power of two */
-static volatile unsigned char gsio_rxbuf[GSIO_RXBUF];
-static volatile unsigned char gsio_rxhead, gsio_rxtail;
+#define GSIO_RXBUF	2048			/* must stay a power of two */
+#define gsio_rxbuf	((volatile unsigned short *)0x06016000)
+static volatile unsigned short gsio_rxhead, gsio_rxtail;
+#define GSIO_NEXT(i)	((unsigned short)(((i) + 1) & (GSIO_RXBUF - 1)))
 
 unsigned long gsio_nrx, gsio_nerr;	/* bytes received, receive errors */
 static int gsio_dead;			/* no serial peer: send nothing, LCD only */
 
-#define TM2NOW()	(*(volatile unsigned short *)(REG_BASE + 0x108))
+#ifdef SERIAL_CONSOLE
+/*
+ * A fine clock for timing the line: 61 us ticks (16.78 MHz / 1024).
+ * Timer2 is NOT a free-running 16-bit counter - cpu_initclocks() gives it
+ * the hardclock reload, so it counts 65536 - TM2_PERIOD .. 65535 and wraps
+ * every 10 ms - and Timer3 counts its overflows.  Together they make one
+ * continuous count; gsio_since() takes care of Timer3's own wrap (~11
+ * minutes).  Plain differences of the Timer2 counter jumped by ~65000 at
+ * every wrap, which ended burst reads mid-packet every 10 ms.
+ */
+#define TM2_PERIOD	(16777216 / 1024 / HZ)		/* 163 */
+#define TM2_CNT		(*(volatile unsigned short *)(REG_BASE + 0x108))
+#define TM3_CNT		(*(volatile unsigned short *)(REG_BASE + 0x10C))
+#define TM_WRAP		(65536UL * TM2_PERIOD)
+
+static unsigned long
+gsio_now(void)
+{
+    unsigned short hi, lo;
+
+    do {
+        hi = TM3_CNT;
+        lo = TM2_CNT;
+    } while (TM3_CNT != hi);		/* Timer2 overflowed in between */
+    return (unsigned long)hi * TM2_PERIOD + (unsigned short)(lo - (65536 - TM2_PERIOD));
+}
+
+static unsigned long
+gsio_since(unsigned long then)
+{
+    unsigned long now = gsio_now();
+
+    return now >= then ? now - then : now + TM_WRAP - then;
+}
+#endif /* SERIAL_CONSOLE: only /dev/sio times the line */
 
 /*
  * Move every byte now in the hardware RX FIFO into the ring. The caller must
  * ensure the SIO interrupt cannot run concurrently: gsio_rx_isr() is already
  * in IRQ context, and gsio_rx_service() masks the SIO IRQ around its call.
  */
+int gsio_owned;				/* 1: /dev/sio has the port */
+
 static void
 gsio_fifo_drain(void)
 {
     unsigned short cnt;
 
     while (((cnt = REG_SIOCNT) & SIO_RECV_DATA) == 0) {	/* a byte is waiting */
-        unsigned char nh = (unsigned char)((gsio_rxhead + 1) & (GSIO_RXBUF - 1));
+        unsigned short nh = GSIO_NEXT(gsio_rxhead);
 
         if (cnt & SIO_ERROR)
             gsio_nerr++;		/* reading SIOCNT cleared it */
@@ -158,8 +203,8 @@ gsio_rx_pop(void)
 
     if (gsio_rxtail == gsio_rxhead)
         return -1;
-    b = gsio_rxbuf[gsio_rxtail];
-    gsio_rxtail = (unsigned char)((gsio_rxtail + 1) & (GSIO_RXBUF - 1));
+    b = gsio_rxbuf[gsio_rxtail] & 0xff;
+    gsio_rxtail = GSIO_NEXT(gsio_rxtail);
     return b;
 }
 
@@ -326,7 +371,6 @@ gsio_putc(unsigned char c)
  * interrupts off.  The peer should use hardware handshaking (see the ring
  * comment above).
  */
-int gsio_owned;				/* 1: /dev/sio has the port */
 
 /*
  * Fast FIFO polling.  The SIO interrupt fires when the send buffer becomes
@@ -412,7 +456,7 @@ sioclose(dev_t dev, int flag, int mode)
  * 115200) - and a syscall runs with interrupts off.  So once data is
  * flowing, read() keeps the FIFO empty itself: it polls it directly until
  * the line has been quiet for about three byte times, and at least 2 ms
- * (timed with the free-running Timer2, 61 us per tick), taking a whole
+ * (timed with gsio_now(), 61 us per tick), taking a whole
  * SLIP packet in one call instead of a few bytes per syscall with gaps
  * between.  The gap between waking the reader and its read() starting
  * can still cost a byte; the peer pads each packet with extra SLIP END
@@ -441,7 +485,8 @@ sioread(dev_t dev, struct uio *uio, int flag)
 {
     char buf[256];
     int n, error;
-    unsigned short last, quiet, ime;
+    unsigned long last, quiet;
+    unsigned short ime;
 
     for (;;) {
         gsio_rx_service();
@@ -452,22 +497,19 @@ sioread(dev_t dev, struct uio *uio, int flag)
         sleep((caddr_t)gsio_rxbuf, TTIPRI);	/* sio_poll() wakes us */
     }
 
-    n = 0;
-    while (n < (int)sizeof(buf) && n < uio->uio_resid &&
-           gsio_rxtail != gsio_rxhead) {
-        buf[n++] = gsio_rxbuf[gsio_rxtail];
-        gsio_rxtail = (unsigned char)((gsio_rxtail + 1) & (GSIO_RXBUF - 1));
-    }
     /*
      * Interrupts off for the burst: an interrupt here (the 100 Hz clock
-     * work in the Timer0 handler takes about a millisecond) stalls the
-     * polling long enough for the FIFO to overrun.  Diagnostics showed
-     * the burst loop finding overruns after 0.4-1.2 ms gaps.
+     * work in the Timer0 handler, up to a few milliseconds when it
+     * catches up missed ticks) stalls the polling long enough for the
+     * FIFO to overrun.  Bytes go FIFO -> ring -> buf every time, so that
+     * what the ring already held comes out ahead of what is still
+     * arriving.
      */
+    n = 0;
     ime = REG_IME_;
     REG_IME_ = 0;
     quiet = gsio_quiet_ticks();
-    last = TM2NOW();
+    last = gsio_now();
     while (n < uio->uio_resid) {
         if (n == (int)sizeof(buf)) {
             /* hand over a full buffer; the FIFO covers the short pause */
@@ -477,18 +519,15 @@ sioread(dev_t dev, struct uio *uio, int flag)
                 return error;
             }
             n = 0;
-            last = TM2NOW();
+            last = gsio_now();
             continue;
         }
-        unsigned short cnt = REG_SIOCNT;
-
-        if ((cnt & SIO_RECV_DATA) == 0) {		/* a byte in the FIFO */
-            if (cnt & SIO_ERROR)
-                gsio_nerr++;
-            buf[n++] = (char)REG_SIODATA8;
-            gsio_nrx++;
-            last = TM2NOW();
-        } else if ((unsigned short)(TM2NOW() - last) > quiet)
+        gsio_fifo_drain();
+        if (gsio_rxtail != gsio_rxhead) {
+            buf[n++] = (char)gsio_rxbuf[gsio_rxtail];
+            gsio_rxtail = GSIO_NEXT(gsio_rxtail);
+            last = gsio_now();
+        } else if (gsio_since(last) > quiet)
             break;					/* line quiet: done */
     }
     REG_IME_ = ime;
@@ -497,16 +536,33 @@ sioread(dev_t dev, struct uio *uio, int flag)
     return error;
 }
 
+/*
+ * Writes may come back short.  While a byte goes out, about one comes in
+ * (the line runs the same rate both ways), and a syscall runs with
+ * interrupts off, so only this loop moves received bytes into the ring.
+ * Once the ring cannot take another chunk's worth, the write stops and
+ * returns what it sent - possibly nothing - so that the caller reads
+ * before writing the rest.  Letting the ring fill instead would drop a
+ * byte when RTS finally stops the peer (see above).
+ */
+#define GSIO_WCHUNK	16
+#define GSIO_WROOM	(GSIO_RXBUF - 64)	/* ring use that still allows a chunk */
+
 int
 siowrite(dev_t dev, struct uio *uio, int flag)
 {
-    char buf[32];
+    char buf[GSIO_WCHUNK];
     int n, i, error;
 
     while (uio->uio_resid > 0) {
-        n = uio->uio_resid;
+        gsio_rx_service();
+        n = GSIO_WROOM - gsio_ring_count();
+        if (n <= 0)
+            break;			/* read first; the caller retries */
         if (n > (int)sizeof(buf))
             n = sizeof(buf);
+        if (n > uio->uio_resid)
+            n = uio->uio_resid;
         error = uiomove(buf, n, uio);
         if (error)
             return error;
