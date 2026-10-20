@@ -46,6 +46,11 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o ${OWN} -g ${GRP} -m 644 fstab.${MACHINE} \
 		    ${DESTDIR}/etc/fstab; \
 	fi
+# Per-port ttys, the same way (gba: adds its telnet pseudo-terminals).
+	if [ -f ttys.${MACHINE} ]; then \
+		${INSTALL} -c -o ${OWN} -g ${GRP} -m 644 ttys.${MACHINE} \
+		    ${DESTDIR}/etc/ttys; \
+	fi
 #	${INSTALL} -c -o root -g wheel -m 600 master.passwd ${DESTDIR}/etc
 #	${INSTALL} -c -o ${OWN} -g ${GRP} -m 555 MAKEDEV.local MAKEDEV \
 #	    ${DESTDIR}/dev
