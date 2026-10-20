@@ -1,0 +1,83 @@
+GBA Wireless Adapter (AGB-015) - what is known, what it could do here
+=====================================================================
+
+Status: research only (2026-10).  Nothing in the port talks to the
+adapter yet.  Sources at the end.
+
+1. THE HARDWARE
+---------------
+
+- Plugs into the link port and talks to the GBA in SIO Normal (SPI)
+  mode, 32-bit transfers: 256 kHz while initialising, ~2 MHz in command
+  mode.  It is NOT a UART device - the same port and SIO block that
+  /dev/sio (gba_sio_uart.c) uses in UART mode, so the two exclude each
+  other: with the adapter in, there is no serial console and no SLIP.
+- Radio: a proprietary 2.4 GHz protocol between adapters (baseband chip
+  + RF chip).  Not Wi-Fi, no access point, no way to the Internet.
+- Rooms of at most 5 adapters: 1 host + up to 4 clients (Setup bits
+  16-17).  Clients cannot talk to each other; everything goes through
+  the host.
+- Per transfer: host SendData up to 87 bytes, client up to 16 bytes
+  (header not counted); one packet buffer only - a second SendData
+  before the peer's ReceiveData loses data.  Clients only get to send
+  when the host's SendData triggers a transfer.
+- Timing: ~40 us between SPI transfers normally; Wait/SendDataWait time
+  out after 500 ms; an unresponsive client is dropped after 4 s; a host
+  that stops broadcasting disappears from client lists after 3 s.
+- Built-in multiboot ROM: a host can push a small program (RFU-MBOOT
+  header) to a GBA with no cartridge ("download play").
+- Command set (gba-link-connection's notes): Hello 0x10, SignalLevel
+  0x11, VersionStatus 0x12, SystemStatus 0x13, SlotStatus 0x14,
+  ConfigStatus 0x15, Broadcast 0x16, Setup 0x17, StartHost 0x19,
+  PollConnections 0x1a, EndHost 0x1b, BroadcastRead Start/Poll/End
+  0x1c/0x1d/0x1e, Connect 0x1f, IsConnectionComplete 0x20,
+  FinishConnection 0x21, SendData 0x24, SendDataWait 0x25, ReceiveData
+  0x26, Wait 0x27, DisconnectClient 0x30, RetransmitAndWait 0x37,
+  Bye 0x3d.  0x18, 0x32-0x35, 0x38, 0x39 are unknown.
+
+2. FITTING IT INTO DISCOBSD
+--------------------------
+
+- Driver: a new link-port mode next to gba_sio_uart.c (SIO Normal 32-bit,
+  master clock), selected instead of the UART - e.g. a /dev/rfu device
+  that, like /dev/sio, owns the port while open.  On GBAED the console
+  then lives on the LCD/soft keyboard only.
+- Timers: gba-link-connection's LinkWireless drives its transfers from a
+  hardware timer (default Timer3), but all four are taken here: Timer0
+  hardclock (4096 Hz while /dev/sio is open), Timer1 PCM sample clock,
+  Timer2+3 the IME-independent tick counter that the clock catch-up,
+  swkbd, audio and /dev/sio timing read (NOTES.hardware).  A driver
+  would have to pace transfers off Timer0 (as /dev/sio's fast poll
+  does) or in a burst inside the syscall, not take a timer.
+- IME: syscalls run with interrupts off (the trampoline), so the same
+  care as /dev/sio applies - long transfers inside a syscall stall the
+  clock catch-up, swkbd and PCM.
+- Code: gba-link-connection (afska, MIT, C++ with C bindings, GCC
+  extensions) has LinkRawWireless (low level) and LinkWireless (up to 5
+  consoles, halfword messages, IRQ-driven).  MIT is compatible; a port
+  would be a C rewrite of the raw layer, credited.
+
+3. WHAT IT COULD BE USED FOR
+---------------------------
+
+- GBA-to-GBA networking for up to 5 consoles: write/talk-style chat,
+  file transfer, multi-console games.
+- An IP network among GBAs only: SLIP-like framing of IP over the 87/16
+  byte packets, with the host relaying.  slipd's stack (usr.sbin/slipd)
+  could sit on top.  No route out: the host's link port is the adapter,
+  so it cannot also do SLIP to a PC.
+- Download play: push a small terminal program to a cartridge-less GBA
+  and use it as a terminal logged into the DiscoBSD GBA.
+
+Needs two adapters and two GBAs to try anything; the first milestone
+would be Hello/Setup, StartHost/Connect between two consoles, and
+exchanging a few bytes.
+
+Sources
+-------
+- afska/gba-link-connection: https://github.com/afska/gba-link-connection
+- its adapter notes (after kuiper.dev, with davidgfnet's additions):
+  https://github.com/afska/gba-link-connection/blob/master/docs/wireless_adapter.md
+- Wikipedia: https://en.wikipedia.org/wiki/Game_Boy_Advance_Wireless_Adapter
+- Bulbapedia: https://bulbapedia.bulbagarden.net/wiki/Game_Boy_Advance_Wireless_Adapter
+- NXP wireless gaming Q&A (chipset): https://www.nxp.com/docs/en/supporting-information/WIRELESS_GAMING_QA.pdf
