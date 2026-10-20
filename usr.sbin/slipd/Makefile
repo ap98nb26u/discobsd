@@ -5,8 +5,8 @@ TOPSRC!=cd ../..; pwd
 include ${TOPSRC}/share/mk/sys.mk
 
 CFLAGS		+= -O
-SRCS		= slipd.c tcp.c svc.c
-OBJS		= slipd.o tcp.o svc.o
+SRCS		= slipd.c tcp.c svc.c telnet.c
+OBJS		= slipd.o tcp.o svc.o telnet.o
 
 all:		slipd
 
@@ -19,7 +19,7 @@ slipd:		${OBJS}
 # Host build, for testing against tools/gbanet/slip_tun.py --pty:
 #   make slipd-host && ./slipd-host -v -d /dev/pts/N
 slipd-host:	${SRCS} slipd.h
-		cc -O -Wall -o $@ ${SRCS}
+		cc -O -Wall -D_GNU_SOURCE -o $@ ${SRCS}
 
 clean:
 		rm -f *.o *~ slipd slipd.elf slipd.dis slipd-host tags
