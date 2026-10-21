@@ -16,19 +16,19 @@
 
 #define NO_ADDR     ((caddr_t)(~0U)) /* Indicates addr. not yet filled in */
 
-__attribute__((packed))struct memsect {
+struct memsect {
     caddr_t vaddr;
     unsigned len;
 };
 
-__attribute__((packed))struct exec_params {
+struct exec_params {
     char *userfname;            /* The arguments to the exec() call */
     char **userargp;
     char **userenvp;
     union {
         char sh[SHSIZE];
-        struct exec aout __attribute__((aligned(4)));
-        struct elf_ehdr elf __attribute__((aligned(4)));
+        struct exec aout;
+        struct elf_ehdr elf;
     } hdr;                      /* head of file to exec */
     int hdr_len;                /* number of bytes valid in image_header */
     char **argp, **envp;
