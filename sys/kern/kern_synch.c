@@ -406,6 +406,7 @@ swtch()
     register int n;
     struct proc *pp, *pq;
     int s;
+
 #ifdef UCB_METER
     cnt.v_swtch++;
 #endif
@@ -482,10 +483,7 @@ loop:
      */
     n = p->p_flag & SSWAP;
     p->p_flag &= ~SSWAP;
-    //printf("DBG: swtch longjmp to pid=%d addr=%x %s\n", p->p_pid,
-    //    p->p_addr, n ? "ssave" : "rsave");
     longjmp (p->p_addr, n ? &u.u_ssave : &u.u_rsave);
-    //printf("DBG: swtch UNREACHABLE after longjmp\n");
 }
 
 /*
