@@ -60,10 +60,8 @@ GCCPREFIX!=if [ x"${MACHINE_ARCH}" = x"arm" ] ; then \
 		echo "/does/not/exist" ; \
 	fi
 
-CC!=	if [ x"${MACHINE}" = x"stm32" ] ; then \
+CC!=	if [ x"${MACHINE_ARCH}" = x"arm" ] ; then \
 		echo "${GCCPREFIX}-gcc -mcpu=cortex-m4 -mabi=aapcs -mlittle-endian -mthumb -mfloat-abi=soft -nostdinc -I${TOPSRC}/include ${INCLUDES}" ; \
-	elif [ x"${MACHINE}" = x"gba" ] ; then \
-		echo "${GCCPREFIX}-gcc -mcpu=arm7tdmi -mabi=aapcs -mlittle-endian -mthumb -mthumb-interwork -mfloat-abi=soft -nostdinc -I${TOPSRC}/include ${INCLUDES}" ; \
 	elif [ x"${MACHINE_ARCH}" = x"mips" ] ; then \
 		echo "${GCCPREFIX}-gcc -mips32r2 -EL -msoft-float -nostdinc -I${TOPSRC}/include ${INCLUDES}" ; \
 	else \
@@ -96,18 +94,11 @@ LDWARN!=if [ x"${MACHINE_ARCH}" = x"arm" ] ; then \
 # kernel build already does -MP -MD), so an object only rebuilt when its
 # own .c changed - a changed header, or a toolchain/interworking-veneer
 # flag bump, silently left stale .o's, and lib/libc/Makefile then
-# re-archived libc.a from them (that is how a veneer-broken libc member
-# survived until a full clean rebuild - see the sysctl wild-jump saga).
+# re-archived libc.a from them (that is how a broken libc member once
+# survived until a full clean rebuild).
 # -MD (not -MMD) tracks system headers too; harmless in link-only
 # commands, which compile nothing and so emit no .d.
-# Per-board define for userland, mirroring the kernel's PARAM=-DGBA
-# (sys/arch/gba/compile/*/Makefile). gba and stm32 share MACHINE_ARCH=arm,
-# so a board-specific knob must key off MACHINE, not the arch. Lets a
-# memory-constrained board shrink its footprint in C (e.g. usr.bin/tail's
-# line buffer on the GBA's tiny 64K user window - see that file).
-MDDEF!=	if [ x"${MACHINE}" = x"gba" ] ; then echo "-DGBA" ; else echo "" ; fi
-
-CFLAGS=	${COPTS} ${MDDEF} -MD -MP
+CFLAGS=	${COPTS} -MD -MP
 
 AFLAGS=	${ASFLAGS}
 
@@ -159,6 +150,11 @@ AOUT_NM=	${TOOLBINDIR}/nm
 AOUT_RANLIB=	${TOOLBINDIR}/ranlib
 AOUT_SIZE=	${TOOLBINDIR}/size
 AOUT_STRIP=	${TOOLBINDIR}/strip
+
+# Per-port settings: a port whose CPU or userland needs differ from the
+# generic ${MACHINE_ARCH} defaults above (gba: an ARM7TDMI, not a
+# Cortex-M) overrides them in sys/arch/${MACHINE}/conf/sys.mk.inc.
+-include ${TOPSRC}/sys/arch/${MACHINE}/conf/sys.mk.inc
 
 # Pull in the per-object header dependencies emitted by -MD -MP (above)
 # for whatever directory the including Makefile lives in. $(wildcard)
