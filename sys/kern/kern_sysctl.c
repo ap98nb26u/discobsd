@@ -56,6 +56,10 @@
 #include <machine/cpu.h>
 #include <sys/conf.h>
 
+#ifndef ROOT_IS_ROM
+#define ROOT_IS_ROM()	0	/* no machine with a ROM root: see KERN_ROMROOT */
+#endif
+
 sysctlfn kern_sysctl;
 sysctlfn hw_sysctl;
 #ifdef DEBUG
@@ -252,13 +256,12 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	case KERN_ROMROOT:
 		/*
 		 * True when root is on a device that can never accept
-		 * writes (e.g. the GBA's mrams driver, which returns
-		 * EROFS for its filesystem partition - see mrams_strategy()
-		 * in arch/gba/dev/mrams.c). Lets /etc/rc skip fsck/mount
-		 * on a build where the root image is baked into the ROM
-		 * itself and can neither become dirty nor be repaired.
+		 * writes (machine-dependent ROOT_IS_ROM(), see the machine's
+		 * machparam.h).  Lets /etc/rc skip fsck/mount on a build
+		 * whose root image is baked into ROM: it can neither become
+		 * dirty nor be repaired.
 		 */
-		return (sysctl_rdint(oldp, oldlenp, newp, major(rootdev) == 3));
+		return (sysctl_rdint(oldp, oldlenp, newp, ROOT_IS_ROM()));
 	case KERN_RTC_OFFSET:
 		/*
 		 * Minutes west of UTC that the real-time clock is set to.

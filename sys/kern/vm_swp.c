@@ -17,18 +17,10 @@
  */
 
 /*
- * Retry a failed swap I/O a few times before giving up. Added
- * 2026-09-05 after sd.c's card_read()/card_write() failure path got
- * wired up to set B_ERROR (see the comment at sd.c's sdstrategy())
- * and this panic actually fired for the first time on real GBAED
- * hardware - a genuine, if infrequent, SD/EverDrive I/O failure.
- * Panicking the whole system on the first such
- * hiccup is worse than retrying: swap I/O is exactly the path
- * suspected of causing an as-yet-unexplained real-hardware text
- * corruption in /bin/sh (see project_gba_sh_fault_sigreturn_hang.md
- * memory) - if a retry here usually succeeds, that's useful evidence
- * (transient hardware flakiness) as well as making the system far
- * more usable in the meantime.
+ * Retry a failed swap I/O a few times before giving up.  A flaky
+ * storage device (seen with an SD card behind the GBA's EverDrive) can
+ * fail an occasional transfer; panicking the whole system on the first
+ * such hiccup is worse than trying again.
  */
 #define SWAP_IO_RETRIES 4
 

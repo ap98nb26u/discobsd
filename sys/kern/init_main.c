@@ -54,11 +54,6 @@ main(void)
 	struct fs *fs = NULL;
 	int s __attribute__((unused));
 
-//	int ret = setjmp(&u.u_rsave);
-//	printf("setjmp ret=%d\n", ret);
-//	register unsigned int sp asm("sp");
-//	printf("SP=%x, u=%x\n", sp, &u);
-
 	startup();
 	printf("\n%s", version);
 	config();
@@ -75,21 +70,6 @@ main(void)
 	u.u_procp = p;			/* init user structure */
 	u.u_cmask = CMASK;
 	u.u_lastfile = -1;
-	/*
-	 * u_uid/u_ruid/u_svuid/u_groups[0] are never written anywhere else
-	 * before a process explicitly calls setuid()/setgid() - every port
-	 * has relied on the u/u0 memory happening to read as zero here. On
-	 * GBA that memory isn't backed by a real .bss section (see UAREA in
-	 * kern.ldscript), so it holds whatever was left there earlier in
-	 * boot instead of zero, and getuid() returning nonzero for process 1
-	 * makes init() exit(1) immediately (see init.c's "getuid() != 0"
-	 * check). Set explicitly so process 0/1's credentials are root
-	 * regardless of what this memory happened to contain.
-	 */
-	u.u_uid = 0;
-	u.u_ruid = 0;
-	u.u_svuid = 0;
-	u.u_groups[0] = 0;
 	for (i = 1; i < NGROUPS; i++)
 		u.u_groups[i] = NOGROUP;
 	for (i = 0; i < sizeof(u.u_rlimit)/sizeof(u.u_rlimit[0]); i++)
@@ -161,11 +141,6 @@ main(void)
 	iunlock(u.u_cdir);
 	u.u_rdir = NULL;
 
-#ifdef GBA
-//	u.u_procp->p_addr = (size_t)&u;
-//	printf("INIT setjmp\n");
-//	setjmp(&u.u_rsave);
-#endif
 	/*
 	 * Make init process.
 	 */
@@ -174,7 +149,6 @@ main(void)
 		/* No return from sched. */
 		sched();
 	}
-	//printf("DBG: main() child path pid=%d\n", u.u_procp->p_pid);
 
 	/* Child process with pid 1: init. */
 	s = splhigh();
@@ -184,8 +158,6 @@ main(void)
 	p->p_ssize = 1024;			/* One kbyte of stack. */
 	p->p_saddr = (size_t)__user_data_end - 1024;
 	bcopy((caddr_t)icode, (caddr_t)__user_data_start, icodeend - icode);
-	//printf("DBG: icode bcopy done, dst=%x size=%d\n",
-	//    (unsigned)__user_data_start, icodeend - icode);
 
 	/* Start in single user mode, if asked. */
 	if (boothowto & RB_SINGLE) {
@@ -195,9 +167,6 @@ main(void)
 		iflags[1] = 's';
 	}
 
-//printf("u0 init sp=%x lx=%x\n",
-//  u0.u_rsave.val[9],
-//  u0.u_rsave.val[8]);
 	/*
 	 * return goes to location 0 of user init code
 	 * just copied out.

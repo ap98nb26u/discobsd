@@ -102,19 +102,16 @@ void exec_setupstack(unsigned entryaddr, struct exec_params *epp)
     topp = (char ***)(epp->stack.vaddr + epp->stack.len - NBPW);            /* Last word of RAM */
     ucp = (char *)((unsigned)topp - roundup(epp->envbc + epp->argbc,NBPW)); /* arg string space */
     envp = (char **)(ucp - (epp->envc+1)*NBPW); /* Make place for envp[...], +1 for the 0 */
+    /* Byte arithmetic: envp is a char **, so "envp - N*NBPW" would step
+     * back N*NBPW pointers, NBPW times too far. */
     argp = (char **)((char *)envp - (epp->argc+1)*NBPW); /* Make place for argv[...] */
-    /* envp is char**, so "envp - N*NBPW" above used to subtract
-     * N*NBPW *pointer-sized slots* (i.e. 4x too far on this 32-bit
-     * port) instead of N*NBPW bytes - cast to char* first so this
-     * matches the byte-offset math used for envp/ucp above it. */
 
-DEBUG("\texec_setupstack(): writing to argp = %p, ucp = %p\n", argp, ucp);
 #ifdef __mips__
     u.u_frame->tf_sp = (int)(argp-16);
     u.u_frame->tf_r4 = epp->argc;               /* $a0 := argc */
     u.u_frame->tf_r5 = (int)argp;               /* $a1 := argp */
     u.u_frame->tf_r6 = (int)envp;               /* $a2 := env */
-#elif __thumb2__ || __thumb__ || __arm__
+#elif __thumb2__ || __thumb__
     /*
      * Round the initial user SP down to an 8-byte boundary. AAPCS requires
      * the stack to be 8-byte aligned at a public interface, and the C
@@ -150,36 +147,17 @@ DEBUG("\texec_setupstack(): writing to argp = %p, ucp = %p\n", argp, ucp);
             nc += len;
             ucp += len;
         }
-        //caddr_t val = (caddr_t)ucp;
-        //bcopy(&val, &argp[i], sizeof(val)); 
-
-        //len = strlen(epp->argp[i])+1;
-        //bcopy(epp->argp[i], ucp, len);
-        //ucp += len;
-        //nc += len;
     }
     argp[epp->argc] = NULL;
-    //caddr_t null_val = NULL;
-    //bcopy(&null_val, &argp[epp->argc], sizeof(null_val));
 
-    //nc = 0;
     for (i = 0; i < epp->envc; i++) {
         envp[i] = ucp;
         if (copystr((caddr_t)epp->envp[i], (caddr_t)ucp, (caddr_t)topp-ucp, &len) == 0) {
             nc += len;
             ucp += len;
         }
-        //caddr_t val = (caddr_t)ucp;
-        //bcopy(&val, &envp[i], sizeof(val)); 
-
-        //len = strlen(epp->envp[i])+1;
-        //bcopy(epp->envp[i], ucp, len);
-        //ucp += len;
-        //nc += len;
     }
     envp[epp->envc] = NULL;
-    //null_val = NULL;
-    //bcopy(&null_val, &envp[epp->envc], sizeof(null_val));
 
     ucp = (caddr_t)roundup((unsigned)ucp, NBPW);
     if ((caddr_t)ucp != (caddr_t)topp) {
@@ -194,9 +172,6 @@ DEBUG("\texec_setupstack(): writing to argp = %p, ucp = %p\n", argp, ucp);
      * Remember file name for accounting.
      */
     (void) copystr(argp[0], u.u_comm, MAXCOMLEN, 0);
-    //caddr_t user_arg0_ptr;
-    //bcopy(&argp[0], &user_arg0_ptr, sizeof(user_arg0_ptr)); 
-    //(void)copystr(user_arg0_ptr, u.u_comm, MAXCOMLEN, 0);
 
     DEBUG("\texec_setupstack(): end\n");
 }
@@ -283,16 +258,10 @@ int exec_estab(struct exec_params *epp)
     /*
      * Try out for overflow
      *
-     * bss.len must be counted here too: it's part of the same
-     * data+bss region (u_procp->p_dsize below is data.len+bss.len),
-     * sitting directly below the stack's fixed top-of-USERRAM
-     * position. Omitting it let a large-bss binary (e.g. fsck,
-     * bss ~28K) pass this check while its actual data+bss span
-     * still overran into the stack's address range, silently
-     * corrupting bss globals via ordinary stack pushes - confirmed
-     * via a real-hardware run where fsck's `imax` global turned into
-     * a stack-pushed return-address-shaped value between setup()
-     * returning and pass1() reading it.
+     * bss.len counts too: data+bss is one region (p_dsize below is
+     * data.len + bss.len) right below the stack, so leaving bss out let
+     * a large-bss program (fsck) pass while its bss overlapped the
+     * stack, and stack pushes then overwrote its globals.
      */
     if (epp->text.len + epp->data.len + epp->bss.len + epp->heap.len + epp->stack.len > MAXMEM) {
         DEBUG("\texec_estab(): error: memory overflow\n");
@@ -487,7 +456,7 @@ void exec_clear(struct exec_params *epp)
     u.u_frame->tf_lo  = 0;
     u.u_frame->tf_hi  = 0;
     u.u_frame->tf_gp  = 0;
-#elif __thumb2__ || __thumb__ || __arm__
+#elif __thumb2__ || __thumb__
     u.u_frame->tf_r0  = 0;              /* a1 */
     u.u_frame->tf_r1  = 0;              /* a2 */
     u.u_frame->tf_r2  = 0;              /* a3 */

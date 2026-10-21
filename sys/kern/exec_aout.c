@@ -26,8 +26,6 @@
 
 int exec_aout_check(struct exec_params *epp)
 {
-//unsigned char *ptr = (unsigned char *)&epp->hdr.aout;
-//for (int i=0;i<32;i++) printf("%02x ", ptr[i]);
     int error;
     int i;
 
@@ -48,17 +46,13 @@ int exec_aout_check(struct exec_params *epp)
     switch (N_GETMAGIC(epp->hdr.aout)) {
     case OMAGIC:
         /*
-	 * Because OMAGIC's text area is writable, DiscBSD treats the entire 
-	 * area as data.  However, completely deleting the text segment 
-	 * leaves an invalid address (NO_ADDR) in exec_estab(), so the length 
-	 * is explicitly set to 0 to align the address with the base address.
-	 */
+         * OMAGIC text is writable, so the whole image is treated as data;
+         * the text length is set to 0 (rather than the segment dropped)
+         * so that exec_estab() still gives text a valid base address
+         * instead of NO_ADDR.
+         */
         epp->hdr.aout.a_data += epp->hdr.aout.a_text;
         epp->hdr.aout.a_text = 0;
-#if 0
-	epp->text.vaddr = (caddr_t)__user_data_start;
-	epp->text.len = 0;
-#endif
         break;
     default:
         printf("Bad a.out magic = %0o\n", N_GETMAGIC(epp->hdr.aout));
@@ -110,21 +104,11 @@ int exec_aout_check(struct exec_params *epp)
     exec_estab(epp);
 
     /*
-     * Read in text and data.
-     *
-     * Retry an intermittently failing read before giving up (2026-09-06).
-     * This is the root cause of the long-chased real-hardware-only
-     * "/bin/sh hangs jumping into its own fault()" bug - see
-     * project_gba_sh_fault_sigreturn_hang.md. The SD/EverDrive read
-     * path fails occasionally (the same failure class that made
-     * vm_swp.c's swap() panic "hard err: swap" once sd.c started
-     * reporting card_read()/card_write() failures properly), and when
-     * it failed *here*, exec_estab() had already torn down the old
-     * image, so the process was left running on a half-destroyed,
-     * partially-overwritten memory image - which is exactly why the
-     * bytes at /bin/sh's fault() address were found to be garbage at
-     * the moment sendsig() tried to jump there, even though the
-     * on-disk binary and every swap round trip verified clean.
+     * Read in text and data, retrying a failed read a few times: a
+     * flaky storage device (seen with an SD card behind the GBA's
+     * EverDrive) can fail a read now and then, and by this point
+     * exec_estab() has already torn down the old image, so a failed
+     * read would leave the process running on a half-loaded image.
      */
     for (i = 0; ; i++) {
         error = rdwri (UIO_READ, epp->ip,
@@ -144,16 +128,11 @@ int exec_aout_check(struct exec_params *epp)
          * the new image, so the old one is gone and the new one is at
          * best partially read. There is nothing left to return to.
          *
-         * This used to raise SIGSEGV, which is *catchable* - and
-         * /bin/sh catches it (bin/sh/fault.c, its classic stack-growth
-         * handler). So a failed exec sent a caught signal to a process
-         * whose text had just been overwritten by the partial load,
-         * making sendsig() faithfully compute a jump into a handler
-         * address that no longer held any handler - a wild jump into
-         * garbage, hanging the machine with no further output. That is
-         * the crash this whole investigation chased. SIGKILL cannot be
-         * caught, blocked or ignored, so the doomed process dies
-         * cleanly instead of jumping into its own wreckage.
+         * SIGKILL, not SIGSEGV: SIGSEGV can be caught (/bin/sh does, in
+         * bin/sh/fault.c), and delivering a caught signal to a process
+         * whose image was just overwritten jumps to wherever the handler
+         * used to be - into garbage, hanging the machine.  SIGKILL cannot
+         * be caught, so the process simply dies.
          */
         printf("exec: image read failed (%d) for pid %d, killing it\n",
             error, u.u_procp->p_pid);

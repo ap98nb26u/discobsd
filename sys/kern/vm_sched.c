@@ -121,11 +121,8 @@ sched()
             splx (s);
             continue;
         }
-        if (swapped_out) {
-            //printf("DBG: sched swapin pid=%d\n", swapped_out->p_pid);
+        if (swapped_out)
             swapin (swapped_out);
-            //printf("DBG: sched after swapin\n");
-        }
         splhigh();
         in_core = 0;
         swapped_out = 0;
