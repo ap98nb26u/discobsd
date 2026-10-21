@@ -980,10 +980,9 @@ boot(dev_t dev, int howto)
 }
 
 /*
- * Millisecond delay routine.
- *
- * Uses SysTick, which must be configured to a 1ms timebase.
- * This is a busy-wait blocking delay, so be wise with use.
+ * Millisecond delay routine: not implemented on the GBA (an empty stub -
+ * the shutdown sync loop calls it).  Code that needs a real delay
+ * busy-waits on its own (see sd.c), or times with Timer2/Timer3.
  */
 void
 mdelay(u_int msec)

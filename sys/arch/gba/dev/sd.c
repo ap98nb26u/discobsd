@@ -902,8 +902,7 @@ card_read(int unit, unsigned int offset, char *data, unsigned int bcount)
 
     /*
      * Settle-retries exhausted: the controller/card is in a state a
-     * fresh CMD18 can't clear at all (see project_gba_sh_fault_sigreturn_hang.md
-     * and project_gba_sd_driver_plan.md). Fall back to the heavy
+     * fresh CMD18 can't clear at all. Fall back to the heavy
      * recovery - a full card_init() reinit - then retry before reporting
      * failure up to the caller's own retry loop (exec_aout.c/vm_swp.c).
      * Expensive (card_init() busy-waits with interrupts blocked) but

@@ -46,10 +46,9 @@ struct	trapframe {
 #define	tf_r15	tf_pc		/* Program Counter */
 
 /*
- * Exception stack frame of a SysTick exception.
- * A clockframe encapsulates the machine state when the SysTick
- * exception occured.
- * The clockframe is used by hardclock(), softclock(), and gatherstats().
+ * Clock interrupt frame, kept from the stm32 port for the shared
+ * declarations.  The GBA does not use it: the Timer0 interrupt calls
+ * hardclock() with a null pc and ps (gba_do_schedule(), machdep.c).
  */
 struct	clockframe {
 /* These 8 registers are pushed on stack by hardware in an exception. */

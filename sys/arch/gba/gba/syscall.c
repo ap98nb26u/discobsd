@@ -367,9 +367,6 @@ syscall_handler(int sys_num, struct trapframe *frame)
 	cnt.v_syscall++;
 #endif
 
-	/* Enable interrupts. */
-	(void)arm_intr_enable();
-
 	u.u_error = 0;
 	u.u_frame = frame;
 	u.u_code = u.u_frame->tf_pc - INSN_SZ;	/* Syscall for sig handler. */
@@ -384,7 +381,7 @@ syscall_handler(int sys_num, struct trapframe *frame)
 	 * SSIZE. swapout()/swapin() (vm_swap.c) then save/restore only p_ssize
 	 * bytes from the stack top, truncating a deeper stack across a swap - a
 	 * shell recursing to build a >=6-stage pipeline lost its deepest stage's
-	 * frame and silently produced 0 bytes (project_gba_deep_pipeline_data_loss).
+	 * frame and silently produced 0 bytes.
 	 * This port only ever swaps a user process out from inside the kernel
 	 * (tsleep, or the runrun reschedule at trap return, kern_sig.c), and the
 	 * user sp is frozen for the duration of the trap, so refreshing p_ssize
