@@ -195,7 +195,6 @@ void    init_dev(struct device *);
 int     yyparse(void);
 void    pic32_ioconf(void);
 void    stm32_ioconf(void);
-void    gba_ioconf(void);
 void    makefile(void);
 void    headers(void);
 void    swapconf(void);

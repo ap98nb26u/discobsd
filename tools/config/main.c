@@ -105,11 +105,8 @@ usage:  fputs("usage: config [-gp] sysname\n", stderr);
         break;
 
     case ARCH_STM32:
+    case ARCH_GBA:              /* same conf_device tables as stm32 */
         stm32_ioconf();
-        break;
-
-    case ARCH_GBA:
-        gba_ioconf();
         break;
 
     default:
