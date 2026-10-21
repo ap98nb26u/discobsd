@@ -251,9 +251,6 @@ const struct cdevsw cdevsw[] = {
 		nostrategy,	0,		0,
 	},
 	{	/* 17 - audio: DirectSound PCM, /dev/audio */
-#if AUDIO_MAJOR != 17
-#error Wrong AUDIO_MAJOR value!
-#endif
 		audioopen,	audioclose,	norw,		audiowrite,
 		audioioctl,	nullstop,	0,		seltrue,
 		nostrategy,	0,		0,

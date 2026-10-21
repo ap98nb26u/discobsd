@@ -227,8 +227,8 @@ ucall(void)
 
 /*
  * Fetch the word at addr from flash memory or i/o port.
- * This system call is required on PIC32 because in user mode
- * the access to flash memory region is not allowed.
+ * A pic32 system call (there user mode cannot read flash); a GBA process
+ * can read ROM and I/O directly (no MMU), so it is not implemented here.
  */
 void
 ufetch(void)

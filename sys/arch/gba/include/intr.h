@@ -20,144 +20,38 @@
 #ifdef	KERNEL
 
 /*
- * Logical interrupt priority level: low prio (0) -> high prio (6)
- * Interrupts at or lower than numerical level are blocked.
+ * Interrupt priority levels on the GBA: there are none to manage.
  *
- * Notes:
- * - IPLs are the inverse of the Cortex-M hardware interrupt scheme.
- *     low prio (0b111x.xxxx) -> high prio (0b001x.xxxx), 3 NVIC prio bits
- *     low prio (0b0111.xxxx) -> high prio (0b0001.xxxx), 4 NVIC prio bits
- * - A zero value disables BASEPRI register; IPL levels are 0 -> 6.
- * - PendSV exception is IPL level 0; SVCall exception is IPL level 7.
+ * The GBA has one IRQ line, masked as a whole by REG_IME (see
+ * gba_irq_allow()/gba_irq_block() in machdep.c); there is no priority
+ * hardware like the Cortex-M BASEPRI/NVIC that the stm32 port's spl*()
+ * drive.  This port keeps kernel code safe from its interrupt handlers
+ * another way: every system call runs with IME=0 (the syscall
+ * trampoline, gba/syscall.c), and interrupts are let in only while user
+ * code runs and while idle() waits.  The single-level handler
+ * (gba_intr_handler, locore0.S) never nests.  So the machine-independent
+ * kernel's spl*() calls have nothing to raise or restore: they are
+ * no-ops: each evaluates to 0, and splx() ignores its argument.
  */
-#define	IPL_NONE	0	/* Blocks nothing. */
-#define	IPL_SOFTCLOCK	1	/* Blocks low-priority clock processing. */
-#define	IPL_NET		2	/* Blocks network protocol processing. */
-#define	IPL_BIO		3	/* Blocks disk controllers. */
-#define	IPL_TTY		4	/* Blocks terminal multiplexers. */
-#define	IPL_CLOCK	5	/* Blocks high-priority clock processing. */
-#define	IPL_HIGH	6	/* Blocks all interrupt activity. */
-
-#define	IPL_TOP		(IPL_HIGH + 1)	/* +1 since zero disables BASEPRI. */
-#define	IPL_BITS	(8U - __NVIC_PRIO_BITS)	/* MSB prio shift bits. */
-
-/* Cortex-M core exception/interrupt priority levels. */
-#define	IPL_PENDSV	IPL_NONE	/* PendSV exception at lowest prio. */
-#define	IPL_SVCALL	IPL_TOP		/* SVC exception at highest prio. */
-#define	IPL_SYSTICK	IPL_CLOCK	/* SysTick exception at clock prio. */
-
-#define	IPLTOREG(ipl) \
-	(uint8_t)((ipl) ? (((IPL_TOP - (ipl)) << IPL_BITS) & 0xFFUL) : 0)
-#define	REGTOIPL(reg) \
-	(uint32_t)((reg) ? (IPL_TOP - ((reg) >> IPL_BITS)) : 0)
-
-static inline int
-arm_intr_disable(void)
+static inline __attribute__((always_inline)) int
+gba_spl(void)
 {
-	//int s = __get_PRIMASK();
-	//__disable_irq();			/* Disable interrupts. */
-	//__ISB();
-	//return s;
 	return 0;
 }
 
-static inline int
-arm_intr_enable(void)
-{
-	//int s = __get_PRIMASK();
-	//__enable_irq();				/* Enable interrupts. */
-	//__ISB();
-	//return s;
-	return 0;
-}
-
-static inline void
-arm_intr_restore(int s)
-{
-	//__set_PRIMASK(s);
-	//__ISB();
-}
-
-static inline void
-arm_intr_disable_irq(int irq)
-{
-	//NVIC_DisableIRQ(irq);
-}
-
-static inline void
-arm_intr_enable_irq(int irq)
-{
-	//NVIC_EnableIRQ(irq);
-}
-
-static inline void
-arm_intr_set_priority(int irq, int prio)
-{
-	/*
-	 * This CMSIS function bitshifts prio into the most significant bits
-	 * and expects an inverted prio for the Cortex-M interrupt priority
-	 * scheme (zero has more priority than one), so IPL_TOP - prio.
-	 */
-	//NVIC_SetPriority(irq, IPL_TOP - prio);
-}
-
-#ifdef __thumb2__
-
-static inline int
-splraise(int new)
-{
-	//int old;
-
-	//old = REGTOIPL(__get_BASEPRI());
-	//__set_BASEPRI_MAX(IPLTOREG(new));
-	//__ISB();
-
-	//return old;
-	return new
-}
-
-#define	splhigh()	splraise(IPL_HIGH)
-#define	splclock()	splraise(IPL_CLOCK)
-#define	spltty()	splraise(IPL_TTY)
-#define	splnet()	splraise(IPL_NET)
-#define	splbio()	splraise(IPL_BIO)
-
-#define	splsoftclock()	splraise(IPL_SOFTCLOCK)
-
-static inline void
+static inline __attribute__((always_inline)) void
 splx(int s)
 {
-	//__set_BASEPRI(IPLTOREG(s));
-	//__ISB();
+	(void)s;
 }
 
-static inline int
-spl0(void)
-{
-	//int old;
-
-	//old = REGTOIPL(__get_BASEPRI());
-	//splx(IPL_NONE);
-
-	//return old;
-	return 0;
-}
-
-#else /* __thumb__ */
-
-#define	splhigh()	arm_intr_disable()
-#define	splclock()	arm_intr_disable()
-#define	spltty()	arm_intr_disable()
-#define	splnet()	arm_intr_disable()
-#define	splbio()	arm_intr_disable()
-
-#define	splsoftclock()	arm_intr_enable()
-
-#define	splx(s)		arm_intr_restore(s)
-
-#define	spl0()		arm_intr_enable()
-
-#endif
+#define	splhigh()	gba_spl()
+#define	splclock()	gba_spl()
+#define	spltty()	gba_spl()
+#define	splnet()	gba_spl()
+#define	splbio()	gba_spl()
+#define	splsoftclock()	gba_spl()
+#define	spl0()		gba_spl()
 
 #endif	/* KERNEL */
 

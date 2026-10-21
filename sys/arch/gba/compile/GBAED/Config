@@ -74,9 +74,9 @@ config          unix    root on sd0b
                         swap on mr0b
                         dumps on sd0c
 
-# Serial UART ports
-device          uart1                       # USART1 as console
-device          uart2                       # USART2
+# Serial port: the link port's SIO in UART mode (dev/gba_sio_uart.c,
+# dev/mgba_uart.c) - the GBA has just this one.
+device          uart1                       # SIO UART, the console tty
 options         "UART_BAUD=115200"          # default speed
 
 # Console. Output goes to the on-screen LCD console (gtxt) and input

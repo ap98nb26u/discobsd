@@ -35,7 +35,8 @@
 
 /*
  * Clock ticks per second. The HZ value must be an integer factor of 1000.
- * Cortex-M SysTick operates with a 1ms time base, hence 1000 for HZ.
+ * Timer0 (/1024 prescaler) gives the tick - see cpu_initclocks() in
+ * gba/clock.c and the drift correction in gba/machdep.c.
  */
 #ifndef HZ
 #define HZ              100
@@ -78,19 +79,17 @@
 /*
  * Kernel table sizes. Deep shell pipelines are bounded by these: each
  * `|` is a pipe() = 1 inode + 2 file-table entries + (per stage) 1 proc.
- * Measured on real GBAED hardware (project_gba_oom_root_cause): a
+ * Measured on real GBAED hardware: a
  * cat-pipeline ran fine to 9 stages but "file: table full" / "cannot make
  * pipe" at 10 (9 pipes = 18 file entries + ~6 baseline = the old NFILE 24).
  * NFILE is the first wall (2 entries per pipe), then NINODE (1 per pipe),
  * then NPROC (1 per stage). Raised to roughly double the usable depth
  * (~18-stage pipelines): NFILE 40 -> ~18 pipes, NINODE 32 and NPROC 28
  * keep pace. Cost is IWRAM .bss (struct file 24B, inode 108B, proc ~92B;
- * NNAMECACHE and SMAPSIZ scale off these) and must stay under the SYSVEC
- * vector at IWRAM+0x6400 - the kern.ldscript ASSERT enforces it. At these
- * values ~2K of the ~3.9K IWRAM slack below SYSVEC is used, leaving margin;
- * pushing much higher needs the SYSVEC-relocation reclamation first
- * (project_gba_config_completeness workstream #4). Shared by both the GBA
- * (mrams) and GBAED builds - rebuild both when changing these.
+ * NNAMECACHE and SMAPSIZ scale off these), which must stay below the
+ * syscall vector SYSVEC at 0x03007E00 - the ldscript ASSERT enforces it,
+ * and on GBAED only a few hundred bytes are left there now.  Shared by
+ * both the GBA (mrams) and GBAED builds - rebuild both when changing these.
  */
 #ifndef NPROC
 #define NPROC           28                      /* number of processes */
@@ -152,16 +151,16 @@
  */
 #define USIZE           3072
 /*
- * Initial user stack size. This port has no MMU and no stack-fault growth (the
- * whole 64K USERRAM window is directly accessible, so a deep user stack never
- * faults), which once let p_ssize stay frozen at this value while a process's
- * stack grew past it - swapout()/swapin() (vm_swap.c) save only p_ssize bytes
- * from the top, so a deep stack was truncated across a swap and e.g. a shell
- * building a >=6-stage pipeline silently produced 0 bytes (see
- * project_gba_deep_pipeline_data_loss). That is now fixed by growing p_ssize
- * (and p_saddr) from the live sp on every kernel entry, in gba/syscall.c,
- * exactly as the pic32 port does in its exception.c - so this value is just the
- * starting size, matching pic32.
+ * Initial user stack size. This port has no MMU and no stack-fault growth
+ * (the whole USERRAM window - 64K on GBA, 249K on GBAED - is directly
+ * accessible, so a deep user stack never faults), which once let p_ssize
+ * stay frozen at this value while a process's stack grew past it -
+ * swapout()/swapin() (vm_swap.c) save only p_ssize bytes from the top, so a
+ * deep stack was truncated across a swap and e.g. a shell building a
+ * >=6-stage pipeline silently produced 0 bytes. That is now fixed by
+ * growing p_ssize (and p_saddr) from the live sp on every kernel entry, in
+ * gba/syscall.c, exactly as the pic32 port does in its exception.c - so
+ * this value is just the starting size, matching pic32.
  */
 #define SSIZE           2048            /* initial stack size (bytes) */
 
@@ -219,6 +218,12 @@
 #define BASEPRI(psr)    1
 
 #define noop()          asm volatile("nop")
+
+/*
+ * kern.romroot (kern_sysctl.c): root on the mrams ROM disk (major 3, the
+ * plain GBA build) can never be written, so /etc/rc skips fsck/mount.
+ */
+#define ROOT_IS_ROM()   (major(rootdev) == 3)
 
 /*
  * Wait for something to happen.

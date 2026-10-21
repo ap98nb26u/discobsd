@@ -131,6 +131,18 @@ ewram_bss_loop:
     strlt r2, [r0], #4
     blt ewram_bss_loop
 
+    @ --- clear the u0/u process-context slots (U0AREA/UAREA, EWRAM) ---
+    @ They are not part of .bss, and on a cold boot EWRAM holds garbage;
+    @ the MI boot path relies on u starting zeroed (e.g. u_uid/u_ruid/
+    @ u_svuid/u_groups[0] are never set before init runs, so a nonzero
+    @ uid made init exit at once).  cpu_reboot() wipes them on a warm boot.
+    ldr r0, =u0
+    ldr r1, =u_end
+uarea_loop:
+    cmp r0, r1
+    strlt r2, [r0], #4
+    blt uarea_loop
+
     @ カーネルスタックを u に合わせる
     ldr r0, =u
     add sp, r0, #3072 @ USIZE
