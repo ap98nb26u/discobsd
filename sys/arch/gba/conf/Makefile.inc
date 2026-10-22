@@ -22,18 +22,22 @@ FS_MBYTES=	20
 U_MBYTES=	1
 SWAP_MBYTES=	1
 FSIMG=		${TOPSRC}/distrib/gba/rootfs.img
-GBA_DEV_ROOTFS=	${TOPSRC}/sys/arch/gba/dev/rootfs.img
 
-# `make all' also builds the filesystem image (and relinks the ROM-root ROM
-# around it); `make cleanfs' also removes the ROM-embedded copy.
+# The plain GBA kernels link this image as their read-only root (md0a,
+# options MD_ROOTIMAGE): `make fs' copies it into place - with
+# distrib/gba/fstab.md as /etc/fstab - and relinks them (top-level
+# Makefile, MDROOT_KERNELS).  GBAED reads the same image from the SD card.
+MDROOT_KERNELS=	GBA GBALOG
+
+# `make all' also builds the filesystem image (and so relinks the
+# ROM-root kernels around it).
 POST_ALL=	$(MAKE) fs
-POST_CLEANFS=	rm -f $(GBA_DEV_ROOTFS)
 
 # Build the bare root FS from the installed tree (single partition, no MBR,
-# no separate /home), copy it to where the ROM-root kernel embeds it, and
-# relink the GBA kernel so its ROM carries the fresh filesystem. The GBAED
-# kernel reads the SD at runtime and needs no relink - it just consumes this
-# same rootfs.img, written to the card's DiscoBSD root partition.
+# no separate /home).  The top-level mdroot step then links it into the
+# ROM-root kernels (MDROOT_KERNELS above).  The GBAED kernel reads the SD at
+# runtime and needs no relink - it just consumes this same rootfs.img,
+# written to the card's DiscoBSD root partition.
 #
 # GBA uses its OWN base manifest (distrib/gba/mi.gba), not the shared
 # distrib/base/mi. The shared mi lists the full userland (games, man pages,
@@ -45,7 +49,8 @@ POST_CLEANFS=	rm -f $(GBA_DEV_ROOTFS)
 # The image ships the sd0b /etc/fstab (etc/fstab.gba, for GBAED which roots
 # on sd0b and runs a boot fsck). The plain GBA kernel instead roots on the
 # ROM memory disk md0a, so its EMBEDDED copy gets /etc/fstab swapped to
-# distrib/gba/fstab.md; the SD image ($@) keeps sd0b.
+# distrib/gba/fstab.md (by the top-level mdroot step); the SD image ($@)
+# keeps sd0b.
 ${FSIMG}:	distrib/gba/md.gba distrib/gba/mi.gba
 		rm -f $@ distrib/gba/_manifest
 		cat distrib/gba/mi.gba distrib/gba/md.gba > distrib/gba/_manifest
@@ -67,12 +72,6 @@ ${FSIMG}:	distrib/gba/md.gba distrib/gba/mi.gba
 		# cc cannot build gpanel programs yet, so the binaries are shipped.
 		$(MAKE) -C ${TOPSRC}/share/examples/gba DESTDIR=${DESTDIR} install
 		$(FSUTIL) --new --size=`expr $(FS_MBYTES) \* 1024` --manifest=distrib/gba/_manifest $@ ${DESTDIR}
-		cp $@ $(GBA_DEV_ROOTFS)
-		d=`mktemp -d`; mkdir -p $$d/etc; \
-			cp ${TOPSRC}/distrib/gba/fstab.md $$d/etc/fstab; \
-			( cd $$d && $(FSUTIL) --add $(GBA_DEV_ROOTFS) etc/fstab ); \
-			rm -rf $$d
-		$(MAKE) -C sys/arch/gba/compile/GBA all
 
 # rootfs.img is a bare root filesystem, not a full-disk image, so it must
 # NOT be dd'd to sector 0 (that would destroy the EverDrive FAT32 boot

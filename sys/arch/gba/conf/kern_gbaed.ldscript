@@ -1,11 +1,10 @@
 /*
  * Kernel linker script for the GBAED (real EverDrive SD) build.
  *
- * This build reads its root filesystem and swap from the real SD card at
- * runtime (dev/ed.c + dev/sd.c): root on /dev/sd0b (2nd MBR partition),
- * swap on /dev/sd0c (3rd). It does NOT use the md memory disk for its root, so the
- * embedded .fs image is only a tiny unused placeholder here (see
- * conf/Makefile.gba: ED_ENABLED links dev/sdcard_ed_placeholder.img).
+ * This build reads its root filesystem from the real SD card at runtime
+ * (dev/ed.c + dev/sd.c): root on /dev/sd0b (2nd MBR partition). Swap is the
+ * md memory disk's md0b, in EverDrive PSRAM (PSRAM_SWAP below). It links no
+ * root image (no options MD_ROOTIMAGE), so .fs is empty and md0a has size 0.
  *
  * The plain GBA (ROM-root / mGBA) build uses kern_gba.ldscript, which embeds
  * the real bare root filesystem in .fs. Keep the two scripts in sync by hand
@@ -164,9 +163,8 @@ SECTIONS {
 
     .fs : ALIGN(1024) {
         /*
-         * GBAED does not use the embedded image (root/swap come from the real
-         * SD card), so this holds only the small unused placeholder. Kept for
-         * layout parity with kern_gba.ldscript; __fs_start needs no MBR skip.
+         * Empty on GBAED (root is on the SD card; no MD_ROOTIMAGE): md0a is
+         * then 0 bytes.  Kept for layout parity with kern_gba.ldscript.
          */
         __fs_start = .;
         *(.fs_image)

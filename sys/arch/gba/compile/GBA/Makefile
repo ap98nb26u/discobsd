@@ -5,6 +5,7 @@ PARAM += -DUART1_ENABLED
 PARAM += -DCONS_MINOR=0
 PARAM += -DCONS_MAJOR=UART_MAJOR
 PARAM += -DUART_BAUD=115200
+PARAM += -DMD_ROOTIMAGE
 PARAM += -DMD_MACHDEP
 PARAM += -DHANGDUMP
 PARAM += -DDIAGNOSTIC
@@ -109,7 +110,12 @@ CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 #	${SYSTEM_LD} swapxxx.o
 #	${SYSTEM_LD_TAIL}
 SYSTEM_OBJ=	locore0.o locore.o ${OBJS} ioconf.o
-SYSTEM_OBJ+=	sdcard.o
+
+# The plain GBA kernel links its root filesystem image (options
+# MD_ROOTIMAGE, md0a); GBAED roots on the SD card instead.
+MDROOT_OFORMAT=	elf32-littlearm
+MDROOT_ARCH=	${_arch}
+include		$S/conf/mdroot.mk
 SYSTEM_DEP=	Makefile ioconf.c machine sys .deps ${LDSCRIPT_DEP} ${SYSTEM_OBJ}
 SYSTEM_LD_HEAD=	sh $S/conf/newvers.sh > vers.c; ${CC} ${CFLAGS} -c vers.c; rm -f $@
 SYSTEM_LD=	-@echo ${LD} ${LDFLAGS} '$${SYSTEM_OBJ}' vers.o -o $@ ${LDADD}; \
@@ -158,27 +164,6 @@ locore0.o: ${_machdir}/${_mach}/locore0.S
 ioconf.o: ioconf.c
 	${COMPILE_C}
 
-# ED_ENABLED (GBAED) reads its root filesystem from the real SD card
-# at runtime (ed.c/sd.c), never from this ROM-embedded copy - that
-# path is for the plain GBA/mGBA build. The ROM-root build
-# embeds the BARE root filesystem (dev/rootfs.img) so its ROM is
-# self-contained; ED_ENABLED links a tiny placeholder instead.
-ifneq (,$(findstring -DED_ENABLED,$(PARAM)))
-SDCARD_IMG=	${_machdir}/dev/sdcard_ed_placeholder.img
-else
-SDCARD_IMG=	${_machdir}/dev/rootfs.img
-# dev/rootfs.img is a .gitignored build artifact: the top-level `make fs`
-# builds distrib/gba/rootfs.img from the installed tree and copies it here,
-# then relinks. Seed a 1K placeholder if it is missing so a first kernel
-# link (before any `make fs`) still succeeds; `make fs` overwrites it with
-# the real filesystem afterwards. ROM-root build only (GBAED has its placeholder).
-${_machdir}/dev/rootfs.img:
-	dd if=/dev/zero of=$@ bs=1024 count=1 2>/dev/null
-endif
-sdcard.o: ${SDCARD_IMG}
-	${OBJCOPY} -I binary -O elf32-littlearm -B ${_arch} \
-	--rename-section .data=.fs_image \
-	$< $@
 
 exec_aout.o: $S/kern/exec_aout.c
 	${COMPILE_C}
