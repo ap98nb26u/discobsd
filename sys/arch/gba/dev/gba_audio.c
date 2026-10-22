@@ -11,7 +11,7 @@
  *
  * Rates: /dev/audio=8192, /dev/audio16=16384, /dev/audio4=4096 (mono) and
  * /dev/audiost[16] (stereo); AUDIO_SETRATE overrides.  On the plain GBA
- * (mrams, data in ROM) playback is clean apart from the wrap click below.
+ * (ROM-root build, data in ROM) playback is clean apart from the wrap click below.
  * On GBAED it is USABLE BUT NOT PRACTICAL: the data streams off the SD while
  * playing, and the SD stalls (plus the halved-ring wraps) add audible drop-
  * outs, beat/growl and a startup echo - 4096 Hz halves the data rate and so
@@ -53,7 +53,7 @@
  * speaker is mono).  Two things were tried to wrap less often and did NOT pan
  * out, recorded here so they are not re-attempted blindly:
  *   - A 32 KB EWRAM ring (short clips wrap-free): it permanently shrank the
- *     mrams swap area enough to OOM 4-stage pipelines, and the kernel stack
+ *     ROM-root build's EWRAM swap area enough to OOM 4-stage pipelines, and the kernel stack
  *     lives at the top of EWRAM so the buffer had to dodge it - reverted.
  *   - A VBlank-synced double buffer (restart on a fixed 60 Hz event instead
  *     of an arbitrary tick): restarting the DMA 60x/s makes the per-restart

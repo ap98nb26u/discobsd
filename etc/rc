@@ -122,7 +122,7 @@ echo -n "Starting daemons:"
 # to the GBA simulated-SWI syscall ABI, so a handler ran off into garbage
 # - the update hang and the sed hang above were the same root cause),
 # fixed in commit 447358a. With signal delivery working they are safe to
-# start. Skipped on a ROM-backed root (kern.romroot, the plain GBA/mrams
+# start. Skipped on a ROM-backed root (kern.romroot, the plain GBA/ROM-root
 # build): update's periodic sync is pointless on a read-only root, cron
 # cannot write its logs, and that build's tiny RAM/swap makes extra
 # resident daemons costly.
@@ -135,7 +135,7 @@ fi
 echo
 
 # Site-specific startup, incl. persistent tunables (writable-root builds).
-# On a ROM-backed root (mrams) this is skipped: it is read-only, and settings
+# On a ROM-backed root (ROM-root) this is skipped: it is read-only, and settings
 # there persist in cart SRAM instead (see sram.c). On the SD-root GBAED build,
 # put persistent "sysctl -w ..." lines (e.g. keyboard auto-repeat) in
 # /etc/rc.local to have them reapplied every boot. Same "no ! negation" note

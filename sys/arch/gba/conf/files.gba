@@ -73,7 +73,8 @@ arch/gba/gba/sysctl.c		standard
 #
 # GBA drivers.
 #
-arch/gba/dev/mrams.c			optional mr
+dev/md.c				optional md
+arch/gba/dev/md_gba.c			optional md
 arch/gba/dev/ed.c			optional ed
 arch/gba/dev/sd.c			optional sd
 arch/gba/dev/rtc.c			optional rtc

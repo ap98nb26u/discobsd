@@ -54,6 +54,9 @@ dir /var/run
 #   4     1   swap1 Virtual i/o area, allocated from swap space
 #   4     2   swap2 Virtual i/o area, allocated from swap space
 #   5     0   sr0   Volatile disk - serial RAM on SPI port (spirams)
+#   6     0   md0   Memory disk: root image in ROM, swap in RAM (md)
+#   6     1   md0a  Partition a: root filesystem
+#   6     2   md0b  Partition b: swap space
 #
 bdev /dev/sd0
 major 0             # Main SD card
@@ -103,14 +106,14 @@ minor 1
 bdev /dev/dr0b
 major 2
 minor 2
-bdev /dev/mr0
-major 3             # Volatile disk - MRAM on SPI port (mrams)
+bdev /dev/md0
+major 6             # Memory disk (md)
 minor 0
-bdev /dev/mr0a
-major 3             # mrams partition a (GBA: ROM root fs)
+bdev /dev/md0a
+major 6             # md partition a (GBA: ROM root fs)
 minor 1
-bdev /dev/mr0b
-major 3             # mrams partition b (GBA: EWRAM swap / GBAED: PSRAM swap)
+bdev /dev/md0b
+major 6             # md partition b (GBA: EWRAM swap / GBAED: PSRAM swap)
 minor 2
 bdev /dev/swap
 major 4             # Virtual swap device, mapped to real swap partition

@@ -35,11 +35,14 @@ options         "TTYEDIT_HISTORY=4"         # command-history lines (up/down)
 options         "DIAGNOSTIC"                # Enable diagnostics
 options         "HANGDUMP"                  # L+R+SELECT: print where the kernel is (hang debugging)
 
-device           mr0                        # read-only Memory disk in ROM
+# Memory disk (dev/md.c): the root filesystem image linked into the ROM
+# (md0a, read-only) and swap in EWRAM (md0b); md_gba.c adds the GBA hooks.
+device          md0
+options         "MD_MACHDEP"                # GBA hooks, arch/gba/dev/md_gba.c
 
-# Root filesystem at /dev/mr0a, swap at /dev/mr0b
-config          unix    root on mr0a
-                        swap on mr0b
+# Root filesystem at /dev/md0a, swap at /dev/md0b
+config          unix    root on md0a
+                        swap on md0b
 
 # Serial port: the link port's SIO in UART mode (dev/gba_sio_uart.c,
 # dev/mgba_uart.c) - the GBA has just this one.

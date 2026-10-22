@@ -1009,7 +1009,7 @@ sd_setup(int unit)
      * on every call, so re-attempting is safe and self-contained: each
      * retry hands the card another settle window plus a clean reset,
      * which brings it up within this same boot instead of costing a whole
-     * reboot cycle. The mrams (ROM-root) build never touches the SD and
+     * reboot cycle. The ROM-root build never touches the SD and
      * never hits this. Treat the cold-boot flakiness as an EverDrive/SD
      * fact of life and absorb it here rather than surfacing it.
      */

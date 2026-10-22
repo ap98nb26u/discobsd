@@ -21,8 +21,8 @@
 
 #include <sys/swap.h>
 
-#ifdef MR_ENABLED
-#include <gba/dev/mrams.h>
+#ifdef MD_ENABLED
+#include <sys/md.h>
 #endif
 #include <gba/dev/uart.h>
 #include <gba/dev/gba_sio_uart.h>
@@ -117,12 +117,7 @@ const struct bdevsw bdevsw[] = {
 		NOBDEV
 	},
 	{	/* 3 - mrams */
-#ifdef MR_ENABLED
-		mrams_open,	mrams_close,	mrams_strategy,
-		mrams_size,	mrams_ioctl,	0
-#else
 		NOBDEV
-#endif
 	},
 	{	/* 4 - swap */
 		swopen,		swclose,	swstrategy,
@@ -130,6 +125,14 @@ const struct bdevsw bdevsw[] = {
 	},
 	{	/* 5 - spirams */
 		NOBDEV
+	},
+	{	/* 6 - md: memory disk (root image in ROM, swap in RAM) */
+#ifdef MD_ENABLED
+		mdopen,		mdclose,	mdstrategy,
+		mdsize,		mdioctl,	0
+#else
+		NOBDEV
+#endif
 	},
 
 	/*
@@ -328,6 +331,7 @@ isdisk(dev_t dev, int type)
 	case 2:				/* rd2 */
 	case 3:				/* rd3 */
 	case 4:				/* sw */
+	case 6:				/* md */
 		return 1;
 	default:
 		return 0;
