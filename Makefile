@@ -106,16 +106,18 @@ endif
 # A port whose kernels link the root filesystem image for the memory disk's
 # md0a (options MD_ROOTIMAGE, see sys/conf/mdroot.mk) names those kernels
 # (compile directories) in MDROOT_KERNELS in its conf/Makefile.inc.
-# `make fs' then puts ${FSIMG} where they link it - with
+# `make fs' then puts ${MDROOT_SRC} - ${FSIMG} unless the port builds a
+# separate, smaller root image for this - where they link it, with
 # distrib/${MACHINE}/fstab.md as its /etc/fstab, if that file exists, since
 # that copy roots on md0a - and relinks them.
 ifdef MDROOT_KERNELS
 MDROOT_IMG?=	${TOPSRC}/sys/arch/${MACHINE}/dev/rootfs.img
+MDROOT_SRC?=	$(FSIMG)
 
 fs:		mdroot
 
-mdroot:		$(FSIMG)
-		cp $(FSIMG) $(MDROOT_IMG)
+mdroot:		$(MDROOT_SRC)
+		cp $(MDROOT_SRC) $(MDROOT_IMG)
 		if [ -f distrib/${MACHINE}/fstab.md ]; then \
 			d=`mktemp -d`; mkdir -p $$d/etc; \
 			cp distrib/${MACHINE}/fstab.md $$d/etc/fstab; \

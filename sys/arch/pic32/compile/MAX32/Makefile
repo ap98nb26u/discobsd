@@ -112,6 +112,12 @@ DEVCFG!=if [ -f devcfg.c ] ; then \
 #	${SYSTEM_LD} swapxxx.o
 #	${SYSTEM_LD_TAIL}
 SYSTEM_OBJ=	locore.o ${OBJS} ioconf.o ${DEVCFG}
+
+# A kernel with options MD_ROOTIMAGE links its root filesystem image, for
+# the md memory disk's md0a (see the MDROOT_KERNELS note in conf/Makefile.inc).
+MDROOT_OFORMAT=	elf32-littlemips
+MDROOT_ARCH=	mips
+include		$S/conf/mdroot.mk
 SYSTEM_DEP=	Makefile ioconf.c machine sys .deps ${SYSTEM_OBJ}
 SYSTEM_LD_HEAD=	sh $S/conf/newvers.sh > vers.c; ${CC} ${CFLAGS} -c vers.c; rm -f $@
 SYSTEM_LD=	-@echo ${LD} ${LDFLAGS} '$${SYSTEM_OBJ}' vers.o -o $@ ${LDADD}; \

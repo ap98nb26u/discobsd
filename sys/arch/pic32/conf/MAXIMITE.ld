@@ -78,6 +78,21 @@ SECTIONS
   __bss_end = . ;
   _end = .;
 
+  /*
+   * Root filesystem image for the md memory disk (dev/md.c, options
+   * MD_ROOTIMAGE), in flash after the initialized data's load image;
+   * empty otherwise.  md0b (swap) is not in memory on these boards.
+   */
+  .fs ADDR (.text) + SIZEOF (.text) + SIZEOF (.data) :
+  {
+    __fs_start = .;
+    KEEP (*(.fs_image))
+    . = ALIGN (32 / 8);
+    __fs_end = .;
+  } > flash
+  PROVIDE (__swap_start = 0);
+  PROVIDE (__swap_end = 0);
+
   /* Stabs debugging sections.  */
   .stab          0 : { *(.stab) }
   .stabstr       0 : { *(.stabstr) }
