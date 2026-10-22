@@ -103,6 +103,32 @@ ${FSIMG}:	distrib/${MACHINE}/md.${MACHINE} distrib/base/mi.home
 		$(FSUTIL) --new --partition=3 --manifest=distrib/base/mi.home $@ distrib/home
 endif
 
+# A port whose kernels link the root filesystem image for the memory disk's
+# md0a (options MD_ROOTIMAGE, see sys/conf/mdroot.mk) names those kernels
+# (compile directories) in MDROOT_KERNELS in its conf/Makefile.inc.
+# `make fs' then puts ${FSIMG} where they link it - with
+# distrib/${MACHINE}/fstab.md as its /etc/fstab, if that file exists, since
+# that copy roots on md0a - and relinks them.
+ifdef MDROOT_KERNELS
+MDROOT_IMG?=	${TOPSRC}/sys/arch/${MACHINE}/dev/rootfs.img
+
+fs:		mdroot
+
+mdroot:		$(FSIMG)
+		cp $(FSIMG) $(MDROOT_IMG)
+		if [ -f distrib/${MACHINE}/fstab.md ]; then \
+			d=`mktemp -d`; mkdir -p $$d/etc; \
+			cp distrib/${MACHINE}/fstab.md $$d/etc/fstab; \
+			( cd $$d && $(FSUTIL) --add $(MDROOT_IMG) etc/fstab ); \
+			rm -rf $$d; \
+		fi
+		for k in $(MDROOT_KERNELS); do \
+			$(MAKE) -C sys/arch/${MACHINE}/compile/$$k all || exit 1; \
+		done
+
+.PHONY:		mdroot
+endif
+
 release:
 		${MAKE} -C etc MACHINE=${MACHINE} RELEASEDIR=${RELEASEDIR} release
 
@@ -121,6 +147,9 @@ cleankernel:
 cleanfs:
 		rm -f distrib/$(MACHINE)/_manifest
 		rm -f $(FSIMG)
+ifdef MDROOT_KERNELS
+		rm -f $(MDROOT_IMG)
+endif
 		$(POST_CLEANFS)
 
 cleanall:	cleantools clean cleankernel
