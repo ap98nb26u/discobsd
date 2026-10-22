@@ -39,6 +39,7 @@ options         "HANGDUMP"                  # L+R+SELECT: print where the kernel
 # (md0a, read-only) and swap in EWRAM (md0b); md_gba.c adds the GBA hooks.
 device          md0
 options         "MD_MACHDEP"                # GBA hooks, arch/gba/dev/md_gba.c
+options         "MD_ROOTIMAGE"              # link the root image (make fs) for md0a
 
 # Root filesystem at /dev/md0a, swap at /dev/md0b
 config          unix    root on md0a
