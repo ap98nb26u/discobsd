@@ -1,10 +1,10 @@
 /*
- * Kernel linker script for the plain GBA (mrams / mGBA) build.
+ * Kernel linker script for the plain GBA (ROM-root / mGBA) build.
  *
  * This build has NO real disk: the root filesystem is a bare UFS image
  * (distrib/gba/rootfs.img, no MBR/partition table) embedded into cartridge
- * ROM in the .fs section below, and served by the mrams memory-disk driver
- * (dev/mrams.c) as /dev/mr0a. Swap (/dev/mr0b) is a separate EWRAM region
+ * ROM in the .fs section below, and served by the md memory-disk driver
+ * (dev/md.c) as /dev/md0a. Swap (/dev/md0b) is a separate EWRAM region
  * (SWAP below), unrelated to the embedded image.
  *
  * The GBAED (real EverDrive SD) build uses kern_gbaed.ldscript instead; keep
@@ -49,8 +49,8 @@ MEMORY {
     UAREA   (rw!x) : ORIGIN = 0x02000C00, LENGTH = 3K    /* 0x0200 0C00 - 0x0200 17FF */
     /*
      * USERRAM is just the user process's own addressable data+stack
-     * window; SWAP is mrams.c's (GBA/mGBA-only) swap staging area, a
-     * *real* EWRAM range that mrams_write()/mrams_read() copy to/from
+     * window; SWAP is md.c's (GBA/mGBA-only) swap staging area, a
+     * *real* EWRAM range that md.c copies to/from
      * directly (see __swap_start/__swap_end there) - it is NOT a disk
      * partition on this config, unlike GBAED's real sd.c (which uses an
      * 8MB SD partition instead and was never the bottleneck here).
@@ -132,11 +132,11 @@ SECTIONS {
     .fs : ALIGN(1024) {
         /*
          * The embedded image is now a BARE root filesystem (rootfs.img, no
-         * MBR/partition table), so the filesystem starts at offset 0 - mrams
-         * maps mr0a directly onto __fs_start. (Previously an MBR-partitioned
+         * MBR/partition table), so the filesystem starts at offset 0 - md
+         * maps md0a directly onto __fs_start. (Previously an MBR-partitioned
          * sdcard.img was embedded and this skipped its 1024-byte MBR with
          * "+ 0x400" to land on partition #1; that partitioning was never used
-         * by mrams - mr0a/mr0b are synthesized from __fs_start/__swap_start -
+         * by md - md0a/md0b are synthesized from __fs_start/__swap_start -
          * so the MBR and the extra swap/home partitions were pure ROM bloat.)
          */
         __fs_start = .;

@@ -1,11 +1,12 @@
 PARAM = -DGBA
 PARAM += -DARM7TDMI
-PARAM += -DMR_ENABLED
+PARAM += -DMD_ENABLED
 PARAM += -DUART1_ENABLED
 PARAM += -DAGBPRINT
 PARAM += -DCONS_MINOR=0
 PARAM += -DCONS_MAJOR=UART_MAJOR
 PARAM += -DUART_BAUD=115200
+PARAM += -DMD_MACHDEP
 PARAM += -DHANGDUMP
 PARAM += -DDIAGNOSTIC
 PARAM += -DTTYEDIT_HISTORY=4
@@ -73,8 +74,8 @@ OBJS = exec_aout.o exec_conf.o exec_elf.o exec_script.o exec_subr.o \
 	ufs_namei.o ufs_subr.o ufs_syscalls.o ufs_syscalls2.o \
 	vfs_vnops.o vm_sched.o vm_swap.o vm_swp.o cons.o mem.o swap.o \
 	clock.o conf.o machdep.o mpu.o sig_machdep.o syscall.o sysctl.o \
-	mrams.o mgba_uart.o gba_text.o gba_font.o swkbd.o gba_sound.o \
-	gba_audio.o gba_gpanel.o sram.o gba_sio_uart.o 
+	md.o md_gba.o mgba_uart.o gba_text.o gba_font.o swkbd.o \
+	gba_sound.o gba_audio.o gba_gpanel.o sram.o gba_sio_uart.o 
 
 CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/kern/exec_script.c $S/kern/exec_subr.c $S/kern/init_main.c \
@@ -96,7 +97,7 @@ CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/dev/swap.c $S/arch/gba/gba/clock.c $S/arch/gba/gba/conf.c \
 	$S/arch/gba/gba/machdep.c $S/arch/gba/gba/mpu.c \
 	$S/arch/gba/gba/sig_machdep.c $S/arch/gba/gba/syscall.c \
-	$S/arch/gba/gba/sysctl.c $S/arch/gba/dev/mrams.c \
+	$S/arch/gba/gba/sysctl.c $S/dev/md.c $S/arch/gba/dev/md_gba.c \
 	$S/arch/gba/dev/mgba_uart.c $S/arch/gba/dev/gba_text.c \
 	$S/arch/gba/dev/gba_font.c $S/arch/gba/dev/swkbd.c \
 	$S/arch/gba/dev/gba_sound.c $S/arch/gba/dev/gba_audio.c \
@@ -160,7 +161,7 @@ ioconf.o: ioconf.c
 
 # ED_ENABLED (GBAED) reads its root filesystem from the real SD card
 # at runtime (ed.c/sd.c), never from this ROM-embedded copy - that
-# path is mrams.c-only (MR_ENABLED, plain GBA/mGBA). The mrams build
+# path is for the plain GBA/mGBA build. The ROM-root build
 # embeds the BARE root filesystem (dev/rootfs.img) so its ROM is
 # self-contained; ED_ENABLED links a tiny placeholder instead.
 ifneq (,$(findstring -DED_ENABLED,$(PARAM)))
@@ -171,7 +172,7 @@ SDCARD_IMG=	${_machdir}/dev/rootfs.img
 # builds distrib/gba/rootfs.img from the installed tree and copies it here,
 # then relinks. Seed a 1K placeholder if it is missing so a first kernel
 # link (before any `make fs`) still succeeds; `make fs` overwrites it with
-# the real filesystem afterwards. mrams build only (GBAED has its placeholder).
+# the real filesystem afterwards. ROM-root build only (GBAED has its placeholder).
 ${_machdir}/dev/rootfs.img:
 	dd if=/dev/zero of=$@ bs=1024 count=1 2>/dev/null
 endif
@@ -354,7 +355,10 @@ syscall.o: $S/arch/gba/gba/syscall.c
 sysctl.o: $S/arch/gba/gba/sysctl.c
 	${COMPILE_C}
 
-mrams.o: $S/arch/gba/dev/mrams.c
+md.o: $S/dev/md.c
+	${COMPILE_C}
+
+md_gba.o: $S/arch/gba/dev/md_gba.c
 	${COMPILE_C}
 
 mgba_uart.o: $S/arch/gba/dev/mgba_uart.c

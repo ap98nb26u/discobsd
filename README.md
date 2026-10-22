@@ -465,5 +465,5 @@ erase ^?, kill ^U, intr ^C
 ```
 
 The plain GBA build instead uses a read-only root file system embedded in the
-ROM (`root dev = (3,1)`, device `mr0a`) and swap in EWRAM, so it skips the boot
-file system check and needs no SD card.
+ROM (`root dev = (6,1)`, `md0a` of the memory disk driver `md`) and swap in
+EWRAM, so it skips the boot file system check and needs no SD card.

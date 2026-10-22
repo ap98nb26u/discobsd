@@ -34,7 +34,7 @@ extern int console_blank_secs;		/* gba/machdep.c: screen-saver timeout */
 extern int swkbd_repeat_delay_ms;	/* dev/swkbd.c: auto-repeat delay (ms) */
 extern int swkbd_repeat_rate_ms;	/* dev/swkbd.c: auto-repeat interval (ms) */
 extern void swkbd_set_repeat(int, int);	/* dev/swkbd.c: apply live (clamped) */
-extern void sram_persist_params(void);	/* dev/sram.c: SRAM write (mrams; no-op else) */
+extern void sram_persist_params(void);	/* dev/sram.c: SRAM write (ROM-root build; no-op else) */
 
 /*
  * Errno messages.
@@ -354,7 +354,7 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		 * Software-keyboard auto-repeat timing, in milliseconds. Read the
 		 * current value; on a write, apply it live (swkbd_set_repeat
 		 * clamps it) and persist it. Persistence differs by build (see
-		 * sram.c): the mrams/ROM-root build writes cart SRAM; the SD-root
+		 * sram.c): the ROM-root build writes cart SRAM; the SD-root
 		 * GBAED build makes sram_persist_params() a no-op and instead
 		 * reapplies "sysctl -w" lines from /etc/rc.local each boot.
 		 * E.g. "sysctl -w machdep.kbd_repeat_rate=80".

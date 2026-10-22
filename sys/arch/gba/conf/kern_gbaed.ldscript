@@ -3,14 +3,14 @@
  *
  * This build reads its root filesystem and swap from the real SD card at
  * runtime (dev/ed.c + dev/sd.c): root on /dev/sd0b (2nd MBR partition),
- * swap on /dev/sd0c (3rd). It does NOT use the mrams memory disk, so the
+ * swap on /dev/sd0c (3rd). It does NOT use the md memory disk for its root, so the
  * embedded .fs image is only a tiny unused placeholder here (see
  * conf/Makefile.gba: ED_ENABLED links dev/sdcard_ed_placeholder.img).
  *
- * The plain GBA (mrams / mGBA) build uses kern_gba.ldscript, which embeds
+ * The plain GBA (ROM-root / mGBA) build uses kern_gba.ldscript, which embeds
  * the real bare root filesystem in .fs. Keep the two scripts in sync by hand
  * except where they deliberately diverge: the USERRAM/SWAP split is where
- * GBAED can reclaim the EWRAM swap region (mrams-only) to enlarge USERRAM -
+ * GBAED can reclaim the EWRAM swap region (ROM-root build only) to enlarge USERRAM -
  * that large-capacity work edits THIS file (and machparam.h's -DGBAED path).
  */
 
@@ -50,8 +50,8 @@ MEMORY {
     UAREA   (rw!x) : ORIGIN = 0x02000C00, LENGTH = 3K    /* 0x0200 0C00 - 0x0200 17FF */
     /*
      * USERRAM is just the user process's own addressable data+stack
-     * window; SWAP is mrams.c's (GBA/mGBA-only) swap staging area, a
-     * *real* EWRAM range that mrams_write()/mrams_read() copy to/from
+     * window; SWAP is md.c's (GBA/mGBA-only) swap staging area, a
+     * *real* EWRAM range that md.c copies to/from
      * directly (see __swap_start/__swap_end there) - it is NOT a disk
      * partition on this config, unlike GBAED's real sd.c (which uses an
      * 8MB SD partition instead and was never the bottleneck here).
@@ -83,11 +83,11 @@ MEMORY {
      * (machparam.h) all in sync by hand if this moves again.
      */
     /*
-     * GBAED LARGE-CAPACITY LAYOUT: unlike the plain GBA/mrams build, GBAED's
+     * GBAED LARGE-CAPACITY LAYOUT: unlike the plain GBA/ROM-root build, GBAED's
      * swap lives on the real SD card (/dev/sd0c), so the EWRAM SWAP staging
-     * region that mrams needs is dead weight here. Reclaim it: USERRAM fills
+     * region that the ROM-root build needs is dead weight here. Reclaim it: USERRAM fills
      * ALL of EWRAM after the u/u0 area (0x02001800..0x02040000 = 250K, vs the
-     * mrams build's 64K), so a single resident process can be up to 250K and
+     * ROM-root build's 64K), so a single resident process can be up to 250K and
      * far more can be parked in SD swap. kern_gba.ldscript keeps the 64K
      * USERRAM + 186K EWRAM SWAP split. Keep LENGTH here in sync with
      * machparam.h's -DGBAED USER_DATA_SIZE and MAXMEM (all 249K) by hand.
@@ -114,8 +114,8 @@ __user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
  * writable at runtime because ed_probe() leaves the EverDrive in
  * NROM_RAM | ROM_WE_ON (dev/ed.c), and the CPU can store to it directly
  * (verified on real hardware). Contents are volatile (lost on power-off),
- * which is exactly what swap needs. mrams.c serves this range as the swap
- * block device (mr0b); machparam.h/MAXMEM are unaffected (swap size is
+ * which is exactly what swap needs. md.c serves this range as the swap
+ * block device (md0b); machparam.h/MAXMEM are unaffected (swap size is
  * independent of the user RAM window).
  *
  * To resize, change PSRAM_SWAP_SIZE/START. The region must stay clear of

@@ -1,18 +1,18 @@
 /*
- * Persistent boot parameters in cartridge backup SRAM - mrams build only.
+ * Persistent boot parameters in cartridge backup SRAM - ROM-root build only.
  *
  * A small parameter block is kept in the GBA's cartridge backup SRAM so
- * settings survive across runs. This works on the ROM-root (mrams / plain
+ * settings survive across runs. This works on the ROM-root (plain
  * GBA / mGBA) build, where there is no writable filesystem to persist to.
  *
  * It does NOT work on the SD-root EverDrive (GBAED) build: there DiscoBSD
  * drives the EverDrive's SD card for its root FS, and that interferes with
  * the ED committing the SRAM buffer to its .sav file on the same card, so a
  * post-boot SRAM write is never flushed (verified on real X5 hardware: writes
- * persist on mrams + mGBA/VBA but not on GBAED). The GBAED build therefore
+ * persist on the ROM-root build + mGBA/VBA but not on GBAED). The GBAED build therefore
  * persists settings in a file on its writable root instead (put "sysctl -w"
  * lines in /etc/rc.local; see etc/rc). So the SRAM machinery below is compiled
- * only under MR_ENABLED; on other builds the entry points are no-ops.
+ * only when not GBAED; there the entry points are no-ops.
  *
  * SRAM hardware rules (GBATEK): the region at 0x0E000000 is 32KB on an 8-bit
  * data bus, accessed one byte at a time (LDRB/STRB, never 16/32-bit, never
@@ -34,7 +34,7 @@
 __attribute__((used, aligned(4)))
 const char sram_save_type_sig[] = "SRAM_V113";
 
-#ifdef MR_ENABLED
+#ifndef GBAED
 
 #define SRAM	((volatile unsigned char *)GBA_SRAM_BASE)
 
@@ -151,7 +151,7 @@ sram_persist_params(void)
 		sram_write8(i, b[i]);
 }
 
-#else /* !MR_ENABLED: SRAM persistence unavailable (see the header); the
+#else /* GBAED: SRAM persistence unavailable (see the header); the
 	 GBAED build persists via /etc instead. */
 
 void
@@ -164,4 +164,4 @@ sram_persist_params(void)
 {
 }
 
-#endif /* MR_ENABLED */
+#endif /* !GBAED */

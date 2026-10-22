@@ -293,7 +293,7 @@ swkbd_move(int dx, int dy)
 /*
  * Auto-repeat timing is runtime-tunable via the machdep sysctls
  * kbd_repeat_delay / kbd_repeat_rate (milliseconds), and persisted per build
- * (cart SRAM on mrams, /etc/rc.local on the SD-root GBAED build; see sram.c). The ms values are the canonical setting; swkbd_set_repeat()
+ * (cart SRAM on the ROM-root build, /etc/rc.local on the SD-root GBAED build; see sram.c). The ms values are the canonical setting; swkbd_set_repeat()
  * clamps them and derives the Timer3 (HZ ~= 100 Hz) tick counts actually
  * compared against below. Defaults ~0.4s delay / ~0.1s interval.
  *

@@ -56,7 +56,7 @@
 #ifdef GBAED
 /*
  * GBAED runs its swap on the real SD card, so the EWRAM swap-staging region
- * the mrams build needs is free to become user RAM: USERRAM fills all of
+ * the ROM-root build needs is free to become user RAM: USERRAM fills all of
  * EWRAM after the u/u0 area but the last 1K, which holds the pseudo-ttys
  * (see kern_gbaed.ldscript). -DGBAED is set only in
  * the GBAED kernel build (sys/arch/gba/compile/GBAED/Makefile PARAM); the
@@ -89,7 +89,7 @@
  * NNAMECACHE and SMAPSIZ scale off these), which must stay below the
  * syscall vector SYSVEC at 0x03007E00 - the ldscript ASSERT enforces it,
  * and on GBAED only a few hundred bytes are left there now.  Shared by
- * both the GBA (mrams) and GBAED builds - rebuild both when changing these.
+ * both the GBA (ROM-root) and GBAED builds - rebuild both when changing these.
  */
 #ifndef NPROC
 #define NPROC           28                      /* number of processes */
@@ -131,7 +131,7 @@
 #ifdef GBAED
 #define USER_DATA_SIZE          (249 * 1024)    /* GBAED: match kern_gbaed.ldscript USERRAM/MAXMEM. */
 #else
-#define USER_DATA_SIZE          (64 * 1024)     /* GBA/mrams: match kern_gba.ldscript USERRAM/MAXMEM. */
+#define USER_DATA_SIZE          (64 * 1024)     /* GBA/ROM-root: match kern_gba.ldscript USERRAM/MAXMEM. */
 #endif
 #define USER_DATA_END           (USER_DATA_START + USER_DATA_SIZE)
 
@@ -218,12 +218,6 @@
 #define BASEPRI(psr)    1
 
 #define noop()          asm volatile("nop")
-
-/*
- * kern.romroot (kern_sysctl.c): root on the mrams ROM disk (major 3, the
- * plain GBA build) can never be written, so /etc/rc skips fsck/mount.
- */
-#define ROOT_IS_ROM()   (major(rootdev) == 3)
 
 /*
  * Wait for something to happen.

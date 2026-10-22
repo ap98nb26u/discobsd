@@ -5,10 +5,10 @@
 # (see sys/arch/gba/conf/GBAED). GBAED runs a real boot-time fsck, so
 # this must name the actual root device.
 # ----
-# The plain GBA (mrams) kernel instead roots on the ROM memory disk
-# mr0a and is read-only (romroot: it skips the boot fsck/mount). The
-# top-level Makefile therefore swaps this file for distrib/gba/fstab.mrams
-# (/dev/mr0a) in the ROM-embedded copy of the image only; the SD image
+# The plain GBA (ROM-root) kernel instead roots on the ROM memory disk
+# md0a and is read-only (romroot: it skips the boot fsck/mount). The
+# top-level Makefile therefore swaps this file for distrib/gba/fstab.md
+# (/dev/md0a) in the ROM-embedded copy of the image only; the SD image
 # keeps this sd0b version. There is no separate /home partition in
 # either layout - /home is just a directory on the root filesystem.
 # NOTE: lib/libc/gen/fstab.c's fstabscan() mis-parses a bare "#" or a

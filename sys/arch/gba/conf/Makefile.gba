@@ -97,7 +97,7 @@ ioconf.o: ioconf.c
 
 # ED_ENABLED (GBAED) reads its root filesystem from the real SD card
 # at runtime (ed.c/sd.c), never from this ROM-embedded copy - that
-# path is mrams.c-only (MR_ENABLED, plain GBA/mGBA). The mrams build
+# path is for the plain GBA/mGBA build. The ROM-root build
 # embeds the BARE root filesystem (dev/rootfs.img) so its ROM is
 # self-contained; ED_ENABLED links a tiny placeholder instead.
 ifneq (,$(findstring -DED_ENABLED,$(PARAM)))
@@ -108,7 +108,7 @@ SDCARD_IMG=	${_machdir}/dev/rootfs.img
 # builds distrib/gba/rootfs.img from the installed tree and copies it here,
 # then relinks. Seed a 1K placeholder if it is missing so a first kernel
 # link (before any `make fs`) still succeeds; `make fs` overwrites it with
-# the real filesystem afterwards. mrams build only (GBAED has its placeholder).
+# the real filesystem afterwards. ROM-root build only (GBAED has its placeholder).
 ${_machdir}/dev/rootfs.img:
 	dd if=/dev/zero of=$@ bs=1024 count=1 2>/dev/null
 endif

@@ -9,11 +9,11 @@ ROM=		${KERNDIR}/${KERN}.bin
 # off that generic ${FSIMG}: / installfs rule so the ones below are used.
 #
 # The GBA image is a BARE root filesystem (no MBR/partition table). The
-# plain GBA (mrams/mGBA) kernel embeds it in ROM (sys/arch/gba/dev/rootfs.img);
+# plain GBA (ROM-root/mGBA) kernel embeds it in ROM (sys/arch/gba/dev/rootfs.img);
 # on real EverDrive hardware the same image is written onto the DiscoBSD
 # root partition (sd0b, MBR #2), leaving the EverDrive's own FAT32 boot
 # partition (#1) intact. There is deliberately no full-disk image: swap is
-# a separate region (EWRAM for mrams, MBR #3 for GBAED) and the build has
+# a separate region (EWRAM for the ROM-root build, MBR #3 for GBAED) and the build has
 # no FAT32 tooling to populate the EverDrive boot partition, so a sector-0
 # image would not be directly usable anyway.
 #
@@ -24,13 +24,13 @@ SWAP_MBYTES=	1
 FSIMG=		${TOPSRC}/distrib/gba/rootfs.img
 GBA_DEV_ROOTFS=	${TOPSRC}/sys/arch/gba/dev/rootfs.img
 
-# `make all' also builds the filesystem image (and relinks the mrams ROM
+# `make all' also builds the filesystem image (and relinks the ROM-root ROM
 # around it); `make cleanfs' also removes the ROM-embedded copy.
 POST_ALL=	$(MAKE) fs
 POST_CLEANFS=	rm -f $(GBA_DEV_ROOTFS)
 
 # Build the bare root FS from the installed tree (single partition, no MBR,
-# no separate /home), copy it to where the mrams kernel embeds it, and
+# no separate /home), copy it to where the ROM-root kernel embeds it, and
 # relink the GBA kernel so its ROM carries the fresh filesystem. The GBAED
 # kernel reads the SD at runtime and needs no relink - it just consumes this
 # same rootfs.img, written to the card's DiscoBSD root partition.
@@ -44,8 +44,8 @@ POST_CLEANFS=	rm -f $(GBA_DEV_ROOTFS)
 #
 # The image ships the sd0b /etc/fstab (etc/fstab.gba, for GBAED which roots
 # on sd0b and runs a boot fsck). The plain GBA kernel instead roots on the
-# ROM memory disk mr0a, so its EMBEDDED copy gets /etc/fstab swapped to
-# distrib/gba/fstab.mrams; the SD image ($@) keeps sd0b.
+# ROM memory disk md0a, so its EMBEDDED copy gets /etc/fstab swapped to
+# distrib/gba/fstab.md; the SD image ($@) keeps sd0b.
 ${FSIMG}:	distrib/gba/md.gba distrib/gba/mi.gba
 		rm -f $@ distrib/gba/_manifest
 		cat distrib/gba/mi.gba distrib/gba/md.gba > distrib/gba/_manifest
@@ -69,7 +69,7 @@ ${FSIMG}:	distrib/gba/md.gba distrib/gba/mi.gba
 		$(FSUTIL) --new --size=`expr $(FS_MBYTES) \* 1024` --manifest=distrib/gba/_manifest $@ ${DESTDIR}
 		cp $@ $(GBA_DEV_ROOTFS)
 		d=`mktemp -d`; mkdir -p $$d/etc; \
-			cp ${TOPSRC}/distrib/gba/fstab.mrams $$d/etc/fstab; \
+			cp ${TOPSRC}/distrib/gba/fstab.md $$d/etc/fstab; \
 			( cd $$d && $(FSUTIL) --add $(GBA_DEV_ROOTFS) etc/fstab ); \
 			rm -rf $$d
 		$(MAKE) -C sys/arch/gba/compile/GBA all
