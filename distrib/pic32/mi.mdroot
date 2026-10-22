@@ -1,0 +1,108 @@
+#
+# Small root filesystem linked into flash by a pic32 kernel built with the
+# md memory disk and options MD_ROOTIMAGE (md0a); see the MDROOT note in
+# sys/arch/pic32/conf/Makefile.inc.  Enough to boot multi-user to a login
+# prompt with /etc/rc's ROM-root path (kern.romroot: no fsck/mount/daemons):
+# about 260 KB of programs.  Swap stays on the SD card.
+#
+default
+owner 0
+group 0
+dirmode 0775
+filemode 0664
+
+dir /bin
+dir /dev
+dir /etc
+dir /root
+dir /sbin
+dir /tmp
+dir /usr
+dir /usr/bin
+dir /usr/libexec
+
+#
+# Devices: the console and memory, the memory disk and the SD card
+# (swap is sd0b).
+#
+cdev /dev/console
+major 0
+minor 0
+cdev /dev/mem
+major 1
+minor 0
+cdev /dev/kmem
+major 1
+minor 1
+cdev /dev/null
+major 1
+minor 2
+mode 666
+cdev /dev/zero
+major 1
+minor 3
+mode 666
+cdev /dev/tty
+major 2
+minor 0
+mode 666
+bdev /dev/sd0
+major 0
+minor 0
+bdev /dev/sd0a
+major 0
+minor 1
+bdev /dev/sd0b
+major 0
+minor 2
+bdev /dev/swap
+major 4
+minor 64
+bdev /dev/md0
+major 6
+minor 0
+bdev /dev/md0a
+major 6
+minor 1
+bdev /dev/md0b
+major 6
+minor 2
+
+#
+# /etc (the top-level mdroot step puts distrib/pic32/fstab.md in as fstab).
+#
+file /etc/fstab
+file /etc/gettytab
+file /etc/group
+file /etc/motd
+file /etc/passwd
+file /etc/rc
+mode 0775
+file /etc/shadow
+mode 0600
+file /etc/shells
+file /etc/ttys
+
+#
+# Programs: what /etc/rc and a login need, and a few basics.
+#
+default
+filemode 0775
+
+file /sbin/init
+file /sbin/sysctl
+file /sbin/reboot
+link /sbin/halt
+target /sbin/reboot
+file /bin/sh
+file /bin/cat
+file /bin/date
+file /bin/echo
+file /bin/hostname
+file /bin/ls
+file /bin/mkdir
+file /bin/rm
+file /bin/sync
+file /usr/libexec/getty
+file /usr/bin/login
+mode 04755
