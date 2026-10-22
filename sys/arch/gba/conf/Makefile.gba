@@ -35,8 +35,15 @@ LDFLAGS+=	-static -marmelf
 # LDSCRIPT quoted - fine for the shell in LDFLAGS, but quotes in a prereq
 # would be taken as part of the filename). GNU make strips them with subst.
 LDSCRIPT_DEP=	${_confdir}/$(subst ",,${LDSCRIPT})
-LDADD=		-L/usr/lib/gcc/arm-none-eabi/12.2.1/thumb/nofp -lgcc
-FIXBIN=		/mnt/c/msys64/usr/local/bin/gbafix.exe
+# libgcc for this CPU (thumb, no FPU), as the compiler finds it.
+LDADD:=		$(shell ${CC} ${CMACHCPU} -mthumb -print-libgcc-file-name)
+
+# gbafix (devkitPro's gba-tools) writes the cartridge header that the GBA
+# BIOS checks before it boots a ROM: from ${DEVKITPRO}, else the PATH; or
+# set FIXBIN.  Without it the kernel still runs in emulators, but not on
+# hardware.
+FIXBIN?=	$(firstword $(wildcard ${DEVKITPRO}/tools/bin/gbafix) \
+		    $(shell command -v gbafix || command -v gbafix.exe))
 
 # compile rules: rules are named COMPILE_${SUFFIX}
 # SUFFIX is the file suffix, capitalized (e.g. C for a .c file).
@@ -67,7 +74,9 @@ SYSTEM_LD=	-@echo ${LD} ${LDFLAGS} '$${SYSTEM_OBJ}' vers.o -o $@ ${LDADD}; \
 SYSTEM_LD_TAIL=	${SIZE} $@; cp $@ $@.elf; \
 		${OBJCOPY} -O ihex $@ $@.hex; \
 		${OBJCOPY} -O binary $@ $@.bin; \
-		${FIXBIN} $@.bin; \
+		if [ -n "${FIXBIN}" ]; then ${FIXBIN} $@.bin; else \
+		    echo "warning: no gbafix (set DEVKITPRO or FIXBIN):" \
+			"$@.bin will not boot on GBA hardware"; fi; \
 		${OBJDUMP} -d -S $@ > $@.dis
 
 %LOAD
