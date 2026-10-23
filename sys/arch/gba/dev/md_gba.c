@@ -3,7 +3,10 @@
  *
  * The plain GBA build roots on a filesystem image in cartridge ROM
  * (md0a) and swaps to EWRAM (md0b); GBAED swaps to the EverDrive's PSRAM,
- * which sits in the cartridge address space as well.
+ * which sits in the cartridge address space as well.  Run from an
+ * EverDrive, the plain build's "ROM" is that PSRAM too, so with options
+ * MD_ROOT_RW its root can be written (md_machdep_rootrw), and it swaps to
+ * the PSRAM after the root instead of EWRAM (md_machdep_swap).
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -19,6 +22,25 @@
 #define MD_CART_START           0x08000000
 #define MD_CART_END             0x0E000000
 
+/* EverDrive registers (as in ed.c, which only GBAED builds). */
+#define MD_ED_REG(r)            (*(volatile unsigned short *)(0x09FC0000 + (r) * 2))
+#define MD_ED_REG_CFG           0x00
+#define MD_ED_REG_KEY           0x5A
+#define MD_ED_CFG_REGS_ON       1
+#define MD_ED_CFG_NROM_RAM      2
+#define MD_ED_CFG_ROM_WE_ON     4
+
+/*
+ * With the configuration above the EverDrive shows only the first 16MB of
+ * its PSRAM: 0x09000000 up mirrors 0x08000000 up (CFG_ROM_BANK, 0x400,
+ * shows the second 16MB in both halves instead).  The value its menu
+ * starts a game with maps all 32MB, but the register cannot be read back
+ * to keep that, so a writable root must end below this.
+ */
+#define MD_ED_WINDOW_END        0x09000000
+
+extern char __fs_start[], __fs_end[];
+
 /*
  * PSRAM write-reliability counters (see md_machdep_write).  md_wr_fails
  * above 0 means a store never verified even after retries - real
@@ -27,19 +49,26 @@
 unsigned int md_wr_retries;
 unsigned int md_wr_fails;
 
+/* Set by md_machdep_rootrw(): the root (cartridge PSRAM) is writable. */
+static int md_cart_rw;
+
 /*
  * A swap transfer is a long CPU copy with interrupts off (splbio), so the
  * Timer0 audio ISR cannot service the DirectSound ring meanwhile: a sound
  * DMA left running would hit an unmanaged ring wrap and screech.  Idle the
  * sample clock across the copy (as ed.c does around SD DMA), so playback
- * pauses and resumes in place.  No-op when nothing is playing.  Only GBAED
- * has transfers long enough to matter (up to ~250 KB to PSRAM).
+ * pauses and resumes in place.  No-op when nothing is playing.  Only swap
+ * to PSRAM has transfers long enough to matter (up to ~250 KB): GBAED, or
+ * the plain build with a writable root.
  */
 void
 md_machdep_begin(void)
 {
 #ifdef GBAED
     audio_suspend();
+#else
+    if (md_cart_rw)
+        audio_suspend();
 #endif
 }
 
@@ -48,6 +77,9 @@ md_machdep_end(void)
 {
 #ifdef GBAED
     audio_resume();
+#else
+    if (md_cart_rw)
+        audio_resume();
 #endif
 }
 
@@ -96,8 +128,63 @@ md_machdep_write(caddr_t dst, caddr_t src, u_int len)
     MD_REG_WAITCNT = savewc;
 }
 
+#ifdef MD_ROOT_RW
+/*
+ * Can the root region (md0a, in cartridge space) be written?  On an
+ * EverDrive the cartridge ROM is PSRAM, writable once the register
+ * window is unlocked with ROM write-enable on - the setting ed.c's probe
+ * uses on GBAED.  Elsewhere (a ROM or other flash cartridge, an emulator)
+ * stores to cartridge space go nowhere.  So enable it and try: flip the
+ * root image's first halfword, read it back, and put it back.  Runs once,
+ * when md0 attaches, before anything has the root open.
+ *
+ * A root reaching past MD_ED_WINDOW_END stays read-only, and the registers
+ * are left alone: on an EverDrive, the write-enabled setting would hide
+ * the image's end.
+ */
+int
+md_machdep_rootrw(void)
+{
+    volatile unsigned short *p = (volatile unsigned short *)__fs_start;
+    unsigned short v, savewc;
+    int ok, t;
+
+    if ((u_int)__fs_end > MD_ED_WINDOW_END) {
+        printf("md0: root ends past 16MB of cartridge space, read-only\n");
+        return 0;
+    }
+    MD_ED_REG(MD_ED_REG_KEY) = 0xA5;
+    MD_ED_REG(MD_ED_REG_CFG) = MD_ED_CFG_REGS_ON | MD_ED_CFG_NROM_RAM |
+        MD_ED_CFG_ROM_WE_ON;
+
+    savewc = MD_REG_WAITCNT;            /* no prefetch: see md_machdep_write */
+    MD_REG_WAITCNT = savewc & ~MD_WAITCNT_PREFETCH;
+    v = *p;
+    *p = ~v;
+    ok = (*p == (unsigned short)~v);
+    for (t = 0; t < 5 && *p != v; t++)
+        *p = v;                         /* (retried as md_machdep_write does) */
+    MD_REG_WAITCNT = savewc;
+    md_cart_rw = ok;
+    return ok;
+}
+#endif
+
+/*
+ * With a writable root, swap to the PSRAM between the root image and
+ * MD_ED_WINDOW_END (about 1.9MB for the 14MB image) rather than the small
+ * EWRAM area the linker script sets aside - the bigger the better, as a
+ * writable root also brings /etc/rc's motd update and the update and
+ * cron daemons.  GBAED's swap is in PSRAM already.
+ */
 void
 md_machdep_swap(caddr_t *startp, caddr_t *endp)
 {
-    /* keep the linker script's swap area */
+    u_int start = ((u_int)__fs_end + DEV_BSIZE - 1) & ~(DEV_BSIZE - 1);
+
+    if (md_cart_rw && start < MD_ED_WINDOW_END &&
+        MD_ED_WINDOW_END - start > (u_int)(*endp - *startp)) {
+        *startp = (caddr_t)start;
+        *endp = (caddr_t)MD_ED_WINDOW_END;
+    }
 }

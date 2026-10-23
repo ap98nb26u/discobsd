@@ -150,7 +150,7 @@ cleanfs:
 		rm -f distrib/$(MACHINE)/_manifest
 		rm -f $(FSIMG)
 ifdef MDROOT_KERNELS
-		rm -f $(MDROOT_IMG)
+		rm -f $(MDROOT_SRC) $(MDROOT_IMG)
 endif
 		$(POST_CLEANFS)
 
