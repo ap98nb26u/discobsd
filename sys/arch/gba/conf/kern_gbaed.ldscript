@@ -119,16 +119,18 @@ __user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
  *
  * To resize, change PSRAM_SWAP_SIZE/START. The region must stay clear of
  * the kernel image at ORIGIN(FLASH) (~132 KB today; the 1 MB start offset
- * leaves ample margin) and below the EverDrive FPGA registers at 0x09FC0000.
- * Sized to use essentially all of PSRAM as swap: 30 MB at 0x08100000 ..
- * 0x09F00000 (1 MB kernel margin below, 768 KB register margin above). This
- * backs the "big swap, EWRAM stays the exec window" model - many processes
- * (each parked at its real size) rather than one giant process; enough for
- * e.g. a native Smaller C self-host pipeline whose stages each fit the 250 KB
- * EWRAM window and park here between runs.
+ * leaves ample margin) and inside the first 16MB of cartridge space: with
+ * the configuration ed.c's probe writes (registers on, PSRAM write-enabled)
+ * the EverDrive shows only its first 16MB of PSRAM, and 0x09000000 up
+ * mirrors 0x08000000 up - swap there would overwrite the kernel (seen on
+ * real hardware; see md_gba.c).  So 15 MB at 0x08100000 .. 0x09000000.
+ * This backs the "big swap, EWRAM stays the exec window" model - many
+ * processes (each parked at its real size) rather than one giant process;
+ * enough for e.g. a native Smaller C self-host pipeline whose stages each
+ * fit the 250 KB EWRAM window and park here between runs.
  */
-PSRAM_SWAP_SIZE		= 30M;
-PSRAM_SWAP_START	= ORIGIN(FLASH) + 1M;	/* 0x08100000 .. 0x09F00000 */
+PSRAM_SWAP_SIZE		= 15M;
+PSRAM_SWAP_START	= ORIGIN(FLASH) + 1M;	/* 0x08100000 .. 0x09000000 */
 __swap_start		= PSRAM_SWAP_START;
 __swap_end		= PSRAM_SWAP_START + PSRAM_SWAP_SIZE;
 
@@ -227,3 +229,6 @@ SECTIONS {
  */
 ASSERT(__bss_end__ <= ORIGIN(SYSVEC),
     "Error: kernel IWRAM overflowed past SYSVEC into the IRQ stack!")
+
+/* The EverDrive's write-enabled PSRAM window: see PSRAM_SWAP_SIZE. */
+ASSERT(__swap_end <= 0x09000000, "PSRAM swap must end within the first 16MB")
