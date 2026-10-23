@@ -95,3 +95,9 @@ md_machdep_write(caddr_t dst, caddr_t src, u_int len)
     }
     MD_REG_WAITCNT = savewc;
 }
+
+void
+md_machdep_swap(caddr_t *startp, caddr_t *endp)
+{
+    /* keep the linker script's swap area */
+}

@@ -11,14 +11,18 @@
  * The root region is normally a filesystem image linked into the kernel
  * (in ROM or flash), so a board without an SD card can still boot:
  * "config unix root on md0a swap on md0b".  It is read-only unless the
- * kernel is built with options MD_ROOT_RW (for a root that is really in
- * RAM).  The swap area is RAM.  Either region may be empty (e.g. GBAED:
- * root on SD, swap only).
+ * kernel is built with options MD_ROOT_RW, for a root that is really in
+ * RAM; with MD_MACHDEP as well, the port's md_machdep_rootrw() decides
+ * when the disk attaches, so one kernel can run with its root in ROM or
+ * in RAM that stands in for ROM (e.g. a flash cartridge's PSRAM).  The
+ * swap area is RAM; with MD_MACHDEP the port's md_machdep_swap() may move
+ * it when the disk attaches (e.g. into that RAM).  Either region may be
+ * empty (e.g. GBAED: root on SD, swap only).
  *
  * Transfers are plain copies.  A port that needs more - bus quirks, a
  * device to pause around the copy - builds with options MD_MACHDEP and
- * supplies md_machdep_begin(), md_machdep_end() and md_machdep_write()
- * (see <sys/md.h>).
+ * supplies md_machdep_begin(), md_machdep_end(), md_machdep_write(),
+ * md_machdep_rootrw() and md_machdep_swap() (see <sys/md.h>).
  */
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -34,13 +38,21 @@ extern char __fs_start[], __fs_end[];
 extern char __swap_start[], __swap_end[];
 
 #define MD_ROOT_KB      ((daddr_t)((__fs_end - __fs_start) >> DEV_BSHIFT))
-#define MD_SWAP_KB      ((daddr_t)((__swap_end - __swap_start) >> DEV_BSHIFT))
+#define MD_SWAP_KB      ((daddr_t)((md_swapend - md_swap) >> DEV_BSHIFT))
 
 #ifndef MD_MACHDEP
 #define md_machdep_begin()              /* nothing */
 #define md_machdep_end()                /* nothing */
 #define md_machdep_write(dst, src, len) bcopy((src), (dst), (len))
+#define md_machdep_rootrw()             1
+#define md_machdep_swap(startp, endp)   /* keep the linker's */
 #endif
+
+/* The root region takes writes: set when the disk attaches. */
+static int md_rootrw;
+
+/* The swap area: the linker script's, unless the port moves it. */
+static caddr_t md_swap = __swap_start, md_swapend = __swap_end;
 
 static int
 md_isswap(dev_t dev)
@@ -85,11 +97,7 @@ mdsize(dev_t dev)
 int
 md_rootrom(dev_t dev)
 {
-#ifdef MD_ROOT_RW
-    return 0;
-#else
-    return major(dev) == MD_MAJOR && !md_isswap(dev);
-#endif
+    return major(dev) == MD_MAJOR && !md_isswap(dev) && !md_rootrw;
 }
 
 void
@@ -120,15 +128,13 @@ mdstrategy(struct buf *bp)
         bp->b_bcount = nblk << DEV_BSHIFT;
     }
 
-    base = md_isswap(bp->b_dev) ? __swap_start : __fs_start;
+    base = md_isswap(bp->b_dev) ? md_swap : __fs_start;
     addr = base + (bp->b_blkno << DEV_BSHIFT);
 
-#ifndef MD_ROOT_RW
-    if (!(bp->b_flags & B_READ) && !md_isswap(bp->b_dev)) {
+    if (!(bp->b_flags & B_READ) && !md_isswap(bp->b_dev) && !md_rootrw) {
         bp->b_error = EROFS;
         goto bad;
     }
-#endif
 
     s = splbio();
     md_machdep_begin();
@@ -164,13 +170,13 @@ mdprobe(struct conf_device *config)
     /* One unit, laid out by the linker script. */
     if (config->dev_unit != 0)
         return 0;
+#ifdef MD_ROOT_RW
+    md_rootrw = MD_ROOT_KB && md_machdep_rootrw();
+#endif
+    md_machdep_swap(&md_swap, &md_swapend);
     printf("md0: root %u kbytes%s, swap %u kbytes\n",
         (unsigned)MD_ROOT_KB,
-#ifdef MD_ROOT_RW
-        "",
-#else
-        MD_ROOT_KB ? " read-only" : "",
-#endif
+        MD_ROOT_KB && !md_rootrw ? " read-only" : "",
         (unsigned)MD_SWAP_KB);
     return 1;
 }
