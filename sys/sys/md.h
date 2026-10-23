@@ -23,6 +23,8 @@ int     md_rootrom(dev_t dev);
 void    md_machdep_begin(void);         /* before a transfer */
 void    md_machdep_end(void);           /* after it */
 void    md_machdep_write(caddr_t dst, caddr_t src, u_int len);
+int     md_machdep_rootrw(void);        /* root region writable? (MD_ROOT_RW) */
+void    md_machdep_swap(caddr_t *startp, caddr_t *endp); /* move swap? */
 #endif
 #endif /* KERNEL */
 
