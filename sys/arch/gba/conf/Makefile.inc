@@ -23,11 +23,17 @@ U_MBYTES=	1
 SWAP_MBYTES=	1
 FSIMG=		${TOPSRC}/distrib/gba/rootfs.img
 
-# The plain GBA kernels link this image as their read-only root (md0a,
-# options MD_ROOTIMAGE): `make fs' copies it into place - with
+# The plain GBA kernels link a root image of their own (md0a, options
+# MD_ROOTIMAGE): `make fs' copies ${MDROOT_SRC} into place - with
 # distrib/gba/fstab.md as /etc/fstab - and relinks them (top-level
-# Makefile, MDROOT_KERNELS).  GBAED reads the same image from the SD card.
+# Makefile, MDROOT_KERNELS).  It holds the same files as ${FSIMG}, which
+# GBAED reads from the SD card, in a smaller filesystem: run from an
+# EverDrive, those kernels can write their root (options MD_ROOT_RW), but
+# only within the first 16MB of the cartridge space (see md_gba.c); the
+# image starts after the kernel, and swap then takes the rest.
 MDROOT_KERNELS=	GBA GBALOG
+MDROOT_MBYTES=	14
+MDROOT_SRC=	${TOPSRC}/distrib/gba/mdroot.img
 
 # `make all' also builds the filesystem image (and so relinks the
 # ROM-root kernels around it).
@@ -72,6 +78,11 @@ ${FSIMG}:	distrib/gba/md.gba distrib/gba/mi.gba
 		# cc cannot build gpanel programs yet, so the binaries are shipped.
 		$(MAKE) -C ${TOPSRC}/share/examples/gba DESTDIR=${DESTDIR} install
 		$(FSUTIL) --new --size=`expr $(FS_MBYTES) \* 1024` --manifest=distrib/gba/_manifest $@ ${DESTDIR}
+
+# The ROM kernels' root: the same manifest and installed tree as ${FSIMG}.
+${MDROOT_SRC}:	${FSIMG}
+		rm -f $@
+		$(FSUTIL) --new --size=`expr $(MDROOT_MBYTES) \* 1024` --manifest=distrib/gba/_manifest $@ ${DESTDIR}
 
 # rootfs.img is a bare root filesystem, not a full-disk image, so it must
 # NOT be dd'd to sector 0 (that would destroy the EverDrive FAT32 boot

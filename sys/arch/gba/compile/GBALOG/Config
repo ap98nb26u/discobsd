@@ -36,10 +36,12 @@ options         "DIAGNOSTIC"                # Enable diagnostics
 options         "HANGDUMP"                  # L+R+SELECT: print where the kernel is (hang debugging)
 
 # Memory disk (dev/md.c): the root filesystem image linked into the ROM
-# (md0a, read-only) and swap in EWRAM (md0b); md_gba.c adds the GBA hooks.
+# (md0a: read-only, or writable where the "ROM" is RAM - an EverDrive) and
+# swap in EWRAM (md0b); md_gba.c adds the GBA hooks.
 device          md0
 options         "MD_MACHDEP"                # GBA hooks, arch/gba/dev/md_gba.c
 options         "MD_ROOTIMAGE"              # link the root image (make fs) for md0a
+options         "MD_ROOT_RW"                # md0a writable when it is RAM (EverDrive PSRAM)
 
 # Root filesystem at /dev/md0a, swap at /dev/md0b
 config          unix    root on md0a
