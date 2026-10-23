@@ -135,6 +135,19 @@ int uartopen(dev_t dev, int flag, int mode)
     struct tty *tp = &uartttys[minor(dev)];
     struct proc *pp = u.u_procp;
 
+    /*
+     * First open: give the tty the usual terminal modes (echo, CR->NL,
+     * erase/kill/intr characters), as other ports' uartopen() does.
+     * getty sets its own modes over these in multi-user mode, but a
+     * single-user shell (init's single(), e.g. after /etc/rc fails)
+     * reads the console as it is - without CRMOD a typed Enter never
+     * ends the line, and without ECHO nothing typed shows.
+     */
+    if ((tp->t_state & TS_ISOPEN) == 0) {
+        ttychars(tp);
+        tp->t_flags = ECHO | XTABS | CRMOD | CRTBS | CRTERA | CTLECH | CRTKIL;
+        tp->t_state |= TS_ISOPEN;
+    }
     tp->t_state |= TS_CARR_ON;
 
     if (pp->p_pid != 1 && pp->p_pgrp == 0) {
