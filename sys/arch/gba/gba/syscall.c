@@ -27,17 +27,6 @@
 
 #include <sys/stdint.h>
 
-// GBAの割り込みマスタ有効化レジスタ (16bit)
-#define REG_IME_ADDR 0x04000208
-
-void my_custom_swi_handler(uint32_t swi_number, uint32_t *regs) {
-    // ここに独自のSWI処理を記述（IRQは禁止されています）
-    if (swi_number == 0x01) {
-        // 例: カスタム処理
-    }
-}
-
-
 /*
  * Holds tf_psr (the CPSR syscall_handler computed, with PSR_C set/cleared
  * to reflect success/failure) across the r0-r12 restore below, so it can
@@ -126,198 +115,155 @@ __attribute__((target("arm"), naked))
 void simulate_swi_via_inline_data(void) {
     __asm__ volatile (
         /* -------------------------------------------------------------
-         1. struct trapframe一杯分(16ワード=64バイト)を確保し、
-            r0〜r12、および呼び出し元の戻り先LRを先頭14ワードへ退避
+         1. Reserve a whole struct trapframe (16 words, 64 bytes) and
+            save r0-r12 and the caller's return lr in its first 14.
          ------------------------------------------------------------- */
-        // struct trapframeはtf_r0..tf_r11(12)+tf_ip(=r12)+tf_lr+tf_pc+tf_psrの
-        // 16ワード。ここで14ワード分しか確保しないと、後段のsyscall_handler()が
-        // 読み書きするtf_pc/tf_psr(offset56/60)が未確保領域になる。今回のように
-        // frameがスタック上端付近(IWRAM終端0x03008000近く)にあるとIWRAMの物理範囲
-        // を超えて書き込むことになり、実機とmGBAで挙動が分かれてハングしていた。
+        // struct trapframe is tf_r0..tf_r11 (12) + tf_ip (r12) + tf_lr +
+        // tf_pc + tf_psr = 16 words.  Reserving only 14 left tf_pc/tf_psr
+        // (offsets 56/60), which syscall_handler() reads and writes, outside
+        // the frame - past the end of IWRAM when the frame sat near its top
+        // (0x03008000), which hung real hardware and mGBA differently.
         //
-        // レジスタ退避は他の何よりも先に行う。以前はこの前にREG_IME無効化の
-        // コードがあり、そこでr1/r2を汎用レジスタとして使っていたため、
-        // icode側がr1に積んだ第2引数(execvのargvポインタ等)がここで退避される
-        // 前に0x04000200(REG_IME計算途中の値)へ上書きされてしまっていた。
-        // fnameが正しくargpだけ壊れていたのはr0を触らずr1/r2だけ使っていたため。
+        // Save the registers before anything else: code that turned
+        // REG_IME off used to come first and used r1/r2 as scratch,
+        // overwriting the second argument icode passes in r1 (execv's argv)
+        // with 0x04000200 before it was saved.
         "sub sp, sp, #64\n\t"
-        "stmia sp, {r0-r12, lr}\n\t"  // sp+0..sp+53 (14ワード、書き戻しなし)
+        "stmia sp, {r0-r12, lr}\n\t"  // sp+0..sp+55 (14 words, no writeback)
 
         /* -------------------------------------------------------------
-         1.5. トラップフレームをカーネルスタック(UAREA, u_end手前)へ
-              退避する。このあとsyscall_handler()とその呼び出し先
-              (execve()のexec_clear()/exec_setupstack()等)は全て
-              *ここに切り替えた後の* spの上で動く。呼び出し元自身の
-              ユーザースタック上にフレームを置いたままにしておくと、
-              execve()が新イメージのスタック領域(常に同じ固定終端
-              __user_data_end/u_endに置かれる)をbzero()でクリアする
-              際、まだ実行中のこの呼び出しチェーン自身(このフレーム
-              やepp/exec_paramsのローカル変数を含む)を踏み潰してし
-              まう - 実際に/bin/shのexecでexec_clear()のbzero(stack)
-              が巨大化けした長さでハングする形で再現した(このファイル
-              冒頭のコメント参照)。
+         1.5. Move the trapframe to the kernel stack (UAREA, just below
+              u_end).  syscall_handler() and everything it calls (e.g.
+              execve()'s exec_clear()/exec_setupstack()) then run on that
+              stack.  Left on the caller's user stack, the frame and the
+              call chain's locals would be cleared by execve()'s
+              bzero() of the new image's stack, which always sits at the
+              same fixed top (__user_data_end/u_end) - seen as /bin/sh's
+              exec hanging in exec_clear() (see the comment at the top
+              of this file).
          ------------------------------------------------------------- */
-        "mov r0, sp\n\t"               // r0 = コピー元(呼び出し元スタック上の現フレーム)
-        "add r5, r0, #64\n\t"          // r5 = 呼び出し元の本来のsp(sub #64より前の値)。
-                                        // コピーループでr0-r4を使い切るのでr5に温存する。
+        "mov r0, sp\n\t"               // r0 = source: the frame on the caller's stack
+        "add r5, r0, #64\n\t"          // r5 = the caller's own sp (before sub #64),
+                                        // in r5 since the copy loop uses r0-r4.
 
         "ldr r1, =u_end\n\t"
-        "sub r1, r1, #64\n\t"          // r1 = コピー先(カーネルスタック上のフレーム位置)
-        "mov r2, r1\n\t"               // r2 = コピー先の先頭(切替後のsp値として温存)
-        "mov r3, #16\n\t"              // 64バイト = 16ワード
+        "sub r1, r1, #64\n\t"          // r1 = destination: the frame on the kernel stack
+        "mov r2, r1\n\t"               // r2 = its start, the sp to switch to
+        "mov r3, #16\n\t"              // 64 bytes = 16 words
         "9:\n\t"
         "ldr r4, [r0], #4\n\t"
         "str r4, [r1], #4\n\t"
         "subs r3, r3, #1\n\t"
         "bne 9b\n\t"
 
-        // 呼び出し元の本来のsp(r5)を、コピー後のフレームのtf_ip(=r12)
-        // スロット(オフセット48)へ書き込む。通常のシステムコールでは
-        // r12は使い捨てのスクラッチ値でしかないので、ここで温存用途に
-        // 転用しても安全(下のgba_exec_switched_stackの説明コメント参照)。
-        // グローバル変数(saved_user_sp)ではなくフレーム自身に持たせる
-        // ことで、fork()の子プロセスがずっと後でlongjmp経由で復帰した
-        // ときも正しい値が付いてくる - フレームはカーネルスタック上に
-        // あり、u/u0の切り替えでプロセスごとに正しくスワップされる
-        // ため(詳細はファイル冒頭のコメント参照)。
+        // Keep the caller's sp (r5) in the copied frame's tf_ip (r12) slot,
+        // offset 48.  r12 is only a disposable scratch value on a syscall
+        // (see gba_exec_switched_stack below), so the slot is free.  In the
+        // frame rather than a global, the value follows its process: a
+        // fork()ed child resumes much later via longjmp, and the frame on
+        // the kernel stack is swapped with the process by the u/u0 switch
+        // (see the comment at the top of this file).
         "str r5, [r2, #48]\n\t"
 
-        "mov sp, r2\n\t"               // ここからカーネルスタック上のフレームを使う
+        "mov sp, r2\n\t"               // from here on, the frame on the kernel stack
 
         /* -------------------------------------------------------------
-         2. 割り込みを禁止 (REG_IME = 0)
+         2. Interrupts off (REG_IME = 0)
          ------------------------------------------------------------- */
         "mov r1, #0x04000000\n\t"
         "add r1, #0x200\n\t"
         "mov r2, #0\n\t"
-        "strh r2, [r1, #0x08]\n\t"    // REG_IME (0x04000208) に 0 を書き込み (16bit)
+        "strh r2, [r1, #0x08]\n\t"    // REG_IME (0x04000208) = 0 (16-bit)
 
         /* -------------------------------------------------------------
-         3. 呼び出し元の状態（CPSR）を取得し、戻り先（LR_svc）を計算
+         3. Get the caller's CPSR and its return address
          ------------------------------------------------------------- */
-        "mrs r0, cpsr\n\t"            // 現在のCPSR（呼び出し元のモード情報含む）を取得
-        "ldr r1, [sp, #52]\n\t"       // スタックから退避したLRを取得
+        "mrs r0, cpsr\n\t"            // current CPSR (the caller's mode)
+        "ldr r1, [sp, #52]\n\t"       // the saved lr
 
         /* -------------------------------------------------------------
-         4. 呼び出し元の命令状態（ARM/Thumb）を判定してSWI番号を取得
+         4. Read the SWI number inline, as ARM or Thumb per the caller
          ------------------------------------------------------------- */
-        "tst r0, #0x20\n\t"           // Tビット（Thumbフラグ）をチェック
-        "ldrneh r2, [r1]\n\t"         // 【Thumb】2バイトとしてSWI番号を読み込む
-        "addne r1, r1, #2\n\t"        // 【Thumb】復帰先を2バイト進める
-        "ldreq r2, [r1]\n\t"          // 【ARM】4バイトとしてSWI番号を読み込む
-        "addeq r1, r1, #4\n\t"        // 【ARM】復帰先を4バイト進める
+        "tst r0, #0x20\n\t"           // T bit (Thumb state)
+        "ldrneh r2, [r1]\n\t"         // Thumb: 2-byte SWI number
+        "addne r1, r1, #2\n\t"        // Thumb: return past it
+        "ldreq r2, [r1]\n\t"          // ARM: 4-byte SWI number
+        "addeq r1, r1, #4\n\t"        // ARM: return past it
 
-        "str r1, [sp, #52]\n\t"       // 修正済みの復帰先アドレスをスタックに書き戻す
-        "str r1, [sp, #56]\n\t"       // tf_pc = 修正済みの復帰先アドレス
-        "str r0, [sp, #60]\n\t"       // tf_psr = 呼び出し元のCPSR
+        "str r1, [sp, #52]\n\t"       // the adjusted return address, back in the frame
+        "str r1, [sp, #56]\n\t"       // tf_pc = the adjusted return address
+        "str r0, [sp, #60]\n\t"       // tf_psr = the caller's CPSR
 
         /* -------------------------------------------------------------
-         5. C言語のハンドラ関数を呼び出し
+         5. Call the C handler
          ------------------------------------------------------------- */
-        // GBA移植では特権分離(SVCモード)を実装していない(USERMODE()は常に0)ため、
-        // ここでモードを切り替えると sp/lr がバンクされた別レジスタに切り替わり、
-        // 直後の「mov r1, sp」が今積んだr0-r12ではなく未初期化のsp_svc(BIOS既定値、
-        // IWRAM上のu/u0領域のすぐ近く)を指してしまい、フレームポインタが完全に
-        // 壊れる。呼び出し元と同じモード(SYS)のまま進める。
+        // This port has no privilege separation (USERMODE() is always 0):
+        // switching to SVC mode here would bank sp/lr, and "mov r1, sp"
+        // below would get the uninitialized sp_svc instead of the frame.
+        // Stay in the caller's mode (SYS).
         //
-        // 注意: REG_IME=0はここではまだ解除しない。以前ここで
-        // syscall_handler呼び出し直前にREG_IME=1へ戻す変更を試したが、
-        // このnaked関数はr0-r2をSWI番号/復帰先などの生きたスクラッチとして
-        // 複数命令にまたがって保持しており、通常のC呼び出し規約(呼び出しの
-        // たびにr0-r3は破棄されて構わない)を前提にしたISR(gba_do_schedule等)
-        // がここで割り込むとr0-r2が破壊され、ゴミのSWI番号でsyscall_handlerが
-        // 呼ばれて即クラッシュした(GDBでr0=0x4000000等になっているのを確認)。
-        // select()のブロック対策としての割り込み再許可は、生きたレジスタ状態を
-        // 抱えていない安全な場所(swtch()がidle()を呼ぶ直前、通常のC関数呼び出し
-        // 境界)で行う(kern_synch.c参照)。
-        "mov r0, r2\n\t"              // 第1引数: SWI番号
-        "mov r1, sp\n\t"              // 第2引数: 退避されたレジスタ配列へのポインタ
+        // Do not turn interrupts back on yet: this naked function keeps live
+        // values in r0-r2 across several instructions, and an interrupt
+        // handler (gba_do_schedule, ...) following the C convention may
+        // clobber them - tried once, syscall_handler() got a garbage SWI
+        // number and crashed.  Interrupts are re-enabled where no live
+        // registers are held: before swtch() calls idle() (kern_synch.c).
+        "mov r0, r2\n\t"              // 1st argument: the SWI number
+        "mov r1, sp\n\t"              // 2nd argument: the saved registers
         "bl syscall_handler\n\t"
 
         /* -------------------------------------------------------------
-         6. レジスタと復帰先アドレスの復元
+         6. Restore the registers and return
          ------------------------------------------------------------- */
-        // bl syscall_handler 自体がlrを上書きするため、復帰先アドレスはスタックから
-        // 読み直す。ここで必ずtf_pc(offset56)から読むこと - tf_lr(offset52)は
-        // 呼び出し前にこちらが計算した「icode内の次の命令」のスナップショットの
-        // ままだが、execve()成功時はexec_subr.c内のexec_setupstack()が
-        // u.u_frame->tf_pcを新しいエントリポイントへ書き換える(syscall_handler
-        // 末尾で frame->tf_pc |= 1 によりThumbビットも設定済み)。tf_lrから読むと
-        // execveが成功してもicode自身に戻ってしまい、新しいプロセスへ絶対に
-        // 遷移できない。
+        // bl syscall_handler overwrote lr, so the return address comes from
+        // the frame - from tf_pc (offset 56), never tf_lr (52): a successful
+        // execve() sets tf_pc to the new entry point (exec_setupstack() in
+        // exec_subr.c), and returning through tf_lr would go back into the
+        // old image.
 
-        // tf_psr(呼び出し元へ返すべきCPSR、syscall_handler側でPSR_Cを成功/失敗に
-        // 応じて設定・クリア済み)をここで退避する。r0はこの直後のldmiaでどうせ
-        // 上書きされるので自由に使える。呼び出し元(SYS.hのSYS()マクロが生成する
-        // 各ラッパー)は復帰後に「bcc 2f」でキャリーフラグを見て成功/失敗を判定する
-        // が、以前はtf_psrを一切CPUの実CPSRへ反映しておらず、少し下のexec切替判定
-        // の「cmp r5, #0」がr5=0(execve以外は常にそう)のたびにキャリーを1(セット)
-        // にしてしまっていた。その結果、あらゆる通常システムコールが成功していても
-        // 呼び出し元からは「エラー」にしか見えず、戻り値がすべて-1にすり替わって
-        // いた(fstat以外の全ての戻り値を使う呼び出し元が誤動作していた実際の原因)。
+        // Keep tf_psr (the CPSR for the caller, PSR_C set or cleared by
+        // syscall_handler() for failure or success); r0 is reloaded by the
+        // ldmia below anyway.  The caller's SYS() wrapper tests the carry
+        // ("bcc 2f") after return, and the cmp/tst instructions on the way
+        // here change the real flags: without restoring them every syscall
+        // looked like a failure and returned -1.
         "ldr r0, [sp, #60]\n\t"
         "ldr r1, =saved_tf_psr\n\t"
         "str r0, [r1]\n\t"
 
-        // REG_IME再許可とCPSRフラグ復元は、以前は下のldmia(r0-r12の本復元)
-        // の*あと*に置かれていて、r1/r2をスクラッチとして使い潰したまま
-        // 一切元に戻していなかった(r5だけは別の一時変数経由で復元する
-        // 特別扱いがあったが、r1/r2にはその対応がなかった)。通常のシステム
-        // コールは呼び出し元がr0(戻り値)以外の生存を仮定しないため気付かれずに
-        // 済んでいたが、execve()成功時だけは別 - exec_setupstack()
-        // (exec_subr.c)がr0/r1/r2にargc/argv/envpを積んで新プロセスの
-        // エントリポイント(crt0の_start)へ渡す契約になっており、この
-        // 破壊によりargv(r1)が本来のargpではなく「REG_IME再許可コードが
-        // 計算した0x04000200(I/Oレジスタアドレス)」にすり替わっていた
-        // (initのmain()でargv[1]が実際にNULLになる形で顕在化・実機で確認)。
-        // ここでは逆に、r0-r12がまだ本復元されていない今のうちに
-        // r1/r2/r5を自由なスクラッチとして使い切ってしまうことで、
-        // 下のldmia以降は本当に一切のレジスタを壊さないようにする。
+        // Turn interrupts back on and restore the flags here, while r1/r2/r5
+        // are still free scratch, so nothing after the ldmia below changes a
+        // register.  This used to come after the ldmia and clobber r1/r2 -
+        // harmless for ordinary syscalls, but a successful execve() passes
+        // argc/argv/envp in r0-r2 to the new program's crt0, and argv
+        // arrived as 0x04000200 (init's argv[1] read as NULL on hardware).
         "mov r1, #0x04000000\n\t"
         "add r1, #0x200\n\t"
         "mov r2, #1\n\t"
-        "strh r2, [r1, #0x08]\n\t"   // REG_IME = 1 (割り込みマスタ許可)
+        "strh r2, [r1, #0x08]\n\t"   // REG_IME = 1 (interrupts on)
 
-        // 呼び出し元のSYS()マクロ生成ラッパーは復帰後「bcc 2f」でキャリーフラグを
-        // チェックして成功/失敗を判定する。ここまでに来る間の複数のcmp/tst命令が
-        // 実CPSRのフラグを勝手に書き換えているため、bx lrの直前でsyscall_handlerが
-        // 計算したtf_psr(のフラグ部分)を明示的に復元しないと、その判定は常に無関係な
-        // 値を見ることになる。cpsr_fはフラグビットのみ書き換え、モード/割り込み
-        // マスクなどの制御ビットには触れない。
+        // Restore the flags syscall_handler() computed (cpsr_f writes only
+        // the condition flags, not the mode or the interrupt masks).
         "ldr r5, =saved_tf_psr\n\t"
         "ldr r5, [r5]\n\t"
         "msr cpsr_f, r5\n\t"
 
-        // ユーザーランドへ復帰する。ここではspはまだフレーム先頭を指す
-        // (tf_r0=0 .. tf_ip=48, tf_lr=52, tf_pc=56, tf_psr=60)。
+        // Return to user space; sp still points at the frame
+        // (tf_r0=0 .. tf_ip=48, tf_lr=52, tf_pc=56, tf_psr=60).
         //
-        // tf_lrは「破棄」してはならず、ユーザーのlrへ復元する。通常の
-        // システムコールではARMラッパー(SYS.h)が復帰後に自前で pop {lr}
-        // するため、以前ここでtf_lrを捨ててlr=tf_pcのまま返しても実害が
-        // なかった。しかしsendsig()(sig_machdep.c)は tf_lr = u.u_sigtramp
-        // を明示的に設定し、シグナルハンドラが sigtramp -> sigreturn へ
-        // 戻るようにしている。tf_lrを捨てるとハンドラは「lr=自分自身の
-        // アドレス」で開始してしまい sigtramp へ戻れず、捕捉シグナル
-        // (SIGINT/^C・SIGALRM 等)の復帰が一度も成立せずゴミへ暴走して
-        // いた。tf_lrをlrへ復元し、tf_pcへのinterworking分岐は呼び出し
-        // 規約上破壊可能なr12を分岐先に使って行う(ユーザーの本来のspは
-        // tf_ip=48にあり、上の1.5節で既にユーザーr12を上書き済みなので
-        // r12は自由に使える)。ldmiaは書き戻しなしにして、最後にtf_ipから
-        // spを直接ロードする。
-        "ldr r12, [sp, #56]\n\t"      // r12 = tf_pc(分岐先)
-        "ldr lr,  [sp, #52]\n\t"      // lr  = tf_lr(ユーザーlr。シグナル時はsigtramp)
-        "ldmia sp, {r0-r11}\n\t"      // r0-r11 = tf_r0..tf_r11(書き戻しなし)
-        "ldr sp,  [sp, #48]\n\t"      // sp  = tf_ip = 復帰先スタックポインタ
-        "bx r12\n\t"                  // 復帰。tf_pcのbit0でARM/Thumb切替(Thumbハンドラ対応)
+        // Restore tf_lr into lr rather than dropping it: sendsig()
+        // (sig_machdep.c) sets tf_lr = u.u_sigtramp so a signal handler
+        // returns through sigtramp to sigreturn; dropping it made caught
+        // signals (SIGINT, SIGALRM, ...) return into garbage.  Branch to
+        // tf_pc through r12, which the calling convention lets us clobber
+        // (the user's sp is in tf_ip, and r12 was given up in step 1.5);
+        // load sp from tf_ip last.
+        "ldr r12, [sp, #56]\n\t"      // r12 = tf_pc (branch target)
+        "ldr lr,  [sp, #52]\n\t"      // lr  = tf_lr (the user's lr, or sigtramp)
+        "ldmia sp, {r0-r11}\n\t"      // r0-r11 = tf_r0..tf_r11 (no writeback)
+        "ldr sp,  [sp, #48]\n\t"      // sp  = tf_ip, the stack to return to
+        "bx r12\n\t"                  // return; bit 0 of tf_pc selects ARM/Thumb
     );
-}
-
-int sys_write(const char *s)
-{
-    printf("%s", s);
-    //for (int i=0; *(s+i)!=0; i++)
-    //    cnputc(*(s+i));
-    return 0;
 }
 
 #ifdef SERIAL_CONSOLE
@@ -341,11 +287,6 @@ syscall_handler(int sys_num, struct trapframe *frame)
 	int code;
 
 	SIO_KEEPALIVE();
-
-	//volatile struct trapframe *f = frame;
-
-	//printf("DBG: syscall_handler entry, sys_num=%d frame=%x\n",
-	//    sys_num, (unsigned)frame);
 
 	syst = u.u_ru.ru_stime;
 
@@ -479,39 +420,24 @@ syscall_handler(int sys_num, struct trapframe *frame)
 			u_int addr = (u_int)frame->tf_ip + 4;
 			if (!baduaddr((caddr_t)addr))
 				u.u_arg[4] = *(u_int *)addr;
-			//if (sys_num == 23)
-			//	printf("DBG: sysctl arg4 tf_ip=%x addr=%x bad=%d val=%x\n",
-			//	    (unsigned)frame->tf_ip, addr,
-			//	    baduaddr((caddr_t)addr), (unsigned)u.u_arg[4]);
 		}
 		if (callp->sy_narg > 5) {
 			u_int addr = (u_int)frame->tf_ip + 4 + 4;
 			if (!baduaddr((caddr_t)addr))
 				u.u_arg[5] = *(u_int *)addr;
-			//if (sys_num == 23)
-			//	printf("DBG: sysctl arg5 addr=%x bad=%d val=%x\n",
-			//	    addr, baduaddr((caddr_t)addr), (unsigned)u.u_arg[5]);
 		}
 	}
 
 	u.u_rval = 0;
 
-	//printf("DBG: before setjmp qsave, callp=%x sy_call=%x\n",
-	//    (unsigned)callp, (unsigned)callp->sy_call);
-
 	if (setjmp(&u.u_qsave) == 0) {
-		//printf("DBG: setjmp qsave=0, calling sy_call\n");
 		(*callp->sy_call)();		/* Make syscall. */
 
 		/*
-		 * execve(11)が成功した直後の処理
-		 * execveから戻る際、新しいプログラム(init)のLRが
-		 * カーネル内の古いアドレスを指していると、最初の
-		 * 関数から戻るときに暴走するため初期化する。
-		 *
-		 * code==11はSYS_execv(icodeが起動時に使う手書きのSWI)のみで、
-		 * /sbin/initが実際の子プロセスを起動する経路であるSYS_execve
-		 * (code==59)がこれまで抜けていた。
+		 * After a successful exec: clear lr, which still points into
+		 * the old image, so the new program cannot return into it.
+		 * Both execv (11, icode's hand-made call at boot) and execve
+		 * (59, how /sbin/init starts everything else).
 		 */
 		if ((code == 11 || code == 59) && u.u_error == 0) {
 			u.u_frame->tf_lr = 0;
@@ -559,19 +485,11 @@ syscall_handler(int sys_num, struct trapframe *frame)
 	 */
 	frame->tf_psr |= 0x80;
 
+#ifdef DIAGNOSTIC
 	/*
-	 * DBG: chasing a wild jump (PC lands in the SWAP staging region,
-	 * ORIGIN(SWAP)=0x02011800 in kern.ldscript, right past USERRAM's
-	 * end) that happens several syscalls after a successful execve(),
-	 * both on mGBA (during init's own startup) and on real GBAED
-	 * hardware (during the login shell's startup, further along).
-	 * Catch it *here* - the last point with a normal C stack frame and
-	 * full register/memory state before control returns to userland
-	 * via the naked trampoline's raw ldmia/bx lr - rather than after
-	 * the wild bx has already happened and clobbered everything.
-	 * Bounds are the user process's own declared text+data+bss+stack
-	 * window; a legitimate resume address/sp can never be outside it
-	 * on this MMU-less port.
+	 * Without an MMU a corrupted return state goes unnoticed until the
+	 * jump: check, while the trapframe is still at hand, that the
+	 * process resumes inside its own memory (text+data+bss+stack).
 	 */
 	{
 		extern char __user_data_start[], __user_data_end[];
@@ -581,17 +499,16 @@ syscall_handler(int sys_num, struct trapframe *frame)
 		unsigned rsp = frame->tf_ip;
 
 		if (pc < lo || pc >= hi || rsp < lo || rsp > hi) {
-			printf("DBG: BOUNDS pid=%d sysnum=%d pc=%x sp=%x "
-			    "r0=%x r1=%x r2=%x r3=%x lr=%x psr=%x\n",
-			    u.u_procp->p_pid, sys_num,
+			printf("syscall %d: pid %d returns outside user memory:"
+			    " pc=%x sp=%x r0=%x r1=%x r2=%x r3=%x lr=%x psr=%x\n",
+			    sys_num, u.u_procp->p_pid,
 			    (unsigned)frame->tf_pc, rsp,
 			    (unsigned)frame->tf_r0, (unsigned)frame->tf_r1,
 			    (unsigned)frame->tf_r2, (unsigned)frame->tf_r3,
 			    (unsigned)frame->tf_lr, (unsigned)frame->tf_psr);
 		}
 	}
+#endif
 
 	userret(u.u_frame->tf_pc, syst);
-
-	//led_control(LED_KERNEL, 0);
 }

@@ -713,11 +713,8 @@ card_init(int unit)
         volatile uint32_t settle;
 
         /*
-         * DBG: bumped from 100000 - still seeing sd0 fail to be
-         * recognized on some cold boots (2 failed probe-and-reboot
-         * cycles observed before a 3rd attempt succeeded), suggesting
-         * the original margin isn't always enough. Cheap to make
-         * larger; only paid once at boot.
+         * 100000 was not always enough: sd0 then went unrecognized on
+         * some cold boots.  Paid once, at boot.
          */
         gba_irq_block();
         for (settle = 0; settle < 400000; settle++)
@@ -800,19 +797,8 @@ card_init(int unit)
         return 0;
 
     /*
-     * DBG: tried forcing SPD_LO here to test a clock-speed/signal-
-     * integrity theory for intermittent read/write corruption (see
-     * the swap-checksum-mismatch + fsck "BLK(S) MISSING" evidence) -
-     * made things strictly worse on real GBAED hardware: the partition
-     * table read in sd_setup() (right after card_init() returns)
-     * started failing every time ("no fs on dev", reproducing even
-     * after rewriting the SD image fresh), where it previously worked
-     * at high speed. Reverted back to HIGH; whatever the low-speed
-     * mode actually does on this FPGA, it isn't simply "the same
-     * protocol, slower" - something else in the driver's timing
-     * assumptions is calibrated for HIGH specifically. The settle-
-     * delay increase above (card_init()'s pre-command wait) is
-     * unrelated and stays.
+     * Stay at high speed: low speed made the partition table read in
+     * sd_setup() fail every time on real GBAED hardware.
      */
     ed_sd_speed(ED_SD_SPD_HI);
     /* Card was just fully re-initialized: no transfer can still be
@@ -1217,22 +1203,9 @@ bad:    bp->b_flags |= B_ERROR;
     }
 #endif
 
-    //printf("DBG: sdstrategy unit=%d %s offset=%d bcount=%d\n",
-    //    unit, (bp->b_flags & B_READ) ? "READ" : "WRITE",
-    //    offset, bp->b_bcount);
-
     /*
-     * DBG: card_read()/card_write()'s return value (1=ok, 0=failed)
-     * used to be discarded here - a genuine SD failure (including the
-     * bounded card-ready-wait timeouts in sd.c/ed.c added this
-     * session) was silently treated as a completed, successful I/O:
-     * biodone(bp) ran regardless, with whatever partial/stale data
-     * was already in the destination buffer. vm_swp.c's swap() (the
-     * only caller that matters for the corruption chased this
-     * session) explicitly panics on B_ERROR - "panic: hard err: swap"
-     * never once fired despite confirmed real corruption, because
-     * this path never set it. Wiring it up turns a silent bad-data
-     * or opaque-hang failure into an actual diagnosable panic.
+     * A failed card_read()/card_write() is an I/O error: swap() then
+     * panics instead of carrying on with stale data.
      */
     if (bp->b_flags & B_READ) {
         if (!card_read(unit, offset, bp->b_addr, bp->b_bcount)) {

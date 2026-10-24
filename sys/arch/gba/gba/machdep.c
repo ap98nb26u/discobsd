@@ -133,20 +133,6 @@ volatile uint16_t frame_count = 0;
 volatile uint32_t myticks = 1;
 volatile int timer0_flag;
 
-/*
- * DBG: lr_irq, stashed by gba_intr_handler (locore0.S) before it
- * switches out of IRQ mode and that banked register becomes
- * unreachable. Used below to see where the interrupted code actually
- * was - chasing a wild-jump crash/reboot on real GBAED hardware that
- * happens between syscalls (confirmed: the bounds check in
- * syscall_handler(), gba/syscall.c, never fires before it), so a
- * check only at syscall return can't catch it; this fires on every
- * timer/vblank tick instead, while the corruption is presumably still
- * fresh. -4 is the standard ARM IRQ return-address adjustment (lr_irq
- * = address of the interrupted instruction + 4, both ARM and Thumb).
- */
-volatile unsigned irq_last_lr;
-
 #ifdef HANGDUMP
 volatile unsigned irq_last_pc;		/* interrupted pc + 4, see locore0.S */
 
@@ -177,8 +163,8 @@ gba_hang_dump(void)
     if (shown++)
         return;
     gtxt_blank(0);
-    printf("HANG pc=%x lr=%x noproc=%d pid=%d stat=%d wchan=%x pri=%d\n",
-        irq_last_pc - 4, irq_last_lr, noproc, p ? p->p_pid : -1,
+    printf("HANG pc=%x noproc=%d pid=%d stat=%d wchan=%x pri=%d\n",
+        irq_last_pc - 4, noproc, p ? p->p_pid : -1,
         p ? p->p_stat : -1, p ? (unsigned)p->p_wchan : 0,
         p ? p->p_pri : -1);
     for (p = allproc; p; p = p->p_nxt)
@@ -187,17 +173,6 @@ gba_hang_dump(void)
     printf("\n");
 }
 #endif /* HANGDUMP */
-
-static void check_irq_pc(void)
-{
-    extern char __swap_start[], __swap_end[];
-    unsigned pc = irq_last_lr - 4;
-
-    if (pc >= (unsigned)__swap_start && pc < (unsigned)__swap_end) {
-        printf("DBG: IRQPC in SWAP! irq_last_lr=%x pc=%x\n",
-            irq_last_lr, pc);
-    }
-}
 
 /*
  * Console input polling, shared by idle() and the Timer0 interrupt.
@@ -299,7 +274,6 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
     uint16_t flag = REG_IF;
     uint16_t ack = 0;
 
-    check_irq_pc();
 #ifdef SERIAL_CONSOLE
     if (flag & IRQ_SERIAL) {    // SIO: overrun/error, send full, receive empty
         extern void gsio_rx_isr(void);
@@ -435,9 +409,9 @@ void irq_enable(void)
 	//REG_TM0CNT_L = 65263;//60Hz 65536 - (16777216 / 1024 / HZ);
 	REG_TM0CNT_L = 65372;//100Hz 65536 - (16777216 / 1024 / HZ);
 
-	// 0x0040: 割り込み有効
-	// 0x0003: 1024分周
-	// 0x0080: 開始
+	// 0x0040: interrupt enable
+	// 0x0003: prescaler 1/1024
+	// 0x0080: start
 	REG_TM0CNT_H = 0x00C3;
 
 	/*
@@ -749,12 +723,6 @@ idle(void)
 	 * sleep() waiting for console input).
 	 */
 	{
-		/*
-		 * Ruled out as the cause of an early-boot crash (identical
-		 * DBG trail and crash address with this disabled) - see the
-		 * comment on uart_poll_input() in mgba_uart.c for what this
-		 * does and why it's here.
-		 */
 		/*
 		 * On-screen software keyboard: turn GBA button presses
 		 * into console input for a UART-less machine. Polled

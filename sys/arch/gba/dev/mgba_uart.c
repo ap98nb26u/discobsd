@@ -89,7 +89,7 @@ uartprobe(struct conf_device *config) {
     return 1;
 }
 
-/* conf.o が期待するシンボル名に変更 */
+/* Entry points, under the names conf.c expects. */
 int uartopen(dev_t dev, int flag, int mode)
 {
     /*
@@ -376,7 +376,7 @@ int uartselect(dev_t dev, int rw)
     return 1;
 }
 
-/* r_read / r_write に相当する関数名 (conf.cの定義に合わせる) */
+/* Raw character input, as named in conf.c. */
 char uartgetc(dev_t dev) {
 #ifdef SERIAL_CONSOLE
     return (char)gsio_getc();
@@ -482,7 +482,7 @@ void uartputs(dev_t dev, const char *s) {
 #endif
 }
 
-/* ioconf.c が期待するドライバ構造体 */
+/* The driver structure ioconf.c refers to. */
 struct driver uartdriver = {
     "uart",
     uartprobe

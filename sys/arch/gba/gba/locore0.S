@@ -143,7 +143,7 @@ uarea_loop:
     strlt r2, [r0], #4
     blt uarea_loop
 
-    @ カーネルスタックを u に合わせる
+    @ kernel stack: the top of u
     ldr r0, =u
     add sp, r0, #3072 @ USIZE
 
@@ -166,7 +166,7 @@ gba_intr_handler:
     ldr r1, =0x001F
     strh r1, [r0, #0x6D]
 
-    @ (二重)割り込み禁止
+    @ interrupts off (again)
     ldr r1, =0x04000208 @ REG_IME
     mov r2, #0
     strh r2, [r1]
@@ -174,15 +174,6 @@ gba_intr_handler:
     @ save registers (full)
     push {r0-r3, r4-r11, r12, lr}
 
-    @ DBG: stash lr_irq (still live in lr here, untouched by the push
-    @ above) into a C-visible global before it's out of reach - IRQ
-    @ mode's own lr is banked and unavailable once we switch to SYS
-    @ mode two instructions down. gba_do_schedule() (machdep.c) uses
-    @ this to bounds-check where the interrupted code actually was,
-    @ chasing a wild-jump crash that a syscall-return-only check never
-    @ catches - see the comment there.
-    ldr r0, =irq_last_lr
-    str lr, [r0]
 #ifdef HANGDUMP
     @ The interrupted code's own pc+4 is the lr the BIOS IRQ dispatch
     @ pushed ({r0-r3, r12, lr}, lr at +20) just above our 14 words; keep
@@ -224,12 +215,12 @@ gba_intr_handler:
 
     pop {r0-r3, r4-r11, r12, lr}
 
-    @ 割り込み許可
+    @ interrupts on
     ldr r1, =0x04000208 @ REG_IME
     mov r2, #1
     strh r2, [r1]
 
-    bx lr @ BIOS経由で帰還
+    bx lr @ return through the BIOS
 
 .align 2
 .arm
