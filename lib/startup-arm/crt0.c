@@ -3,7 +3,6 @@
  * All rights reserved.  The Berkeley software License Agreement
  * specifies the terms and conditions for redistribution.
  */
-#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -64,8 +63,6 @@ _start (argc, argv, env)
 	char **argv;
 	char **env;
 {
-	//printf("DBG: _start entered, argc=%d argv=%x env=%x\n",
-	//    argc, (unsigned)argv, (unsigned)env);
 	environ = env;
 	if (argc > 0 && argv[0] != 0) {
 		const char *s;
