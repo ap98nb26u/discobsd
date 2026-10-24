@@ -19,12 +19,12 @@ void clkstart(void) {
 }
 
 void cpu_initclocks(void) {
-    // Timer 0 の設定
+    // Timer 0: the HZ clock tick
     REG_TM0CNT_L = 65536 - (16777216 / 1024 / HZ); 
     
-    // 0x0040: 割り込み有効
-    // 0x0003: 1024分周
-    // 0x0080: 開始
+    // 0x0040: interrupt enable
+    // 0x0003: prescaler 1/1024
+    // 0x0080: start
     REG_TM0CNT_H = 0x00C3;
 
     /*
@@ -71,7 +71,7 @@ void cpu_initclocks(void) {
     REG_TM3CNT_L = 0;
     REG_TM3CNT_H = 0x0084;
 
-    // GBA全体の割り込み許可レジスタ
+    // Interrupt enable register
     REG_IE |= IRQ_TIMER0;
 #ifdef SERIAL_CONSOLE
     REG_IE |= IRQ_SERIAL;	/* SIO error/empty -> gsio_rx_isr(); no rx IRQ */
