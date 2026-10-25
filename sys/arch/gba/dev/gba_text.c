@@ -134,28 +134,72 @@ gtxt_cell_blank(int row, int col)
     GTXT_CELL_AT(row, col) = GTXT_PACK(' ', bi, bi);
 }
 
-static void
-gtxt_shift(void)
-{
-    volatile unsigned short *p = VRAM;
-    volatile unsigned short *end = VRAM + (GTXT_SCREEN_W * (GTXT_CONS_H - GTXT_CHAR_H));
-    volatile unsigned short *tail = VRAM + (GTXT_SCREEN_W * GTXT_CONS_H);
-    int r, c;
+/*
+ * Copy (or, with fill, set) n 16-bit units of VRAM with DMA channel 3,
+ * 32 bits at a time.  A scroll is ~35000 units: copied by a CPU loop it
+ * took ~100 ms - with interrupts off, as console output runs inside the
+ * write syscall, so the soft keyboard went unsampled and taps were lost.
+ * DMA does it in a few ms.  The source may overlap the destination from
+ * above (a scroll): DMA copies forward, unit by unit.  n must be even
+ * and both addresses 4-aligned.  DMA3 is otherwise only the SD driver's
+ * (ed.c), which waits for its own transfers to finish.
+ */
+#define GTXT_DMA3SAD	(*(volatile unsigned long *)0x040000D4)
+#define GTXT_DMA3DAD	(*(volatile unsigned long *)0x040000D8)
+#define GTXT_DMA3CNT	(*(volatile unsigned long *)0x040000DC)
+#define GTXT_DMA_ON	0x80000000UL
+#define GTXT_DMA_32	0x04000000UL
+#define GTXT_DMA_SRCFIX	0x01000000UL
 
-    /* Scroll the console region of the backing store up one row (always, so
-       it stays correct even when VRAM is not being painted). */
-    for (r = 0; r < GTXT_BOTTOM; r++)
-        for (c = 0; c < GTXT_COLS; c++)
-            GTXT_CELL_AT(r, c) = GTXT_CELL_AT(r + 1, c);
+static void
+gtxt_dma16(volatile unsigned short *dst, volatile unsigned short *src,
+    unsigned n, int fill)
+{
+    static unsigned long fillword;
+    int t;
+
+    if (n == 0)
+        return;
+    for (t = 0; t < 100000 && (GTXT_DMA3CNT & GTXT_DMA_ON); t++)
+        ;
+    if (fill) {
+        fillword = (unsigned long)gtxt_bg << 16 | gtxt_bg;
+        GTXT_DMA3SAD = (unsigned long)&fillword;
+    } else
+        GTXT_DMA3SAD = (unsigned long)src;
+    GTXT_DMA3DAD = (unsigned long)dst;
+    GTXT_DMA3CNT = GTXT_DMA_ON | GTXT_DMA_32 | (fill ? GTXT_DMA_SRCFIX : 0) |
+        ((n / 2) & 0xFFFF);
+    for (t = 0; t < 100000 && (GTXT_DMA3CNT & GTXT_DMA_ON); t++)
+        ;
+}
+
+/*
+ * Scroll the backing store and the screen's first `rows` character rows
+ * up one row, blanking the last one.
+ */
+static void
+gtxt_scroll_rows(int rows)
+{
+    int c;
+
+    /* The backing store always, so it stays correct even when VRAM is not
+       being painted.  40 cells a row: whole rows are 4-aligned. */
+    gtxt_dma16(&GTXT_CELL_AT(0, 0), &GTXT_CELL_AT(1, 0),
+        (rows - 1) * GTXT_COLS, 0);
     for (c = 0; c < GTXT_COLS; c++)
-        gtxt_cell_blank(GTXT_BOTTOM, c);
+        gtxt_cell_blank(rows - 1, c);
 
     if (gba_gfx_active())
         return;
-    for (; p < end; p++)
-        *p = p[GTXT_ROW_PIXELS];
-    for (; p < tail; p++)
-        *p = gtxt_bg;
+    gtxt_dma16(VRAM, VRAM + GTXT_ROW_PIXELS, (rows - 1) * GTXT_ROW_PIXELS, 0);
+    gtxt_dma16(VRAM + (rows - 1) * GTXT_ROW_PIXELS, 0, GTXT_ROW_PIXELS, 1);
+}
+
+static void
+gtxt_shift(void)
+{
+    gtxt_scroll_rows(GTXT_BOTTOM + 1);
 }
 
 /*
@@ -166,23 +210,7 @@ gtxt_shift(void)
 static void
 gtxt_shift_full(void)
 {
-    volatile unsigned short *p = VRAM;
-    volatile unsigned short *end = VRAM + (GTXT_SCREEN_W * (GTXT_SCREEN_H - GTXT_CHAR_H));
-    volatile unsigned short *tail = VRAM + (GTXT_SCREEN_W * GTXT_SCREEN_H);
-    int r, c;
-
-    for (r = 0; r + 1 < GTXT_ROWS; r++)
-        for (c = 0; c < GTXT_COLS; c++)
-            GTXT_CELL_AT(r, c) = GTXT_CELL_AT(r + 1, c);
-    for (c = 0; c < GTXT_COLS; c++)
-        gtxt_cell_blank(GTXT_ROWS - 1, c);
-
-    if (gba_gfx_active())
-        return;
-    for (; p < end; p++)
-        *p = p[GTXT_ROW_PIXELS];
-    for (; p < tail; p++)
-        *p = gtxt_bg;
+    gtxt_scroll_rows(GTXT_ROWS);
 }
 
 /* Advance to the next line, scrolling the console region when at the bottom. */
