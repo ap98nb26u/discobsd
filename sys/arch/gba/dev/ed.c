@@ -8,6 +8,15 @@
  * controller and share the register access and lock/unlock sequence
  * below, ported from EverDrive's own everdrive.c sample source.
  */
+/*
+ * Built without optimization, as when its timeouts were tuned: the SD
+ * waits here and in sd.c count status-register polls, not time, and
+ * optimized code polls several times faster - a card slow to start a
+ * read stream then looked stalled and the root filesystem failed to
+ * mount on real hardware.
+ */
+#pragma GCC optimize ("O0")
+
 #include <sys/param.h>
 #include <sys/config.h>
 #include <sys/systm.h>
