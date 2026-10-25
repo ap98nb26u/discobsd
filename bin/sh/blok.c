@@ -78,6 +78,17 @@ addblok(reqd)
 		bloktop = (struct blk *) &end;
 	}
 
+	/*
+	 * Everything written below - the stack turned into a busy block,
+	 * a new top block reqd (rounded up) bytes on, and the stack moved
+	 * above it - must lie within the break (see GROWSTAK in stak.h).
+	 * Grow it first, for the most that can take: running out of space
+	 * after the arena is half relinked would leave it corrupt.
+	 */
+	growstak((stakbas != staktop ? (char *)round(staktop + 1, BYTESPERWORD) :
+	    (char *)bloktop) + reqd + BRKMAX + 3 * sizeof(struct blk) +
+	    (stakbot != staktop ? length(stakbot) : 0));
+
 	if (stakbas != staktop)
 	{
 		register char *rndstak;
@@ -102,6 +113,7 @@ addblok(reqd)
 	}
 	reqd += brkincr;
 	reqd &= ~(brkincr - 1);
+
 	{
 		/*
 		 * Terminate the new top block before linking it in: until
