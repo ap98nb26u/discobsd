@@ -1,0 +1,19 @@
+Sound samples for the GBA's PCM audio (/dev/audio, /dev/audiost)
+==================================================================
+
+down15th.s8     mono,   8192 Hz, 8-bit signed PCM, about 24 s
+down15th-st.s8  stereo, 8192 Hz, 8-bit signed PCM, interleaved L,R
+
+Play them with
+
+	cat /usr/share/examples/gba/down15th.s8 > /dev/audio
+	cat /usr/share/examples/gba/down15th-st.s8 > /dev/audiost
+
+(stereo is heard as such only on headphones or in an emulator; the
+GBA's speaker is mono).
+
+"down 15th street" by akelley6
+https://freesound.org/people/akelley6/sounds/554787/
+licensed under CC BY 4.0, https://creativecommons.org/licenses/by/4.0/
+Changes: converted from the original 44.1 kHz stereo WAV to raw 8-bit
+signed PCM at 8192 Hz, mono and stereo.
