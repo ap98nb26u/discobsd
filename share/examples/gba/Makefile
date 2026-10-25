@@ -1,6 +1,7 @@
 # GBA examples: gpanel (/dev/tft0..2) demos and test programs, a port of
 # share/examples/gpanel's tftetris, a PSG sound test (beeptest), plus small
-# sources for the on-device C toolchain.
+# sources for the on-device C toolchain, and PCM sound samples for
+# /dev/audio (see SOUNDS for their source and license).
 #
 # Like the rest of share/examples, the sources are installed in
 # /usr/share/examples/gba.  But the GBA's native cc cannot build gpanel
@@ -21,6 +22,7 @@ LIBS=		-lgpanel -lc
 PROG=		tetris gball gball5 gball5i imgdemo fontchart fontsampler \
 		gfxtest gfxtest2 gfxtest3 gfxtest4 keytest beeptest
 SRCONLY=	hello.c ctest.c
+SOUNDS=		SOUNDS down15th.s8 down15th-st.s8
 
 FONTS=		5x7.o 6x9.o digits20.o lucidasans9.o lucidasans15.o verdana7.o
 
@@ -94,7 +96,7 @@ install:	all
 			${INSTALL} $$p ${DESTDIR}${EXDIR}/$$p; \
 			cp $$p.c ${DESTDIR}${EXDIR}/$$p.c; \
 		done
-		for s in ${SRCONLY} Makefile; do \
+		for s in ${SRCONLY} ${SOUNDS} Makefile; do \
 			cp $$s ${DESTDIR}${EXDIR}/$$s; \
 		done
 		mkdir -p ${DESTDIR}${EXDIR}/selfhost

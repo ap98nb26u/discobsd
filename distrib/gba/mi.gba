@@ -779,7 +779,8 @@ file /usr/games/wump
 # GBA examples (/usr/share/examples/gba): gpanel demos, test programs and
 # the beeptest PSG sound test, shipped as cross-built a.out binaries next
 # to their sources (the native cc cannot build gpanel programs yet), plus
-# hello.c/ctest.c to compile on the device.  See share/examples/gba/Makefile.
+# hello.c/ctest.c to compile on the device, and PCM sound samples (SOUNDS).
+# See share/examples/gba/Makefile.
 #
 default
 dirmode 0775
@@ -802,6 +803,9 @@ file /usr/share/examples/gba/gfxtest3.c
 file /usr/share/examples/gba/gfxtest4.c
 file /usr/share/examples/gba/keytest.c
 file /usr/share/examples/gba/beeptest.c
+file /usr/share/examples/gba/SOUNDS
+file /usr/share/examples/gba/down15th.s8
+file /usr/share/examples/gba/down15th-st.s8
 
 default
 filemode 0775
