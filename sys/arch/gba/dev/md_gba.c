@@ -83,6 +83,11 @@ md_machdep_end(void)
 #endif
 }
 
+/*
+ * In IWRAM: run from ROM, the copy loop's own instruction fetches would
+ * share the cartridge bus with the PSRAM stores it makes.
+ */
+__attribute__((noinline, section(".iwram_text")))
 void
 md_machdep_write(caddr_t dst, caddr_t src, u_int len)
 {

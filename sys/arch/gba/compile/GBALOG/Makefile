@@ -46,7 +46,7 @@ CMACHFLAGS=	-mthumb -mabi=aapcs -mthumb-interwork
 CMACHFLAGS+=	-ffreestanding -fno-builtin -fcommon
 CMACHFLAGS+=	${CMACHCPU}
 
-COPTS?=		#-O
+COPTS?=		-O
 CFLAGS=		${DEBUG} ${CWARNFLAGS} ${CMACHFLAGS} ${COPTS}
 AFLAGS=		-x assembler-with-cpp ${CWARNFLAGS} ${CMACHFLAGS}
 LDFLAGS=	-T ${_confdir}/${LDSCRIPT}
