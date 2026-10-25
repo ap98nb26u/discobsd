@@ -1151,51 +1151,7 @@ strncmp(const char *s1, const char *s2, size_t n)
 /* Nonzero if pointer is not aligned on a "sz" boundary. */
 #define UNALIGNED(p, sz)	((u_int)(p) & ((sz) - 1))
 
-/*
- * Copy data from the memory region pointed to by src0 to the memory
- * region pointed to by dst0.
- * If the regions overlap, the behavior is undefined.
- */
-void
-bcopy(const void *src0, void *dst0, size_t nbytes)
-{
-	u_char		*dst = dst0;
-	const u_char	*src = src0;
-	u_int		*aligned_dst;
-	const u_int	*aligned_src;
-
-	/* printf("bcopy (%08x, %08x, %d)\n", src0, dst0, nbytes); */
-	/* If the size is small, or either SRC or DST is unaligned,
-	 * then punt into the byte copy loop.  This should be rare. */
-	if (nbytes >= 4 * sizeof(u_int) &&
-	    !UNALIGNED(src, sizeof(u_int)) &&
-	    !UNALIGNED(dst, sizeof(u_int))) {
-		aligned_dst = (u_int *)dst;
-		aligned_src = (const u_int *)src;
-
-		/* Copy 4X unsigned words at a time if possible. */
-		while (nbytes >= 4 * sizeof(u_int)) {
-			*aligned_dst++ = *aligned_src++;
-			*aligned_dst++ = *aligned_src++;
-			*aligned_dst++ = *aligned_src++;
-			*aligned_dst++ = *aligned_src++;
-			nbytes -= 4 * sizeof(u_int);
-		}
-
-		/* Copy one unsigned word at a time if possible. */
-		while (nbytes >= sizeof(u_int)) {
-			*aligned_dst++ = *aligned_src++;
-			nbytes -= sizeof(u_int);
-		}
-
-		/* Pick up any residual with a byte copier. */
-		dst = (u_char *)aligned_dst;
-		src = (const u_char *)aligned_src;
-	}
-
-	while (nbytes--)
-		*dst++ = *src++;
-}
+/* bcopy() and bzero() are in fastcopy.S. */
 
 void *
 memcpy(void *dst, const void *src, size_t nbytes)
@@ -1205,47 +1161,6 @@ memcpy(void *dst, const void *src, size_t nbytes)
 	return dst;
 }
 
-/*
- * Fill the array with zeroes.
- */
-void
-bzero(void *dst0, size_t nbytes)
-{
-	u_char *dst;
-	u_int *aligned_dst;
-
-	dst = (u_char *)dst0;
-	while (UNALIGNED(dst, sizeof(u_int))) {
-		*dst++ = 0;
-		if (--nbytes == 0)
-			return;
-	}
-
-	if (nbytes >= sizeof(u_int)) {
-		/*
-		 * If we get this far, we know that nbytes is large
-		 * and dst is word-aligned.
-		 */
-		aligned_dst = (u_int *)dst;
-
-		while (nbytes >= 4 * sizeof(u_int)) {
-			*aligned_dst++ = 0;
-			*aligned_dst++ = 0;
-			*aligned_dst++ = 0;
-			*aligned_dst++ = 0;
-			nbytes -= 4 * sizeof(u_int);
-		}
-		while (nbytes >= sizeof(u_int)) {
-			*aligned_dst++ = 0;
-			nbytes -= sizeof(u_int);
-		}
-		dst = (u_char *)aligned_dst;
-	}
-
-	/* Pick up the remainder with a bytewise loop. */
-	while (nbytes--)
-		*dst++ = 0;
-}
 
 /*
  * Compare not more than nbytes of data pointed to by m1 with
