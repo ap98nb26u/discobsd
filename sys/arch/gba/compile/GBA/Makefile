@@ -81,9 +81,10 @@ OBJS = exec_aout.o exec_conf.o exec_elf.o exec_script.o exec_subr.o \
 	ufs_bmap.o ufs_dsort.o ufs_fio.o ufs_inode.o ufs_mount.o \
 	ufs_namei.o ufs_subr.o ufs_syscalls.o ufs_syscalls2.o \
 	vfs_vnops.o vm_sched.o vm_swap.o vm_swp.o cons.o mem.o swap.o \
-	clock.o conf.o machdep.o mpu.o sig_machdep.o syscall.o sysctl.o \
-	md.o md_gba.o mgba_uart.o gba_text.o gba_font.o swkbd.o \
-	gba_sound.o gba_audio.o gba_gpanel.o sram.o gba_sio_uart.o 
+	clock.o fastcopy.o conf.o machdep.o mpu.o sig_machdep.o \
+	syscall.o sysctl.o md.o md_gba.o mgba_uart.o gba_text.o \
+	gba_font.o swkbd.o gba_sound.o gba_audio.o gba_gpanel.o sram.o \
+	gba_sio_uart.o 
 
 CFILES = $S/kern/exec_aout.c $S/kern/exec_conf.c $S/kern/exec_elf.c \
 	$S/kern/exec_script.c $S/kern/exec_subr.c $S/kern/init_main.c \
@@ -330,6 +331,9 @@ swap.o: $S/dev/swap.c
 
 clock.o: $S/arch/gba/gba/clock.c
 	${COMPILE_C}
+
+fastcopy.o: $S/arch/gba/gba/fastcopy.S
+	${COMPILE_S}
 
 conf.o: $S/arch/gba/gba/conf.c
 	${COMPILE_C}

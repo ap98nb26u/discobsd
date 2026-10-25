@@ -63,6 +63,7 @@ dev/swap.c				standard
 # GBA platform.
 #
 arch/gba/gba/clock.c		standard
+arch/gba/gba/fastcopy.S		standard
 arch/gba/gba/conf.c			standard
 arch/gba/gba/machdep.c		standard
 arch/gba/gba/mpu.c			standard
