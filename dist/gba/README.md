@@ -33,6 +33,7 @@ A short demo, recorded in mGBA:
 https://github.com/user-attachments/assets/de7e6b4d-3066-4683-97d2-ca4a127a9263
 
 A newer demo of the current `master` (faster console, PCM sound sample playback), recorded in mGBA:
+
 https://github.com/user-attachments/assets/d78c0e4f-f79c-4fe8-946e-3bcb9b69d52a
 
 These images are also attached to the
