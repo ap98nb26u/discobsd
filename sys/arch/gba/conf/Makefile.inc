@@ -13,7 +13,7 @@ ROM=		${KERNDIR}/${KERN}.bin
 # on real EverDrive hardware the same image is written onto the DiscoBSD
 # root partition (sd0b, MBR #2), leaving the EverDrive's own FAT32 boot
 # partition (#1) intact. There is deliberately no full-disk image: swap is
-# a separate region (EWRAM for the ROM-root build, MBR #3 for GBAED) and the build has
+# a separate region (EWRAM for the ROM-root build, EverDrive PSRAM for GBAED) and the build has
 # no FAT32 tooling to populate the EverDrive boot partition, so a sector-0
 # image would not be directly usable anyway.
 #

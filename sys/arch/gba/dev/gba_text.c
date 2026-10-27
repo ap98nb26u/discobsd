@@ -433,10 +433,8 @@ gtxt_msgcolor(int on)
  * untouched, so the text reappears intact the instant BG2 is re-enabled.
  *
  * This is a plain register write - deliberately NOT a BIOS power-down SWI
- * (Halt/Stop). The BIOS reset/Halt SWIs behave inconsistently under mGBA
- * (the undocumented HardReset SWI used by cpu_reboot() hangs the emulator
- * inside the BIOS), so blanking stays SWI-free to work identically on real
- * hardware and in the emulator. The original GBA's backlight is not
+ * (Halt/Stop): the port issues no BIOS SWI (see NOTES.hardware), so it
+ * behaves identically on real hardware and in the emulators. The original GBA's backlight is not
  * software-controllable, so this darkens the image and stops BG/VRAM
  * fetches rather than cutting the backlight; it prevents a static image
  * from sitting on the panel and is the console-blanking behaviour other

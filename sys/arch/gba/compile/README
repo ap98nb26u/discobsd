@@ -2,12 +2,17 @@ Kernel build directories:
 
     GBA/      - GameBoy Advance console, plain build (mGBA / VBA-M / flash
                 cartridge). Has no real disk: the root filesystem is a ROM
-                memory disk embedded in the kernel image (device mr0; root
-                on mr0a, swap on the mr0b EWRAM region).
+                memory disk embedded in the kernel image (device md0; root
+                on md0a, swap on the md0b EWRAM region).  Run from an
+                EverDrive, the root can be written and swap moves to the
+                PSRAM after it (options MD_ROOT_RW, dev/md_gba.c).
+
+    GBALOG/   - The GBA build plus AGBPrint console output to the
+                emulator's log window (mGBA, VisualBoyAdvance).
 
     GBAED/    - GameBoy Advance with the EverDrive GBA X5 cartridge. Reads
-                its root filesystem and swap from the cartridge's real SD
-                card (controller ed0, device sd0); root on /dev/sd0b (2nd
-                MBR partition), swap on /dev/sd0c (3rd). Reclaims the EWRAM
-                swap region for user RAM, so it has a larger user window
-                than the plain GBA build.
+                its root filesystem from the cartridge's real SD card
+                (controller ed0, device sd0); root on /dev/sd0b (2nd MBR
+                partition), crash dumps on /dev/sd0c (3rd).  Swaps to the
+                EverDrive's PSRAM (md0b), so the EWRAM swap region becomes
+                user RAM: a larger user window than the plain GBA build.

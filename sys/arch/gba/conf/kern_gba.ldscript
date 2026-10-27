@@ -52,8 +52,8 @@ MEMORY {
      * window; SWAP is md.c's (GBA/mGBA-only) swap staging area, a
      * *real* EWRAM range that md.c copies to/from
      * directly (see __swap_start/__swap_end there) - it is NOT a disk
-     * partition on this config, unlike GBAED's real sd.c (which uses an
-     * 8MB SD partition instead and was never the bottleneck here).
+     * partition on this config.  (GBAED swaps to EverDrive PSRAM
+     * instead - see kern_gbaed.ldscript.)
      *
      * USERRAM used to sit right after UAREA's *old* IWRAM location, with
      * SWAP filling the rest of EWRAM after it (68K) - once u0/uarea

@@ -14,7 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#define UBASE __user_data_start	/* User space base addr (see kern.ldscript). */
+#define UBASE __user_data_start	/* User space base addr (see kern_gba.ldscript). */
 #define USIZE 3072		/* From user.h */
 
 	.syntax	unified
@@ -69,7 +69,7 @@ longjmp:
 	.globl	resume
 	.type	resume, %function
 resume:
-	@ u0area/uarea live in EWRAM now, not IWRAM - see kern.ldscript's
+	@ u0area/uarea live in EWRAM now, not IWRAM - see kern_gba.ldscript's
 	@ U0AREA/UAREA MEMORY block for the current addresses and why.
 	/* Disable interrupts. */
 	mrs r3, cpsr

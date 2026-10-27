@@ -7,8 +7,8 @@
 #   stage 2: smlrc1 compiles smlrc.c again              -> $T/smlrc2
 #   smlrc1 and smlrc2 must be identical (a fixed point).
 #
-# Needs a writable /tmp with about 1.5 MB free, so GBAED only (the mrams
-# ROM root is read-only).  Expect it to take a long time.  The stages run
+# Needs a writable /tmp with about 1.5 MB free, so GBAED only (the plain GBA
+# build's ROM root is read-only).  Expect it to take a long time.  The stages run
 # cpp, the compiler, as and ld by hand (rather than through cc) so that
 # stage 2 can use the freshly built compiler.  smlrc.c and cgarm.c are
 # copies of usr.bin/smlrc; smlrc.c #includes cgarm.c from its directory.

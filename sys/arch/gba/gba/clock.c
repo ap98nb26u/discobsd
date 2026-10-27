@@ -56,8 +56,8 @@ void cpu_initclocks(void) {
      * rate in real hardware time, IRQ bit off. Timer3 is chained to it in
      * count-up mode (increments once per Timer2 overflow): GBA count-up
      * timers count the *preceding* timer's overflows, so Timer3 counts
-     * Timer2 (not Timer0 - Timer1 is the swkbd auto-repeat counter and is
-     * left alone). Timer3 therefore advances once per intended hardclock
+     * Timer2 (not Timer0 - Timer1 is the PCM sample clock and is left
+     * alone). Timer3 therefore advances once per intended hardclock
      * tick regardless of the IME mask; gba_do_schedule() reads its delta
      * and replays exactly that many hardclock() calls. Timer3 wraps only
      * every 65536 ticks (~11 min), far longer than any masked window.

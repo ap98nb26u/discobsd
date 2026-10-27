@@ -20,30 +20,51 @@ makeoptions     DEBUG="-g"                  # Debug symbols
 options         "CPU_KHZ=16777"             # Oscillator frequency of CPU core
 options         "BUS_KHZ=16777"             # Frequency of peripheral bus
 options         "HALTREBOOT"                # If halted, press key to reboot
-options         "HZ=60"
 
-#options         "GLOBAL_DEBUG"              # Enable debugging
-#options         "DIAGNOSTIC"                # Enable diagnostics
+# On-screen console screen-saver: blank the LCD after this many idle
+# seconds (no console input or output), restore on any activity. Blanking
+# just disables BG2 so a black backdrop shows -- VRAM is kept, so the text
+# returns intact; no BIOS SWI is used, so it behaves the same on real
+# hardware and under mGBA. 0 disables it. Tunable at runtime via the
+# machdep.console_blank sysctl.
+options         "SCREEN_BLANK_SECS=60"      # blank LCD after 60s idle
+options         "TTYEDIT"                   # cooked-mode command-line editing (cursor/insert/delete)
+options         "TTYEDIT_HISTORY=4"         # command-history lines (up/down)
 
-device           mr0                        # read-only Memory disk in ROM
+#options        "GLOBAL_DEBUG"              # Enable debugging
+options         "DIAGNOSTIC"                # Enable diagnostics
+options         "HANGDUMP"                  # L+R+SELECT: print where the kernel is (hang debugging)
 
-# Root filesystem at /dev/mr0a, swap at /dev/mr0b
-config          unix    root on mr0a
-                        swap on mr0b
+# Memory disk (dev/md.c): the root filesystem image linked into the ROM
+# (md0a: read-only, or writable where the "ROM" is RAM - an EverDrive) and
+# swap in EWRAM (md0b); md_gba.c adds the GBA hooks.
+device          md0
+options         "MD_MACHDEP"                # GBA hooks, arch/gba/dev/md_gba.c
+options         "MD_ROOTIMAGE"              # link the root image (make fs) for md0a
+options         "MD_ROOT_RW"                # md0a writable when it is RAM (EverDrive PSRAM)
 
-# Console tty devices. These are NOT real USARTs on the GBA: the tty's
-# actual backend is selected per build (see the GBA / GBAED Config) - the
-# on-screen LCD console + software keyboard always, plus an optional mGBA
-# debug-log mirror (plain GBA) or SIO link-cable serial console (GBAED).
-device          uart1                       # uart1: console tty (/dev/tty0)
-device          uart2                       # uart2: second tty
+# Root filesystem at /dev/md0a, swap at /dev/md0b
+config          unix    root on md0a
+                        swap on md0b
+
+# Serial port: the link port's SIO in UART mode (dev/gba_sio_uart.c,
+# dev/mgba_uart.c) - the GBA has just this one.
+device          uart1                       # SIO UART, the console tty
 options         "UART_BAUD=115200"          # default speed
 
+# Console. Output always goes to the on-screen LCD text console (gtxt),
+# and input always comes from the on-screen software keyboard (swkbd);
+# those are unconditional. This is the plain GBA kernel: no emulator log is
+# compiled in, so it stays fully self-contained on real (non-EverDrive)
+# hardware. For a headless emulator console log (mGBA / VisualBoyAdvance)
+# use the GBALOG config, which is this config plus options "AGBPRINT".
+#
+# SERIAL_CONSOLE is deliberately NOT set: this standalone build runs with
+# no serial cable, and the SIO/UART link-cable console (gsio) busy-waits
+# on CTS / a per-byte send-complete flag that never complete with nothing
+# wired up (~0.5s per character, and it would also mirror output to any
+# peer). Leaving it out keeps the LCD console full-speed and cable-free;
+# GBAED opts in to SERIAL_CONSOLE for interactive debugging over a cable.
 options         "CONS_MAJOR=UART_MAJOR"     # console is the uart tty
 options         "CONS_MINOR=0"              # uart1 is /dev/tty0
 
-# The plain GBA build has no real disk: its root filesystem is a ROM
-# memory disk (device mr0 above; root on mr0a, swap on the mr0b EWRAM
-# region). The EverDrive build reaches a real SD card through the
-# EverDrive cartridge instead - see the GBAED Config (controller ed0,
-# device sd0 at ed0). The GBA itself has no SDIO peripheral.

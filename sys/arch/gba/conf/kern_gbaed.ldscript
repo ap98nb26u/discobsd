@@ -52,8 +52,8 @@ MEMORY {
      * window; SWAP is md.c's (GBA/mGBA-only) swap staging area, a
      * *real* EWRAM range that md.c copies to/from
      * directly (see __swap_start/__swap_end there) - it is NOT a disk
-     * partition on this config, unlike GBAED's real sd.c (which uses an
-     * 8MB SD partition instead and was never the bottleneck here).
+     * partition on this config.  (GBAED swaps to EverDrive PSRAM
+     * instead - see kern_gbaed.ldscript.)
      *
      * USERRAM used to sit right after UAREA's *old* IWRAM location, with
      * SWAP filling the rest of EWRAM after it (68K) - once u0/uarea
@@ -83,11 +83,11 @@ MEMORY {
      */
     /*
      * GBAED LARGE-CAPACITY LAYOUT: unlike the plain GBA/ROM-root build, GBAED's
-     * swap lives on the real SD card (/dev/sd0c), so the EWRAM SWAP staging
+     * swap lives in EverDrive PSRAM (PSRAM_SWAP below), so the EWRAM SWAP staging
      * region that the ROM-root build needs is dead weight here. Reclaim it: USERRAM fills
      * ALL of EWRAM after the u/u0 area (0x02001800..0x02040000 = 250K, vs the
      * ROM-root build's 64K), so a single resident process can be up to 250K and
-     * far more can be parked in SD swap. kern_gba.ldscript keeps the 64K
+     * far more can be parked in PSRAM swap. kern_gba.ldscript keeps the 64K
      * USERRAM + 186K EWRAM SWAP split. Keep LENGTH here in sync with
      * machparam.h's -DGBAED USER_DATA_SIZE and MAXMEM (all 249K) by hand.
      *

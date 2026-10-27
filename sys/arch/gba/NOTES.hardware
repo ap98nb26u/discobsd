@@ -2,7 +2,7 @@ GBA hardware feature usage: Interrupts / DMA / BIOS (SWI)
 =========================================================
 
 Scope: what the DiscoBSD GBA port CURRENTLY uses of the GBA's
-interrupt, DMA, and BIOS-call hardware. File:line references point at
+interrupt, DMA, and BIOS-call hardware. File and function references point at
 the authoritative code; this file is a map, not a spec.
 
 
@@ -63,7 +63,6 @@ Dispatch path:
        IRQ->SYS mode to also save the *interrupted* code's live lr
        (IRQ-mode lr is banked and lost across the mode switch); call
        gba_do_schedule(); IME=1; bx lr (returns via BIOS).
-       locore0.S:190-256
     3. gba_do_schedule() (C, Thumb, IWRAM): read REG_IF; TIMER0 ->
        myticks++/need_resched/hardclock(); write REG_IF to ACK.
        machdep.c:gba_do_schedule()
@@ -73,13 +72,14 @@ IME discipline (the load-bearing invariant of this port):
     run: it uses r0-r2 as live scratch across raw instructions with no
     reentrancy protection (GDB-confirmed: enabling IME mid-trampoline
     let an IRQ clobber r0-r2 and crash the next syscall).
-    machdep.c:448 (gba_irq_allow/gba_irq_block comment), syscall.c
+    machdep.c (gba_irq_allow/gba_irq_block comment), syscall.c
   - Only idle() is bracketed by gba_irq_allow()/gba_irq_block()
     (IME=1/0), so Timer0 can fire while idle to expire tsleep timeouts
     (select() etc.) via hardclock/softclock, then interrupts are
-    re-masked before resuming a process.  machdep.c:465
-  - locore0.S forces IME=0 at the very top of reset: SoftReset does not
-    clear I/O space, so IME could survive a reboot as 1.  locore0.S:40
+    re-masked before resuming a process.  machdep.c:idle()
+  - locore0.S forces IME=0 at the very top of reset: a reboot is a warm
+    jump to the ROM entry (see 3. below), which does not reset I/O
+    space, so IME must not be assumed to start at 0.
 
 Note: the installed handler is the asm wrapper gba_intr_handler (wired
 to 0x03007FFC); a bare compiled-C handler is deliberately NOT used, as
@@ -90,86 +90,85 @@ locore0.S comment at the vector install for why.
 2. DMA
 ------
 
-Only DMA channel 3 (general purpose) is used, exclusively for
-EverDrive SD block transfers.  ed.c:42
+    DMA0  unused
+    DMA1  sound FIFO A (PCM, left / mono)   gba_audio.c
+    DMA2  sound FIFO B (PCM, right)         gba_audio.c
+    DMA3  general purpose:
+            EverDrive SD block transfers    ed.c
+            LCD console scroll and clear    gba_text.c:gtxt_dma16()
 
+DMA1/2 run in sound-FIFO mode (32-bit, repeat, start on FIFO request),
+clocked by Timer1 (the sample clock).  A sound DMA and the SD DMA must
+not share the bus: on real GBAED hardware that wedged the machine, so
+ed.c pauses the sample clock (audio_suspend()/audio_resume()) around its
+SD DMA, and md_gba.c does the same around long PSRAM swap copies.
+
+DMA3 registers:
     DMA_SRC 0x040000D4  DMA_DST 0x040000D8
     DMA_LEN 0x040000DC  DMA_CTR 0x040000DE
 
-Transfer unit is 16-bit (32-bit bit 0x0400 not set); LEN=256 halfwords
+SD transfers are 16-bit (32-bit bit 0x0400 not set); LEN=256 halfwords
 = 512 bytes = one SD sector.
 
     ed_sd_dma_wr        mem     -> SD_DAT   CTR 0x8040  enable + dest fixed
-    ed_sd_dma_rd        SD_RAM  -> mem      CTR 0x8100  enable + src  fixed
     ed_sd_read_crc_ram  SD_RAM  -> mem      CTR 0x8100  CRC readback
-    ed_sd_dma_to_rom    ROM win -> buf      CTR 0x8000  cart SRAM window
-                                                        (16-bit DMA can't
+    ed_sd_dma_to_rom    ROM win -> buf      CTR 0x8000  (16-bit DMA can't
                                                         write ROM directly,
                                                         so route via AUTO_WE)
-    ed.c:288-349
+    ed_sd_dma_rd        SD_RAM  -> mem      CTR 0x8000  (ROM-space dst goes
+                                                        via ed_sd_dma_to_rom)
+
+The console uses 32-bit DMA3 transfers: a copy to scroll the text up,
+and a fixed-source fill (from a static zero word) to clear rows.
 
 Completion is POLLED, for two INDEPENDENT reasons -- keep them separate:
 
   (A) Why no DMA-completion interrupt (a design choice, NOT hang-driven):
-      the transfer is tiny (512 bytes, ~microseconds) and runs in the
-      synchronous block-I/O path, so an IRQ + sleep/wakeup would be pure
-      overhead. Moreover the whole SD path runs with IME=0 (syscall
-      region), so a completion IRQ could not fire there anyway.
+      the transfers are short and run in synchronous paths, so an IRQ +
+      sleep/wakeup would be pure overhead. Moreover these paths run with
+      IME=0 (syscall region), so a completion IRQ could not fire there.
+      (The CPU is stopped while DMA3 runs anyway.)
 
-  (B) Why the poll loop is bounded (ed_dma_wait: DMA_CTR busy bit 0x8000,
-      max 50000 iters -- ed.c:58): this is infinite-loop protection, and
-      it is grounded in ACTUALLY-OBSERVED real-hardware hangs, not a
-      theoretical worry -- though not in the DMA loop itself. Sibling
-      ED_STAT_SD_BUSY waits in this same file were seen to hang forever
-      on real GBAED hardware under fsck's scattered access:
-          ed_sd_dat_wr    fsck -p preen write hung forever      ed.c:180
-          ed_sd_wait_f0   6+ hour hang (outer x inner product)  ed.c:229
-      Three of the four DMA call sites transfer directly from the SD
-      data register (ED_REG_SD_DAT), so a stuck/slow SD stalls the DMA
-      itself -- the SAME root cause (a wedged SD) as those observed
-      hangs. ed_dma_wait was bounded pre-emptively to match that proven
-      bug class; its own comment (ed.c:48) says the hang is "possible"
-      here because the DMA loop specifically was not itself witnessed
-      freezing, only its siblings sharing the root cause.
-
-DMA channels 0-2 are UNUSED (DMA1/2 = sound FIFO, reserved for future
-sound work; DMA0 = display timing).
+  (B) Why the SD poll loop is bounded (ed_dma_wait: DMA_CTR busy bit
+      0x8000, max 50000 iters): infinite-loop protection, grounded in
+      real-hardware hangs of sibling ED_STAT_SD_BUSY waits in ed.c under
+      fsck's scattered access (a wedged SD).  Three of the four SD DMA
+      sites read from the SD data register, so a stuck SD can stall the
+      DMA itself - the same root cause.
 
 
 3. BIOS / SWI
 -------------
 
-SWIs actually issued:
-    swi 0x26  HardReset (undocumented)  cpu_reboot()  machdep.c:586
-              r0=0 (cold-boot target). Chosen over the documented
-              SoftReset (swi 0x00), which only clears IWRAM/mode stacks,
-              not I/O space, and left occasional post-reboot hangs.
-              NB: HardReset works on real hardware (reboots to the
-              EverDrive menu) but hangs inside the BIOS under mGBA -- the
-              emulator does not complete this undocumented SWI (observed
-              stuck in BIOS ROM ~0x1948 after "syncing disks... done").
-              This is the reason the screen-blanking feature (#6, below)
-              deliberately uses no SWI at all.
+No BIOS SWI is issued by the GBA and GBAED kernels.
 
-SWIs deliberately NOT used:
+  - Reboot (cpu_reboot(), machdep.c) masks interrupts, stops DMA,
+    timers and sound, blanks the display, clears EWRAM, and jumps to
+    the ROM entry 0x08000000; locore0.S then reinitialises everything
+    as on a cold boot.  The BIOS resets were dropped: HardReset (swi
+    0x26, undocumented) hangs mGBA, and SoftReset (swi 0x00) left stale
+    I/O state that made the next boot misbehave.
+  - Halt (machdep.c) polls REG_KEYINPUT (and, on GBAED, the serial
+    line) for a key to reboot.
   - System calls do NOT use a real SWI. The GBA SWI vector 0x00000018
     is BIOS ROM (unwritable), so this port uses a software-simulated
-    SWI: RAM address SYSCALL_VECTOR_ADDR = 0x03006400 holds a pointer
-    to the kernel's simulate_swi_via_inline_data() trampoline, written
-    once at boot (machdep.c:startup()); userland calls through that
-    pointer.  machparam.h:124
+    SWI: RAM address SYSCALL_VECTOR_ADDR = 0x03007E00 (machparam.h,
+    SYSVEC in the kernel linker scripts) holds a pointer to the kernel's
+    simulate_swi_via_inline_data() trampoline, written once at boot
+    (machdep.c:startup()); userland calls through that pointer.
     The CONCEPT of this simulated SWI (calling the kernel through a
     fixed RAM vector, since the real SWI vector is BIOS ROM) is inspired
     by the Prex Game Boy Advance port's approach; the implementation is
     this port's own (no Prex code is used).
   - Power-saving BIOS calls (Halt swi 0x02, Stop, IntrWait,
-    VBlankIntrWait) are unused. idle() busy-waits with IME toggling
-    instead of BIOS Halt. (Screen blanking, roadmap #6, is implemented
-    WITHOUT any of these -- see below -- to stay emulator-safe given the
-    HardReset-under-mGBA problem noted above.)
+    VBlankIntrWait) are unused. idle() busy-waits with IME toggling.
 
-BIOS mechanism relied upon: the BIOS IRQ dispatch (reads the user
-vector at 0x03007FFC, and "bx lr" returns through the BIOS).
+Exception: the GBALOG kernel's AGBPrint output (dev/mgba_uart.c) issues
+swi 0xFA to flush its buffer; mGBA and VisualBoyAdvance intercept it.
+
+BIOS mechanisms relied upon: the boot (header check, then a jump to
+0x08000000) and the IRQ dispatch (reads the user vector at 0x03007FFC,
+and "bx lr" returns through the BIOS).
 
 
 Display power (roadmap #6, DONE):
@@ -187,7 +186,6 @@ FOLLOW-UP OPPORTUNITIES (not yet done)
 --------------------------------------
   * idle() busy-waits; BIOS Halt (swi 0x02) would additionally cut CPU
     power/heat on real hardware (a complement to the display blanking of
-    #6). Needs a wake source -- likely keypad IRQ -- and, given the mGBA
-    SWI problems above, would want to be real-hardware-gated.
-  * DMA1/2 (sound FIFO) are free, to be claimed by roadmap #4 sound.
+    #6). Needs a wake source -- likely keypad IRQ -- and would need
+    checking in mGBA as well as on real hardware.
   * Keypad IRQ unused (polling suffices today; needed if Halt is added).
