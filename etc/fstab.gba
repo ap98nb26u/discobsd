@@ -1,9 +1,10 @@
 # GBA per-port fstab (installed over /etc/fstab by etc/Makefile when
 # MACHINE=gba). This is the SD variant, for the EverDrive (GBAED)
 # kernel: its root filesystem lives on sd0b because the EverDrive's own
-# FAT32 loader partition owns MBR slot "a" (sd0a) and swap is on sd0c
-# (see sys/arch/gba/conf/GBAED). GBAED runs a real boot-time fsck, so
-# this must name the actual root device.
+# FAT32 loader partition owns MBR slot "a" (sd0a); swap is in the
+# EverDrive's PSRAM, not on the card (see sys/arch/gba/compile/GBAED/Config).
+# GBAED runs a real boot-time fsck, so this must name the actual root
+# device.
 # ----
 # The plain GBA (ROM-root) kernel instead roots on the ROM memory disk
 # md0a and is read-only (romroot: it skips the boot fsck/mount). The

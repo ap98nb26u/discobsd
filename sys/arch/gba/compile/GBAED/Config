@@ -11,7 +11,7 @@
 architecture    "gba"
 cpu             "ARM7TDMI"                  # Processor variant
 board           "GBA"                       # Board type
-options         "GBAED"                     # real EverDrive SD build (vs plain GBA/mrams); selects the large-USERRAM layout & real-SD paths
+options         "GBAED"                     # real EverDrive SD build (vs the plain GBA ROM-root build); selects the large-USERRAM layout & real-SD paths
 ldscript        "kern_gbaed.ldscript"             # Kernel memory linker script
 
 makeoptions     DEBUG="-g"                  # Debug symbols
@@ -60,8 +60,8 @@ options         "DST=0"                     # JST has no daylight saving
 # sd0a is the 1st MBR partition, which on real hardware is the
 # EverDrive's own FAT32 boot/menu partition, not DiscoBSD's -- see
 # sd.c's sd_setup(). DiscoBSD's own partitions come after it:
-# root filesystem at /dev/sd0b (2nd MBR partition), swap at /dev/sd0c
-# (3rd MBR partition).
+# root filesystem at /dev/sd0b (2nd MBR partition), crash dumps at
+# /dev/sd0c (3rd MBR partition).
 # Root filesystem on the SD card (sd0b, 2nd MBR partition). Swap, however,
 # lives in the EverDrive's PSRAM (the md0b "memory disk"), NOT on the SD
 # card: the cartridge ROM/PSRAM window is almost entirely unused on this

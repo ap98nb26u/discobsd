@@ -25,48 +25,23 @@ reset:
     @ arrive here in ARM mode, SYS mode, with IRQ and FIQ disabled
     ldr sp, =0x0203FFF8 @ do not use last 8 bytes
 
-    @ Force REG_IME off before anything else. The GBA BIOS's SoftReset
-    @ (SWI 0x00, used by cpu_reboot() in machdep.c) only clears a small
-    @ IWRAM range and CPU-mode state - it never touches I/O register
-    @ space (0x04000000+), so REG_IME survives a SoftReset-triggered
-    @ reboot exactly as it was at the moment of reset. A true cold
-    @ power-on always starts with REG_IME=0 (hardware POR default), so
-    @ every existing assumption in this port about "interrupts start
-    @ masked until the kernel deliberately unmasks them at a safe
-    @ point" (see resume()/longjmp()'s CPSR I-bit dance in locore.S,
-    @ and gba_irq_allow()/gba_irq_block() in machdep.c) implicitly
-    @ relies on that same starting condition. If a SoftReset happens to
-    @ land here with REG_IME left at 1 - e.g. a panic firing while a
-    @ process was mid-resume or idle() was between gba_irq_allow() and
-    @ gba_irq_block() - the very first CPSR I-bit clear (the first
-    @ process resume, in resume()/longjmp()) would immediately let a
-    @ real interrupt through at a point boot code never expected one,
-    @ with none of this port's careful register-preservation machinery
-    @ around it yet. Matches this session's observation: an early hang
-    @ specifically following a SoftReset-triggered reboot, never seen
-    @ after a genuine cold power-on.
+    @ Force REG_IME off before anything else.  A cold power-on starts
+    @ with IME=0, but a reboot (cpu_reboot() in machdep.c) is a warm
+    @ jump here, and nothing resets I/O space on the way.  The port
+    @ relies on interrupts staying masked until the kernel unmasks them
+    @ at a safe point (resume()/longjmp() in locore.S, gba_irq_allow()
+    @ in machdep.c); an IME left at 1 would let an interrupt in at the
+    @ first CPSR I-bit clear, before any of that is set up.
     ldr r0, =0x04000208 @ REG_IME
     mov r1, #0
     strh r1, [r0]
 
-    @ Generous settle delay before touching any cartridge hardware
-    @ (EverDrive/SD probing starts soon after, in config()/card_init()
-    @ - see gba/dev/sd.c's own settle delay for the fuller story).
-    @ Confirmed needed here, not just in card_init(): switching
-    @ cpu_reboot() (machdep.c) from SoftReset (SWI 0x00) to the
-    @ undocumented HardReset (SWI 0x26) fixed the hang SoftReset left
-    @ behind, but turned this session's previously-intermittent SD
-    @ write timeout into a 100%-reproducible one, on every boot, at
-    @ the exact same point - and, on later boots in the same test
-    @ run, "sd0: cannot open ed0 port" starting to appear too.
-    @ Reproduced across swapping in a completely different physical SD
-    @ card (even a different capacity/type, 2GB SD to 16GB SDHC),
-    @ which rules out a marginal card and points at HardReset's more
-    @ aggressive reset needing more real settling time before the
-    @ EverDrive's own FPGA/SD interface is actually ready to talk to -
-    @ card_init()'s own settle delay runs too late to help
-    @ ed_probe()'s port-open attempt, which happens first. A few
-    @ hundred ms once at boot is cheap insurance either way.
+    @ Settle delay (a few hundred ms) before touching any cartridge
+    @ hardware: the EverDrive's FPGA/SD interface needs time after a
+    @ reset before ed_probe() opens its port, and card_init()'s own
+    @ delay (sd.c) runs too late for that.  Without it, boots after a
+    @ reset failed with SD write timeouts and "sd0: cannot open ed0
+    @ port", on more than one SD card.
     ldr r0, =3000000
 1:
     subs r0, r0, #1

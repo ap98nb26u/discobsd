@@ -26,7 +26,7 @@
   bytes).
 
 .EXAMPLE
-  .\write_sd_offset.ps1 -DiskNumber 4 -SourceFile \\wsl.localhost\Debian\home\keiki\gba_develop\discobsd\discobsd\distrib\gba\sdcard_root.img -Offset 15489564672
+  .\write_sd_offset.ps1 -DiskNumber 4 -SourceFile \\wsl.localhost\Debian\home\keiki\gba_develop\discobsd\discobsd\distrib\gba\rootfs.img -Offset 15489564672
 #>
 param(
     [Parameter(Mandatory=$true)][int]$DiskNumber,

@@ -1060,13 +1060,13 @@ baduaddr(caddr_t addr)
 /*
  * Return 0 if a kernel address is valid.
  * There are three memory regions allowed for kernel: EWRAM (U0AREA/
- * UAREA only - see __kernel_data_start/end in kern.ldscript), IWRAM,
+ * UAREA only - see __kernel_data_start/end in kern_gba.ldscript), IWRAM,
  * and flash/ROM.
  *
  * __kernel_data_start/end only ever covered that narrow EWRAM slice,
  * not IWRAM - where this port's actual kernel .data/.bss (every
  * ordinary kernel global, including proc[]/nproc that ps(1) reads via
- * /dev/kmem) lives (see kern.ldscript's IWRAM block and the .data/.bss
+ * /dev/kmem) lives (see kern_gba.ldscript's IWRAM block and the .data/.bss
  * VMAs in the linked image). Confirmed via ps failing "/dev/kmem: Bad
  * address" on every attempt: mmrw() (dev/mem.c) rejects any address
  * that's *both* badkaddr() and baduaddr(), and an IWRAM address is

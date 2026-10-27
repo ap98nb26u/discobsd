@@ -43,7 +43,7 @@ static volatile unsigned saved_tf_psr;
  * execve()'s exec_clear()/exec_setupstack(), executed on the SAME memory
  * that exec_clear() then bzero()s out as the new image's stack (both old
  * and new stacks are always pinned to the same fixed top address,
- * __user_data_end/u_end - see kern.ldscript). Once a new image's stack
+ * __user_data_end/u_end - see kern_gba.ldscript). Once a new image's stack
  * needed clearing more bytes than the current call depth had *not yet*
  * used, the bzero loop marched forward and overwrote its own live locals
  * (including epp/exec_params itself) out from under itself - observed as
@@ -72,7 +72,7 @@ static volatile unsigned saved_tf_psr;
  * itself doesn't have this problem: it lives on the kernel stack, which
  * IS part of the per-process "u" struct the swtch()/resume() u/u0
  * ping-pong already swaps wholesale on every context switch (see the
- * long comment on U0AREA/UAREA in kern.ldscript) - so stashing the value
+ * long comment on U0AREA/UAREA in kern_gba.ldscript) - so stashing the value
  * there instead makes it correctly follow whichever process it belongs
  * to, no matter how much unrelated activity happens before that process
  * next resumes. tf_ip's original incoming r12 doesn't need preserving:

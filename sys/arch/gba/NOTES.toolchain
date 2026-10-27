@@ -330,7 +330,8 @@ returns the right value in Unicorn (70 for `(4+3)*10`).
 Native ARM (a.out) runtime in usr.bin/as/arm-dev/rt/ (crt0.s, clib.s), built by
 smlrc -> as_arm -> ld_arm. crt0.s: _start (environ=envp; main(argc,argv,envp);
 _exit) - ARM, even entry so ISA-aware exec enters ARM. clib.s: syscalls via the
-0x03006400 trampoline (write/read/open/close/lseek/_exit/exit/_brk), sbrk
+trampoline vector (then 0x03006400, now SYSCALL_VECTOR_ADDR = 0x03007E00)
+(write/read/open/close/lseek/_exit/exit/_brk), sbrk
 (_end/_curbrk), errno, and __aeabi_uidiv/idiv/uidivmod/idivmod (repeated
 subtraction - correct, slow; uses only instructions as_arm emits, so no
 flag-setting S-suffix or tst needed).

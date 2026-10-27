@@ -12,10 +12,8 @@
   partition 2 at $ExpectedRootOffset), then delegates the actual write.
 
 .PARAMETER SourceFile
-  Path to the raw root filesystem image, with its own leading
-  sdcard.img MBR header already stripped (i.e. distrib/gba/sdcard_root.img,
-  produced with `tail -c +1025 sdcard.img > sdcard_root.img` -- fsutil's
-  partition 1 starts at sector 2 = byte 1024).
+  Path to the bare root filesystem image (no MBR), as the build makes
+  it: distrib/gba/rootfs.img.
 
 .PARAMETER CardSerial
   Serial number of the SD card reader, as shown by "Get-Disk" (the
@@ -28,7 +26,7 @@
   If the card was ever repartitioned, update this default.
 
 .EXAMPLE
-  .\write_gba_sd.ps1 -SourceFile \\wsl.localhost\Debian\home\keiki\gba_develop\discobsd\discobsd\distrib\gba\sdcard_root.img
+  .\write_gba_sd.ps1 -SourceFile \\wsl.localhost\Debian\home\keiki\gba_develop\discobsd\discobsd\distrib\gba\rootfs.img
 #>
 param(
     [Parameter(Mandatory=$true)][string]$SourceFile,

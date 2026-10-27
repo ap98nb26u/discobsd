@@ -45,11 +45,11 @@
 /*
  * Maximum core (text+data+bss+stack) a single process may occupy - on
  * this port that's a hard physical limit, not just a policy knob: only
- * one process's core is ever resident at a time (see kern.ldscript's
+ * one process's core is ever resident at a time (see kern_gba.ldscript's
  * USERRAM), so this MUST match USERRAM's LENGTH exactly. Previously a
  * stale 128K (unrelated to the actual 32K window of the time), which let
  * exec_estab()'s overflow check silently pass a too-large /bin/sh image
- * that then overran USERRAM into SWAP - see kern.ldscript for the full
+ * that then overran USERRAM into SWAP - see kern_gba.ldscript for the full
  * story. Keep in sync with USER_DATA_SIZE below and with USERRAM by hand
  * if either ever moves again.
  */
@@ -121,10 +121,10 @@
  * Needed by userland tools (ps, w) that read another process's memory
  * directly (via /dev/kmem) rather than through the kernel - they have no
  * way to see the kernel's own __user_data_start/__user_data_end linker
- * symbols (kern.ldscript), so the same USERRAM bounds are duplicated here
+ * symbols (kern_gba.ldscript), so the same USERRAM bounds are duplicated here
  * as plain constants. Previously stale (0x20000000/96K, matching neither
  * this port's actual USERRAM origin nor its 32K size - ps.c wouldn't even
- * compile with them commented out) - keep in sync with kern.ldscript's
+ * compile with them commented out) - keep in sync with kern_gba.ldscript's
  * USERRAM MEMORY block by hand if that ever moves again.
  */
 #define USER_DATA_START         (0x02001800)
@@ -173,7 +173,7 @@
  * binaries are linked separately from the kernel and never see it).
  * The kernel writes the pointer here once at boot, before running any
  * user process (see gba/gba/machdep.c: startup()). Address must match
- * the SYSVEC region reserved in gba/conf/kern.ldscript AND the literal
+ * the SYSVEC region reserved in gba/conf/kern_gba.ldscript AND the literal
  * in the native-toolchain runtime (usr.bin/as/arm-dev/rt/clib.s);
  * changing it forces a full userland rebuild (every binary bakes this
  * address into its syscall stubs).
