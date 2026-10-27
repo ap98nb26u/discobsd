@@ -461,8 +461,7 @@ startup(void)
 	REG_WAITCNT = 0x4000;
 
 	/*
-	 * EXPERIMENT (branch gba-sd-speedup, stage 2b): overclock EWRAM from
-	 * its default 2 waitstates to 1, via the undocumented internal memory
+	 * Overclock EWRAM from its default 2 waitstates to 1, via the undocumented internal memory
 	 * control register at 0x04000800 (bits 24-27 = EWRAM wait: 0xD = 2
 	 * waits (power-on default 0x0D000020), 0xE = 1 wait, 0xF = lockup).
 	 * Unlike the ROM prefetch above, this speeds up EWRAM - where every
@@ -515,7 +514,8 @@ startup(void)
 	}
 
 	/*
-	 * When User button is pressed - boot to single user mode.
+	 * Always a normal (multi-user) boot: there is no boot prompt or button
+	 * to ask for single-user mode.  init falls back to it when /etc/rc fails.
 	 */
 	boothowto = 0;
 }
