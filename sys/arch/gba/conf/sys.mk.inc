@@ -12,3 +12,10 @@ CC!=	echo "${GCCPREFIX}-gcc -mcpu=arm7tdmi -mabi=aapcs -mlittle-endian -mthumb -
 # Makefiles), so a program can shrink its footprint for the GBA's small
 # user window (e.g. usr.bin/tail's line buffer).
 CFLAGS+=	-DGBA
+
+# User programs link at the GBA's fixed user window (USERRAM), not at
+# sys.mk's lib/elf32-arm.ld address (stm32's RAM): same flags, own script.
+LDFLAGS=-N -nostartfiles -fno-dwarf2-cfi-asm \
+	${LDWARN} \
+	-T${TOPSRC}/sys/arch/gba/conf/elf32-gba.ld \
+	${TOPSRC}/lib/crt0.o -L${TOPSRC}/lib
