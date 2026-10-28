@@ -776,10 +776,11 @@ file /usr/games/worm
 file /usr/games/wump
 
 #
-# GBA examples (/usr/share/examples/gba): gpanel demos, test programs and
-# the beeptest PSG sound test, shipped as cross-built a.out binaries next
-# to their sources (the native cc cannot build gpanel programs yet), plus
-# hello.c/ctest.c to compile on the device, and PCM sound samples (SOUNDS).
+# GBA examples (/usr/share/examples/gba): gpanel demos, test programs,
+# the beeptest PSG sound test and the infloop preemption test, shipped as
+# cross-built a.out binaries next to their sources (the native cc cannot
+# build gpanel programs yet), plus hello.c/ctest.c to compile on the
+# device, and PCM sound samples (SOUNDS).
 # See share/examples/gba/Makefile.
 #
 default
@@ -803,6 +804,7 @@ file /usr/share/examples/gba/gfxtest3.c
 file /usr/share/examples/gba/gfxtest4.c
 file /usr/share/examples/gba/keytest.c
 file /usr/share/examples/gba/beeptest.c
+file /usr/share/examples/gba/infloop.c
 file /usr/share/examples/gba/SOUNDS
 file /usr/share/examples/gba/down15th.s8
 file /usr/share/examples/gba/down15th-st.s8
@@ -822,6 +824,7 @@ file /usr/share/examples/gba/gfxtest3
 file /usr/share/examples/gba/gfxtest4
 file /usr/share/examples/gba/keytest
 file /usr/share/examples/gba/beeptest
+file /usr/share/examples/gba/infloop
 
 # Self-hosting check: rebuild smlrc on the device (selfhost.sh, GBAED).
 default
