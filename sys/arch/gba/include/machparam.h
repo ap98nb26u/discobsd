@@ -189,7 +189,7 @@ __gba_user_data_end(void)
 #define SSIZE           2048            /* initial stack size (bytes) */
 
 /*
- * GBA has no writable SWI vector (0x00000018 is BIOS ROM), so syscalls
+ * GBA has no writable SWI vector (0x00000008 is BIOS ROM), so syscalls
  * are dispatched via a software-simulated SWI: userland calls a fixed,
  * well-known RAM address holding a pointer to the kernel's
  * simulate_swi_via_inline_data() trampoline (see gba/gba/syscall.c),
