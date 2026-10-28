@@ -493,12 +493,18 @@ syscall_handler(int sys_num, struct trapframe *frame)
 	 */
 	{
 		extern char __user_data_start[], __user_data_end[];
+		extern char gba_preempt_tramp_ret[];
 		unsigned lo = (unsigned)__user_data_start;
 		unsigned hi = (unsigned)__user_data_end;
 		unsigned pc = frame->tf_pc & ~1;
 		unsigned rsp = frame->tf_ip;
 
-		if (pc < lo || pc >= hi || rsp < lo || rsp > hi) {
+		/* gba_preempt_tramp (locore.S) resumes the user code itself. */
+		if ((pc < lo || pc >= hi) &&
+		    pc != (unsigned)gba_preempt_tramp_ret)
+			goto bad;
+		if (rsp < lo || rsp > hi) {
+bad:
 			printf("syscall %d: pid %d returns outside user memory:"
 			    " pc=%x sp=%x r0=%x r1=%x r2=%x r3=%x lr=%x psr=%x\n",
 			    sys_num, u.u_procp->p_pid,
