@@ -139,22 +139,30 @@ md_machdep_write(caddr_t dst, caddr_t src, u_int len)
  * EverDrive the cartridge ROM is PSRAM, writable once the register
  * window is unlocked with ROM write-enable on - the setting ed.c's probe
  * uses on GBAED.  Elsewhere (a ROM or other flash cartridge, an emulator)
- * stores to cartridge space go nowhere.  So enable it and try: flip the
- * root image's first halfword, read it back, and put it back.  Runs once,
- * when md0 attaches, before anything has the root open.
+ * stores to cartridge space go nowhere.  So enable it and try a store.
+ * Runs once, when md0 attaches.
  *
- * A root reaching past MD_ED_WINDOW_END stays read-only, and the registers
- * are left alone: on an EverDrive, the write-enabled setting would hide
- * the image's end.
+ * The store goes just past the root image, where md_machdep_swap() puts
+ * swap - unused this early - and never into the image itself: the image
+ * starts with the superblock's magic, and a store that lands but reads
+ * back stale (the PSRAM can lag a read right behind a write, as
+ * md_machdep_write() knows) once left it flipped and unrestored, so the
+ * next boot found no root filesystem.  For the same reason the store is
+ * retried like md_machdep_write() does before being judged.
+ *
+ * A root reaching that far past MD_ED_WINDOW_END stays read-only, and
+ * the registers are left alone: on an EverDrive, the write-enabled
+ * setting would hide the image's end.
  */
 int
 md_machdep_rootrw(void)
 {
-    volatile unsigned short *p = (volatile unsigned short *)__fs_start;
+    u_int start = ((u_int)__fs_end + DEV_BSIZE - 1) & ~(DEV_BSIZE - 1);
+    volatile unsigned short *p = (volatile unsigned short *)start;
     unsigned short v, savewc;
     int ok, t;
 
-    if ((u_int)__fs_end > MD_ED_WINDOW_END) {
+    if (start >= MD_ED_WINDOW_END) {
         printf("md0: root ends past 16MB of cartridge space, read-only\n");
         return 0;
     }
@@ -166,9 +174,9 @@ md_machdep_rootrw(void)
     MD_REG_WAITCNT = savewc & ~MD_WAITCNT_PREFETCH;
     v = *p;
     *p = ~v;
+    for (t = 0; *p != (unsigned short)~v && t < 4; t++)
+        *p = ~v;
     ok = (*p == (unsigned short)~v);
-    for (t = 0; t < 5 && *p != v; t++)
-        *p = v;                         /* (retried as md_machdep_write does) */
     MD_REG_WAITCNT = savewc;
     md_cart_rw = ok;
     return ok;
