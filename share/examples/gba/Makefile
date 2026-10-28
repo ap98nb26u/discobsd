@@ -1,8 +1,8 @@
 # GBA examples: gpanel (/dev/tft0..2) demos and test programs, a port of
 # share/examples/gpanel's tftetris, a PSG sound test (beeptest), a
-# preemption test (infloop), plus small sources for the on-device C
-# toolchain, and PCM sound samples for /dev/audio (see SOUNDS for their
-# source and license).
+# preemption test (infloop), a syscall restart test (sigrestart), plus
+# small sources for the on-device C toolchain, and PCM sound samples for
+# /dev/audio (see SOUNDS for their source and license).
 #
 # Like the rest of share/examples, the sources are installed in
 # /usr/share/examples/gba.  But the GBA's native cc cannot build gpanel
@@ -21,7 +21,8 @@ EXDIR=		/usr/share/examples/gba
 LIBS=		-lgpanel -lc
 
 PROG=		tetris gball gball5 gball5i imgdemo fontchart fontsampler \
-		gfxtest gfxtest2 gfxtest3 gfxtest4 keytest beeptest infloop
+		gfxtest gfxtest2 gfxtest3 gfxtest4 keytest beeptest infloop \
+		sigrestart
 SRCONLY=	hello.c ctest.c
 SOUNDS=		SOUNDS down15th.s8 down15th-st.s8
 
@@ -87,6 +88,10 @@ beeptest:	beeptest.o ${DEPS}
 
 infloop:	infloop.o ${DEPS}
 		${CC} ${CFLAGS} ${LDFLAGS} -o $@.elf infloop.o -lc
+		${ELF2AOUT} $@.elf $@ && rm -f $@.elf
+
+sigrestart:	sigrestart.o ${DEPS}
+		${CC} ${CFLAGS} ${LDFLAGS} -o $@.elf sigrestart.o -lc
 		${ELF2AOUT} $@.elf $@ && rm -f $@.elf
 
 %.o:		../gpanel/fonts/%.c
