@@ -103,26 +103,19 @@ int uartopen(dev_t dev, int flag, int mode)
      * unconditionally regardless of whether anything was actually
      * typed.
      *
-     * Deliberately does NOT call the generic ttyopen() - that also
-     * establishes the controlling-tty association (u.u_ttyp/u.u_ttyd),
-     * which getty's own pre-existing vhangup() call (its normal
-     * per-session setup, unrelated to this session's changes) then had
-     * something real to act on for the first time and sent SIGHUP into -
-     * confirmed on real GBAED hardware: login reached the "login:"
-     * prompt but a SIGHUP arrived and killed/reset whatever was reading
-     * it, right where ttyopen() was tried. vhangup() is a no-op while
-     * u.u_ttyp == NULL (sys_inode.c), so leaving u.u_ttyp unset keeps it
-     * harmless. This console's whole process chain (getty -> login ->
-     * shell, all one continuous boot lineage, not genuinely separate
-     * dial-in sessions) doesn't need real controlling-tty semantics.
+     * Opening the console with no process group makes it the
+     * controlling tty (u.u_ttyp/u.u_ttyd, as ttyopen() does) and puts
+     * the opener at the head of a new foreground group, tp->t_pgrp.
+     * The controlling tty is what ps(1) shows in its TTY column, what
+     * a bare `ps` selects on, and what /dev/tty and vhangup() act on;
+     * t_pgrp is what ^C/^\ signal through gsignal().
      *
-     * But it DOES need the other half ttyopen() would set: the tty's
-     * foreground process group, tp->t_pgrp. ttyinput()'s ^C/^\ handling
-     * signals it via gsignal(t_pgrp, SIGINT), and gsignal() is a no-op
-     * while t_pgrp == 0 (kern_sig.c) - so without this, ^C did nothing
-     * at all, even at an idle prompt. Set t_pgrp (and put the opener in
-     * that group) here, WITHOUT touching u.u_ttyp, so ^C works while
-     * vhangup() stays a no-op.
+     * Unlike ttyopen(), t_pgrp is always set to the opener rather than
+     * kept when non-zero. uartclose() is never reached while a
+     * daemon started from /etc/rc (update) still holds the console,
+     * so the tty would otherwise stay in /etc/rc's group: getty would
+     * join it, and getty's vhangup() would SIGHUP update, as would a
+     * ^C typed at any later shell.
      *
      * Skip init (pid 1): it holds /dev/console open for its own logging,
      * and putting init into the signalled group would let a stray ^C
@@ -150,7 +143,17 @@ int uartopen(dev_t dev, int flag, int mode)
     }
     tp->t_state |= TS_CARR_ON;
 
+    tp->t_dev = dev;
     if (pp->p_pid != 1 && pp->p_pgrp == 0) {
+        u.u_ttyp = tp;
+        /*
+         * cnopen() hands us the uart's own device, but processes open
+         * this tty as /dev/console: record that one, so ps names it
+         * "co" like ttyname(0) does (a bare `ps` compares the two) and
+         * vhangup() revokes the /dev/console opens.
+         */
+        u.u_ttyd = (CONS_MAJOR == UART_MAJOR && minor(dev) == CONS_MINOR) ?
+            makedev(0, 0) : dev;
         tp->t_pgrp = pp->p_pid;
         pp->p_pgrp = pp->p_pid;
     }
