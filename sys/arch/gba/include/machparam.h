@@ -55,7 +55,7 @@
  */
 #ifdef GBAED
 /*
- * GBAED runs its swap on the real SD card, so the EWRAM swap-staging region
+ * GBAED swaps to the EverDrive's PSRAM, so the EWRAM swap-staging region
  * the ROM-root build needs is free to become user RAM: USERRAM fills all of
  * EWRAM after the u/u0 area but the last 1K, which holds the pseudo-ttys
  * (see kern_gbaed.ldscript). -DGBAED is set only in
@@ -118,14 +118,16 @@
 #define btod(x)         (((x) + DEV_BSIZE-1) >> DEV_BSHIFT)
 
 /*
- * Needed by userland tools (ps, w) that read another process's memory
- * directly (via /dev/kmem) rather than through the kernel - they have no
- * way to see the kernel's own __user_data_start/__user_data_end linker
- * symbols (kern_gba.ldscript), so the same USERRAM bounds are duplicated here
- * as plain constants. Previously stale (0x20000000/96K, matching neither
- * this port's actual USERRAM origin nor its 32K size - ps.c wouldn't even
- * compile with them commented out) - keep in sync with kern_gba.ldscript's
- * USERRAM MEMORY block by hand if that ever moves again.
+ * The user memory window (USERRAM in the kernel linker scripts), for code
+ * that needs its bounds as constants: the kernel, and userland tools (ps,
+ * w) that read another process's stack from memory or swap. Keep in sync
+ * with USERRAM by hand.
+ *
+ * The window's start is the same for every GBA kernel, but its end is not
+ * (GBA 64K, GBAED 249K), while userland is built once for both. So in
+ * userland USER_DATA_END asks the running kernel (machdep.user_end, see
+ * <machine/cpu.h>), once. Assembly and compilers other than gcc (the
+ * native Smaller-C) get the GBA build's value.
  */
 #define USER_DATA_START         (0x02001800)
 #ifdef GBAED
@@ -133,7 +135,29 @@
 #else
 #define USER_DATA_SIZE          (64 * 1024)     /* GBA/ROM-root: match kern_gba.ldscript USERRAM/MAXMEM. */
 #endif
+
+#if defined(KERNEL) || defined(__ASSEMBLER__) || !defined(__GNUC__) || \
+    defined(__SMALLER_C__)
 #define USER_DATA_END           (USER_DATA_START + USER_DATA_SIZE)
+#else
+static __inline__ unsigned
+__gba_user_data_end(void)
+{
+	static unsigned end;
+
+	if (end == 0) {
+		extern int sysctl();
+		int mib[2] = { 7, 10 };		/* CTL_MACHDEP, CPU_USER_END */
+		unsigned len = sizeof(end);
+
+		if (sysctl(mib, 2, &end, &len, (void *)0, 0) < 0 ||
+		    len != sizeof(end))
+			end = USER_DATA_START + USER_DATA_SIZE;
+	}
+	return end;
+}
+#define USER_DATA_END           (__gba_user_data_end())
+#endif
 
 #define stacktop(siz)           (USER_DATA_END)
 #define stackbas(siz)           (USER_DATA_END-(siz))
