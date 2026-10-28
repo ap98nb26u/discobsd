@@ -377,6 +377,21 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 			return error;
 		}
 
+	case CPU_USER_END:
+		/*
+		 * End of the user memory window (USERRAM), for <machine/
+		 * machparam.h>'s USER_DATA_END in userland, which is built
+		 * once for kernels with different windows.
+		 */
+		if (namelen != 1)
+			return ENOTDIR;
+		{
+			extern char __user_data_end[];
+
+			return sysctl_rdint(oldp, oldlenp, newp,
+			    (int)__user_data_end);
+		}
+
 	default:
 		return EOPNOTSUPP;
 	}

@@ -18,7 +18,8 @@
 #define	CPU_CONSBLANK		7	/* int: console screen-blank timeout (sec) */
 #define	CPU_KBD_RPT_DELAY	8	/* int: swkbd auto-repeat initial delay (ms) */
 #define	CPU_KBD_RPT_RATE	9	/* int: swkbd auto-repeat interval (ms) */
-#define	CPU_MAXID		10	/* number of valid machdep ids */
+#define	CPU_USER_END		10	/* int: end of the user memory window */
+#define	CPU_MAXID		11	/* number of valid machdep ids */
 
 #ifndef	KERNEL
 #define	CTL_MACHDEP_NAMES { \
@@ -32,5 +33,6 @@
 	{ "console_blank", CTLTYPE_INT }, \
 	{ "kbd_repeat_delay", CTLTYPE_INT }, \
 	{ "kbd_repeat_rate", CTLTYPE_INT }, \
+	{ "user_end", CTLTYPE_INT }, \
 }
 #endif	/* !KERNEL */
