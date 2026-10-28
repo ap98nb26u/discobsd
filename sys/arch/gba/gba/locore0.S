@@ -137,10 +137,6 @@ uarea_loop:
 .arm
 .global gba_intr_handler
 gba_intr_handler:
-    ldr r0, =0x04000000
-    ldr r1, =0x001F
-    strh r1, [r0, #0x6D]
-
     @ interrupts off (again)
     ldr r1, =0x04000208 @ REG_IME
     mov r2, #0
@@ -157,6 +153,12 @@ gba_intr_handler:
     ldr r0, =irq_last_pc
     str r1, [r0]
 #endif
+
+    @ Keep, across the C calls below (r4-r11 are callee-saved), where
+    @ the BIOS frame sits and the interrupted code's CPSR: both are IRQ-
+    @ mode state that SYS mode cannot reach.
+    mov r4, sp
+    mrs r5, spsr
 
     @ change to SYS mode
     mrs r0, cpsr
@@ -179,7 +181,28 @@ gba_intr_handler:
 .global gba_do_schedule
     bl gba_do_schedule
 
+    @ Preemption. The kernel only switches processes and delivers
+    @ signals on its way out of a syscall (userret), so user code that
+    @ never makes one would never give up the CPU or see ^C. When
+    @ gba_irq_preempt() says so, return into gba_preempt_tramp
+    @ (locore.S) instead of the interrupted user code: it saves every
+    @ register, makes a syscall, and then resumes the interrupted code.
+    @ The interrupted pc and CPSR go on the interrupted code's own stack
+    @ for it to find.
+    ldr r0, [r4, #(14*4 + 20)]  @ the interrupted pc + 4 (BIOS frame lr)
+    sub r0, r0, #4
+    ldr r1, =gba_irq_preempt    @ C, in ROM: too far for bl
+    mov lr, pc
+    bx r1
     pop {lr}
+    movs r6, r0
+    beq 1f
+    ldr r1, [r4, #(14*4 + 20)]
+    sub r1, r1, #4
+    stmfd sp!, {r1, r5}         @ [sp] = pc, [sp+4] = CPSR
+    ldr r1, =gba_preempt_tramp + 4
+    str r1, [r4, #(14*4 + 20)]  @ the BIOS returns with subs pc, lr, #4
+1:
 
     @ return to IRQ mode
     mrs r0, cpsr
@@ -187,6 +210,13 @@ gba_intr_handler:
     orr r0, r0, #0x12 @ IRQ
     msr cpsr_c, r0
     nop
+
+    @ gba_preempt_tramp is ARM code: enter it in ARM state, whatever
+    @ state the interrupted code was in.
+    cmp r6, #0
+    mrsne r0, spsr
+    bicne r0, r0, #0x20 @ T
+    msrne spsr_c, r0
 
     pop {r0-r3, r4-r11, r12, lr}
 

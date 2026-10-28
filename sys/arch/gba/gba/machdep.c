@@ -127,11 +127,9 @@ dev_t	pipedev;
 daddr_t	dumplo = (daddr_t)1024;
 
 void gba_do_schedule(void);
-volatile int need_resched;
+int gba_irq_preempt(unsigned pc);
 
-volatile uint16_t frame_count = 0;
 volatile uint32_t myticks = 1;
-volatile int timer0_flag;
 
 #ifdef HANGDUMP
 volatile unsigned irq_last_pc;		/* interrupted pc + 4, see locore0.S */
@@ -303,8 +301,6 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
         }
 #endif
         myticks++;
-        timer0_flag = 1;
-        need_resched = 1;
         /*
          * Advance the kernel clock: this IS the Timer0 interrupt, so
          * hardclock() - which advances lbolt and processes the
@@ -399,6 +395,30 @@ timer0_done:
     /* Acknowledge the sources we handled; if somehow none matched, clear
      * whatever was pending so the interrupt can't latch up. */
     REG_IF = ack ? ack : flag;
+}
+
+/*
+ * Called by gba_intr_handler (locore0.S) after every interrupt, with the
+ * interrupted pc. Nonzero sends the interrupted code through
+ * gba_preempt_tramp (locore.S) and a syscall, so that userret() switches
+ * processes or delivers a signal: without this, a program that makes no
+ * syscalls would keep the CPU and ignore ^C. Only user code is preempted;
+ * the kernel runs with interrupts off except in idle(). The signal test
+ * is CURSIG()'s cheap part: a false positive costs one syscall.
+ */
+int
+gba_irq_preempt(unsigned pc)
+{
+    extern char __user_data_start[], __user_data_end[];
+    struct proc *p;
+
+    if (pc < (unsigned)__user_data_start || pc >= (unsigned)__user_data_end)
+        return 0;
+    if (runrun)
+        return 1;
+    p = u.u_procp;
+    return p->p_sig != 0 &&
+        ((p->p_flag & P_TRACED) || (p->p_sig & ~p->p_sigmask) != 0);
 }
 
 void irq_enable(void)

@@ -64,8 +64,15 @@ Dispatch path:
        (IRQ-mode lr is banked and lost across the mode switch); call
        gba_do_schedule(); IME=1; bx lr (returns via BIOS).
     3. gba_do_schedule() (C, Thumb, IWRAM): read REG_IF; TIMER0 ->
-       myticks++/need_resched/hardclock(); write REG_IF to ACK.
+       myticks++, hardclock() and the rest; write REG_IF to ACK.
        machdep.c:gba_do_schedule()
+    4. Preemption: if user code was interrupted and a process switch or
+       a signal is due (gba_irq_preempt(), machdep.c), the handler
+       pushes the interrupted pc and CPSR on the user stack and returns
+       into gba_preempt_tramp (locore.S) instead. That saves all
+       registers, makes a getpid syscall - whose exit runs userret(),
+       the only place the kernel switches processes or delivers signals
+       - then restores everything via an SVC-mode movs pc, lr.
 
 IME discipline (the load-bearing invariant of this port):
   - The syscall trampoline holds IME=0 for the ENTIRE syscall_handler

@@ -197,3 +197,51 @@ argv:
 	.type	icodeend, %object
 icodeend:
 	.size	icode, . - icode
+
+/*
+ * gba_preempt_tramp - preempt user code from an interrupt.
+ *
+ * gba_intr_handler (locore0.S) returns here instead of to the interrupted
+ * user code when gba_irq_preempt() (machdep.c) wants that code in the
+ * kernel: a process switch is due (runrun) or a signal is pending. This
+ * port only does either on the way out of a syscall (userret), so the
+ * process is made to call one, much as signal delivery makes it call its
+ * handler: every register is saved on its own stack, the syscall runs
+ * userret, and the saved state is then put back exactly - including r12
+ * and lr, which an ordinary syscall return does not preserve, the flags,
+ * and Thumb state.
+ *
+ * Entered in ARM state, SYS mode, with sp pointing at the interrupted pc
+ * and CPSR and every other register as the interrupted code left it.
+ */
+	.text
+	.align	2
+	.arm
+	.globl	gba_preempt_tramp
+	.type	gba_preempt_tramp, %function
+gba_preempt_tramp:
+	stmfd	sp!, {r0-r12, lr}	/* sp -> r0..r12, lr, pc, CPSR */
+	bl	simulate_swi_via_inline_data
+	.word	20			/* SYS_getpid: any harmless syscall */
+	.globl	gba_preempt_tramp_ret
+gba_preempt_tramp_ret:
+	/*
+	 * Back from the kernel, perhaps much later or via a signal handler
+	 * and sigreturn. Restore sp and lr (banked: SYS mode's own), then
+	 * the rest from SVC mode, whose exception return (movs pc, lr)
+	 * loads pc and the whole CPSR - Thumb bit included - at once, with
+	 * no register left over to branch through. IRQs stay masked from
+	 * the moment the saved state is above sp: an interrupt runs on the
+	 * interrupted stack and would overwrite it.
+	 */
+	msr	cpsr_c, #0x9f		/* SYS, IRQ and FIQ off */
+	mov	r0, sp
+	ldr	lr, [r0, #52]
+	add	sp, r0, #64
+	msr	cpsr_c, #0xd3		/* SVC, IRQ and FIQ off */
+	ldr	r1, [r0, #60]
+	msr	spsr_cxsf, r1
+	ldr	lr, [r0, #56]
+	ldmia	r0, {r0-r12}
+	movs	pc, lr
+	.size	gba_preempt_tramp, . - gba_preempt_tramp
