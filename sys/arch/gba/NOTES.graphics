@@ -1,12 +1,12 @@
-GBA graphics: design for a gpanel backend (roadmap #9)
-======================================================
+GBA graphics: design for a gpanel backend
+=========================================
 
-Status: IN PROGRESS (branch gba-gpanel).  Phase 1 (driver /dev/tft0), Phase 2
-(image/glyph/font demos), Phase 3 (Mode 5 double buffering /dev/tft1,tft2 +
-button input) and Phase 4 (console/panel convergence) are implemented and
-real-HW verified, along with the A+B+START / A+B+R escape chords.  Phase 4b
-(console backing-store redraw) remains.  This file is the plan + a few
-implementation notes; a map, not a spec.
+Status: DONE.  Phase 1 (driver /dev/tft0), Phase 2 (image/glyph/font demos),
+Phase 3 (Mode 5 double buffering /dev/tft1,tft2 + button input), Phase 4
+(console/panel convergence) and Phase 4b (console backing-store redraw) are
+implemented and real-HW verified, along with the A+B+START / A+B+R escape
+chords.  This file is the original plan (sections 1-10, kept as the design
+record) + implementation notes; a map, not a spec.
 
 
 0. ESCAPE / FULL-SCREEN APP GUIDELINE  (read first if writing a demo)
@@ -19,16 +19,14 @@ close() -> gpanel_close() clears the screen).  (The combo avoids L/R/SELECT:
 the GBA key matrix cannot distinguish certain 3-key combos - hardware key
 ghosting - and L+R+SELECT is one of them; A+B+START reads cleanly.)
 
-IMPORTANT consequence for app authors: like a real Ctrl-C on this port, the
-signal is delivered on the target's next SYSCALL/TRAP return - there is no
-preemptive delivery to a user CPU-spin.  So a program that displays a static
-image must BLOCK (pause(), or a read), NOT busy-spin `for(;;);`, or it can
-neither be Ctrl-C'd nor escaped by the chord.  Programs that animate (draw
-every frame = continuous ioctls) are interruptible as-is.  The bundled demos
-use `for(;;) pause();` for exactly this reason.  (A truly bulletproof escape
-from an accidental no-syscall spin would need preemptive signal delivery on
-the Timer0 IRQ return - an AST path the port does not have; a deliberate,
-risky kernel change left for later.)
+A+B+R is the same with SIGKILL, for a program that catches or ignores SIGINT.
+
+Like a real Ctrl-C on this port, the signal is delivered on the target's next
+syscall return, or - for user code that makes no syscalls - by preemption
+from the Timer0 interrupt (gba_preempt_tramp, see NOTES.hardware), so even a
+`for(;;);` spin can be interrupted.  A program that displays a static image
+should still BLOCK (pause(), or a read) rather than spin, so it does not burn
+the CPU other processes need; the bundled demos use `for(;;) pause();`.
 
 
 1. GOAL
@@ -56,8 +54,8 @@ Portable layer (reuse verbatim where possible):
                          rect/fill/circle/image/char/text/text_width/
                          fill_triangle).  ALREADY built for ARM (lib/Makefile
                          SUBDIR) as lib/libgpanel.a - what the cross-built GBA
-                         userland links; there is also an ARM lib/libc_aout/
-                         libgpanel for the on-device native a.out toolchain.
+                         userland links.  The on-device native toolchain has
+                         no libgpanel (its libc is usr.bin/as/arm-dev/rt).
   - share/examples/gpanel - the "graphics commands": pixel/line/rect/fill/
                          circle/color/font/speed + games flappy, tftetris.
                          Fonts (5x7, 6x9, lucidasans*, verdana7, digits*)
@@ -71,11 +69,12 @@ all run on the abstract `hw` ops.  Only the lower part is PIC32-specific
 ili9341/st7781/... init_display backends, draw_logo).  GPANEL_MAJOR = 16
 (sys/sys/conf.h).
 
-GBA side today: video is already Mode 3 (240x160, 16bpp linear framebuffer
+GBA side before this work: video is already Mode 3 (240x160, 16bpp linear framebuffer
 at VRAM = 0x06000000).  gba_text.c writes glyph pixels straight into it
 (VRAM[y*240 + x] = colour, BGR555).  So the GBA is ALREADY the exact kind
 of framebuffer gpanel wants - a gpanel pixel is one VRAM store.  conf.c
-cdevsw slot 16 ("hxtft, gpanel, sgpanel") is reserved and currently NOCDEV.
+cdevsw slot 16 ("hxtft, gpanel, sgpanel") was reserved as NOCDEV; it now
+holds gpanel_open/close/ioctl.
 
 
 3. ARCHITECTURE
@@ -107,8 +106,8 @@ Rationale over the alternatives:
     tidy long-term shape, but it EDITS the working pic32 driver and its
     files/conf - risk to another port for no GBA benefit right now.  The
     standing rule is MI-safe + don't break what works.  So: ship the
-    self-contained GBA driver first (zero pic32 changes); leave a TODO to
-    hoist the shared rasterizers into sys/dev/gpanel_raster.c later and have
+    self-contained GBA driver first (zero pic32 changes); a possible later
+    step is to hoist the shared rasterizers into sys/dev/gpanel_raster.c later and have
     BOTH arches include it.  The duplicated code is ~150 lines of stable,
     well-understood raster math.
 
@@ -143,31 +142,26 @@ share/examples is RGB565 too, so it converts consistently.)
 5. CONSOLE / KEYBOARD COEXISTENCE  (must-fix, or graphics gets scribbled on)
 ---------------------------------------------------------------------------
 
-The text console and graphics share the ONE Mode 3 framebuffer.  Two async
-writers currently paint it from idle() (machdep.c) and WILL corrupt a
-graphics screen if left running:
-  - the block cursor blink: gtxt_cursor(lbolt < hz/2)       (machdep.c:721)
-  - the on-screen keyboard:  swkbd_poll()                    (machdep.c:247)
-  - the idle screen-blank:   gtxt_blank(1)                   (machdep.c:703)
+The text console and graphics share the ONE Mode 3 framebuffer.  Async
+writers paint it from the kernel (machdep.c) and would corrupt a graphics
+screen if left running:
+  - the block cursor blink: gtxt_cursor(lbolt < hz/2)       (idle())
+  - the on-screen keyboard:  swkbd_poll()                    (console_input_poll())
+  - the idle screen-blank:   gtxt_blank(1)                   (idle())
 
-Plan: a single "graphics active" flag owned by the gpanel driver.
-  - gpanel_open()  sets it (and may clear the screen);
+Implemented as a single "graphics active" flag owned by the gpanel driver,
+gba_gfx_active() in gba_gpanel.c:
+  - gpanel_open()  sets it (and switches the video mode);
   - gpanel_close() clears it (console resumes; see redraw note below).
   - machdep.c idle() skips the cursor-blink and the screen-blank while it is
     set; swkbd stays hidden (do not draw the keyboard over graphics).
-  - gba_text.c / console output: harmless to leave as-is (the app owns the
-    screen while open), but gtxt_putc should likewise no-op or be avoided
-    while graphics is active - simplest is that nothing writes to the TTY
-    during a full-screen graphics program anyway.
-Expose it as e.g. int gba_gfx_active(void) that machdep.c/swkbd.c test;
-keep the flag in gba_gpanel.c.
+  - gba_text.c: console output and the keyboard stay silent while it is
+    set (the text still goes to the backing store, see below).
 
-On close there is NO text backing store (the console is pixels only), so
-the pre-graphics text cannot be restored.  v1 behaviour: on close, clear to
-black (or leave the last frame) and let the next console output scroll from
-the current cursor row - same as returning from vi today.  A fancier
-"redraw the console" is out of scope for v1 (but see 5.1, which makes it
-natural).
+Restoring the console on close: v1 had no text backing store (the console
+was pixels only), so the next console output just scrolled from the cursor
+row.  Phase 4b added a character backing store in spare VRAM (0x06015000,
+gba_text.c), and gtxt_restore() repaints the console from it on close.
 
 
 5.1  CONVERGENCE: one framebuffer owner (the clean fix for section 5)
@@ -178,9 +172,8 @@ framebuffer currently has THREE independent writers (console, swkbd, a
 future /dev/tft0 app) with no owner.  The structural fix is to converge the
 existing GBA graphics foundation onto the panel layer so there is exactly
 ONE owner of VRAM, and arbitration lives in that one place instead of being
-sprinkled across machdep.c / swkbd.c / gba_text.c.  (User-requested
-direction; adopt it as the end-state, after the self-contained driver
-proves out.)
+sprinkled across machdep.c / swkbd.c / gba_text.c.  (The end-state,
+after the self-contained driver proved out.)
 
 End-state: gba_gpanel.c owns VRAM and exports the kernel-internal
 primitives from section 3.  Its clients are:
@@ -189,8 +182,8 @@ primitives from section 3.  Its clients are:
     - a userland process via /dev/tft0 - an exclusive client.
 The panel layer tracks the active owner; while a userland client holds the
 panel, the console/swkbd draws are suppressed at this single boundary, and
-on release the console redraws itself.  Gotcha #2 then disappears: there is
-no async scribble because there is one arbiter.
+on release the console redraws itself.  The section-5 scribble problem then
+disappears: there is no async scribble because there is one arbiter.
 
 Scope (why this is tractable, not a rewrite): gba_text.c's direct VRAM
 pokes are already concentrated in four helpers -
@@ -203,8 +196,8 @@ route those helpers through the panel primitives (same pixels, just one
 owner), move the owner flag/arbitration into the panel, and - the one real
 addition - give the console a small CHARACTER backing store (<=40x20 cells
 + attribute, ~1-2 KB) so it can redraw after a graphics app or screen-blank
-(today it is pixels-only and cannot restore; this also cleans up the blank
-restore and would let vi repaint without a full app redraw).  Note the two
+(this also cleans up the blank restore and would let vi repaint without a
+full app redraw).  Note the two
 ops the gpanel ABI lacks but the console needs - a scroll/blit and an
 xor-cursor - stay as internal panel entry points, not gpanel ioctls.
 
@@ -235,7 +228,7 @@ transform places them; this is exposed as two devices:
 The scaling is done by the PPU per-scanline, so it costs ~0 CPU - tft1 and tft2
 run at the same speed; pick by whether full-screen or pixel-exact is wanted.
 
-COST NOTE (real-HW, roadmap #9 Phase 3).  The dominant cost of double-buffered
+COST NOTE (real-HW, Phase 3).  The dominant cost of double-buffered
 animation is NOT the mode or the scaling, it is how much of the back page you
 repaint.  A naive "clear the whole 160x128 page + redraw" every frame writes
 ~20,500 px/frame and ran ~4x slower than Mode 3 (and on GBAED stuttered when
@@ -256,8 +249,8 @@ paletted pages are a possible future variant; not needed so far.)
     the gpanel header; guard with "#if GPANEL_MAJOR != 16 #error".  (read/
     write unused: gpanel is ioctl-driven, like the pic32 slot.)
   - Re-run config in each compile dir (GBA, GBAED, GBALOG) so files.gba is
-    picked up - ioconf.c is generated+tracked and its reconfig rule is
-    mtime-based (see the RTC/ioconf gotcha memo), so regenerate deliberately.
+    picked up - ioconf.c is generated but tracked in git, and its reconfig
+    rule is mtime-based, so regenerate deliberately.
   - distrib/gba/mi.gba: add  cdev /dev/tft0  major 16  minor 0  mode 666.
     (libgpanel/examples default to "/dev/tft0".)
 
@@ -266,9 +259,9 @@ paletted pages are a possible future variant; not needed so far.)
 -----------
 
   - libgpanel: lib/libgpanel.a is already built for ARM (lib/Makefile) and
-    is what the cross-built GBA example programs link; the on-device native
-    toolchain has its own ARM lib/libc_aout/libgpanel.  Nothing to port here;
-    just link the demos against it in their GBA build.
+    is what the cross-built GBA example programs link (the on-device native
+    toolchain has none, so the demos ship as cross-built binaries).  Nothing
+    to port here; just link the demos against it in their GBA build.
   - Example programs: build a subset for the GBA image and/or ship sources
     for the on-device cc.  Start with the STATIC demos (no input):
     pixel, line, rect, circle, fill, color, font - these prove the pipeline.
@@ -277,11 +270,11 @@ paletted pages are a possible future variant; not needed so far.)
     tty / stdin.  On GBA the "keyboard" is swkbd, which we hide during
     graphics.  So interactive demos need either (a) read the GBA buttons
     (REG_KEYINPUT) - cleanest for games - or (b) a minimal key path that
-    still works with graphics active.  Treat games as a later phase; v1 is
-    the static demos + a confidence image.
+    still works with graphics active.  Done with (a): tetris, gball and
+    gball5/gball5i read REG_KEYINPUT (share/examples/gba).
 
 Test harness: the same libmgba route used for audio works for video too -
-mgbarun/mgbadump already set a video buffer (core->setVideoBuffer); a small
+mgbarun (usr.bin/as/arm-dev) already sets a video buffer (core->setVideoBuffer); a small
 tool can dump the 240x160 framebuffer to a PPM/PNG after N frames and diff
 it against the expected shape (e.g. "rect drew a red box at x,y").  This
 gives automated, ear-free verification before real-HW.
@@ -302,11 +295,12 @@ gives automated, ear-free verification before real-HW.
            read REG_KEYINPUT directly.  DONE + real-HW: see the section 6 cost
            note (draw incrementally, not whole-page, or it stutters on GBAED).
   Phase 4  CONVERGENCE (section 5.1): route gba_text.c + swkbd.c through the
-           panel primitives, add the console char backing store, move owner
-           arbitration into the panel, delete the section-5 flag.  This is
-           the user-requested end-state; it RETIRES gotcha #2 structurally.
-           Can be pulled earlier (after Phase 1) if the coexistence flag
-           proves fiddly, since Phase 1 already exposes the needed primitives.
+           panel primitives and move owner arbitration into the panel.  This
+           is the end-state; it retires the section-5 scribble problem
+           structurally.  DONE + real-HW; gba_gfx_active() stayed as the
+           single arbitration point that the console and swkbd test.
+  Phase 4b Console character backing store (spare VRAM at 0x06015000) and
+           its repaint on graphics close (gtxt_restore()).  DONE + real-HW.
 
   MI-safety: ALL phases touch ONLY sys/arch/gba/* and distrib/gba/mi.gba,
   with ONE additive shared edit: GPANEL_FLIP in sys/sys/gpanel.h (a new ioctl
@@ -316,14 +310,14 @@ gives automated, ear-free verification before real-HW.
   step that would touch other arches and is left for its own reviewed PR.
 
 
-10. OPEN QUESTIONS (decide during Phase 1)
-------------------------------------------
+10. DECISIONS (open questions settled in Phase 1)
+------------------------------------------------
 
   - Clip policy: clamp out-of-range pixels (safe) vs. trust the app.  pic32
     draw_char clamps; set_pixel does not.  GBA must clamp in set_pixel (a
     stray VRAM store past 240x160 hits other VRAM/OAM).  -> clamp.
   - Should gpanel_open() force the screen to black, or inherit whatever the
-    console left?  Leaning: clear to black on open (matches gpanel_clear
-    being the usual first call anyway) but make it cheap.
+    console left?  -> inherit: gpanel_open() only switches the video mode;
+    programs start with gpanel_clear() anyway.
   - Keep gba_text's Mode-3 assumption documented as a shared invariant so a
     future Mode-5 double-buffer change updates both.

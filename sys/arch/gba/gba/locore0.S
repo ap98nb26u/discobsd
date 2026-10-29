@@ -29,7 +29,7 @@ reset:
     @ with IME=0, but a reboot (cpu_reboot() in machdep.c) is a warm
     @ jump here, and nothing resets I/O space on the way.  The port
     @ relies on interrupts staying masked until the kernel unmasks them
-    @ at a safe point (resume()/longjmp() in locore.S, gba_irq_allow()
+    @ at a safe point (the syscall return in syscall.c, gba_irq_allow()
     @ in machdep.c); an IME left at 1 would let an interrupt in at the
     @ first CPSR I-bit clear, before any of that is set up.
     ldr r0, =0x04000208 @ REG_IME
@@ -48,16 +48,11 @@ reset:
     bne 1b
 
     @ register user intr handler
-    @ The BIOS trampoline (add lr,pc,#0 / ldr pc,[r0,#-4]) does not save
-    @ any registers before jumping to the handler installed here, so a
-    @ plain compiled C function used directly would clobber r0-r3/r12 of
-    @ whatever code was interrupted (harmless while the kernel carefully
-    @ keeps IME=0 through its own register-juggling, but corrupts any
-    @ real userland code the instant IME=1). gba_intr_handler below is
-    @ an asm wrapper that saves/restores r0-r12,lr around the actual work
-    @ (in gba_do_schedule) and is safe to call from arbitrary interrupted
-    @ context - which is why the handler is this wrapper, not a bare C
-    @ function.
+    @ The BIOS IRQ dispatch saves r0-r3, r12 and lr_irq and calls the
+    @ address stored here, in IRQ mode.  gba_intr_handler below is an asm
+    @ wrapper rather than a bare C function because it must mask IME,
+    @ switch to SYS mode, save the interrupted code's own lr, and possibly
+    @ redirect the return into gba_preempt_tramp (locore.S).
     ldr r0, =0x03007FFC
     ldr r1, =gba_intr_handler
     str r1, [r0]

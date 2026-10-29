@@ -1,8 +1,8 @@
 /*
  * Smaller C - ARM (ARMv4T / ARM7TDMI) code generator for DiscoBSD/GBA.
  *
- * Emits GNU-as-compatible ARM assembly text (validated against
- * arm-none-eabi-as/ld before the in-tree as/ld are retargeted). Target is
+ * Emits GNU-as-compatible ARM assembly text, assembled by the in-tree
+ * as_arm (or arm-none-eabi-as). Target is
  * the GBA's ARM7TDMI = ARMv4T: NO movw/movt, NO blx <reg>, NO hardware
  * divide - large constants go through ldr= literal pools, indirect calls
  * use the mov lr,pc / bx idiom, and division is a runtime helper call.
@@ -18,12 +18,10 @@
  * callee-saved registers (r4-r10, its temp-register stack) it uses; the
  * prolog is written with a fixed-width placeholder and back-patched at the
  * epilog, once the frame size and the registers used are known.
- * This is AAPCS-compatible for the register half (interops with the
- * gcc-built libc for calls of up to 4 args).
- *
- * INCREMENT 1: everything except function-call argument passing (a '(' ... ')'
- * user call currently errors out - see GenExpr0). Division/modulo DO work
- * (fixed __aeabi_* runtime calls). See sys/arch/gba/NOTES.toolchain.
+ * Calls follow AAPCS: args 1-4 in r0-r3, the 5th and later on the stack.
+ * Division/modulo are __aeabi_* runtime calls.  Not supported:
+ * struct-by-value, floating point, __interrupt functions.
+ * See sys/arch/gba/NOTES.toolchain.
  */
 
 /* --- register model ------------------------------------------------------ */

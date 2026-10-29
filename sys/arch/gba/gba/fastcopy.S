@@ -1,7 +1,7 @@
 /*
  * bcopy() and bzero() for the GBA kernel, in ARM code in IWRAM.
  *
- * The C versions, built without optimization and fetched from ROM, made
+ * The C versions, fetched from ROM over the 16-bit cartridge bus, made
  * every large copy slow - exec loading a program, swapping a process,
  * the buffer cache - and these run inside system calls with interrupts
  * off, long enough for soft keyboard taps to go unseen.  IWRAM is the

@@ -53,7 +53,8 @@ unsigned int md_wr_fails;
 static int md_cart_rw;
 
 /*
- * A swap transfer is a long CPU copy with interrupts off (splbio), so the
+ * A swap transfer is a long CPU copy with interrupts off (the kernel runs
+ * with REG_IME=0), so the
  * Timer0 audio ISR cannot service the DirectSound ring meanwhile: a sound
  * DMA left running would hit an unmanaged ring wrap and screech.  Idle the
  * sample clock across the copy (as ed.c does around SD DMA), so playback

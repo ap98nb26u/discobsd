@@ -1,16 +1,17 @@
 /*
  * GBA DirectSound PCM playback driver - /dev/audio.
  *
- * Plays raw 8-bit SIGNED PCM, mono or stereo.  Mono (/dev/audio[16]) feeds
- * DirectSound A to both speakers from one ring.  Stereo (/dev/audiost[16])
+ * Plays raw 8-bit SIGNED PCM, mono or stereo.  Mono (/dev/audio[16|4]) feeds
+ * DirectSound A to both speakers from one ring.  Stereo (/dev/audiost[16|4])
  * takes interleaved L,R,L,R... samples, deinterleaves them into a left and a
  * right ring (each half the mono length, so the same total RAM), and plays
  * them through DirectSound A (left) via DMA1 and DirectSound B (right) via
  * DMA2, both clocked by the same Timer1.  NB the GBA's built-in speaker is
  * mono; stereo separation is only heard on headphones / an emulator.
  *
- * Rates: /dev/audio=8192, /dev/audio16=16384, /dev/audio4=4096 (mono) and
- * /dev/audiost[16] (stereo); AUDIO_SETRATE overrides.  On the plain GBA
+ * Rates: /dev/audio=8192, /dev/audio16=16384, /dev/audio4=4096 (mono), and
+ * /dev/audiost, audiost16, audiost4 at the same rates in stereo;
+ * AUDIO_SETRATE overrides.  On the plain GBA
  * (ROM-root build, data in ROM) playback is clean apart from the wrap click below.
  * On GBAED it is USABLE BUT NOT PRACTICAL: the data streams off the SD while
  * playing, and the SD stalls (plus the halved-ring wraps) add audible drop-
@@ -203,15 +204,16 @@ audio_set_timer(void)
 }
 
 /*
- * Suspend/resume the sample clock around an EverDrive SD data transfer (called
- * from ed.c).  Stopping Timer1 stops the FIFO draining, so the sound DMA stops
- * requesting and goes idle WITHOUT being disabled - its source position is
- * preserved, so playback resumes seamlessly.  This keeps the sound DMA off the
- * bus while DMA3 drives the SD: on real EverDrive hardware a sound DMA running
- * concurrently with an SD transfer intermittently wedges the transfer (the cat
- * process then hangs in the SD driver's IME=0 busy-wait, uninterruptible by
- * ^C). The emulator does not reproduce it. No-op when nothing is playing, so
- * ordinary SD I/O is unaffected.
+ * Suspend/resume the sample clock around an EverDrive SD data transfer (ed.c)
+ * and a long swap copy (md_gba.c).  Stopping Timer1 stops the FIFO draining,
+ * so the sound DMA stops requesting and goes idle WITHOUT being disabled -
+ * its source position is preserved, so playback resumes seamlessly.  This
+ * keeps the sound DMA off the bus while DMA3 drives the SD: on real EverDrive
+ * hardware a sound DMA running concurrently with an SD transfer
+ * intermittently wedges the transfer (the cat process then hangs in the SD
+ * driver's IME=0 busy-wait, uninterruptible by ^C). The emulator does not
+ * reproduce it. No-op when nothing is playing, so ordinary SD I/O is
+ * unaffected.
  */
 void
 audio_suspend(void)

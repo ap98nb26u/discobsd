@@ -1,5 +1,5 @@
 /*
- * GBA backend for the portable graphics-panel device: /dev/tft0 and /dev/tft1.
+ * GBA backend for the portable graphics-panel device: /dev/tft0, tft1, tft2.
  *
  * /dev/tft0 (minor 0) is video Mode 3 - a 240x160, 16bpp linear framebuffer
  * at VRAM (0x06000000), the same surface the text console (gba_text.c) draws
@@ -23,10 +23,11 @@
  * (bit15 unused).  set_pixel converts RGB565 -> BGR555 once, so every
  * primitive, image and glyph shows the intended colour.
  *
- * Phase 1 (roadmap #9): drawing primitives + the single-owner guard
- * (gba_gfx_active) that stops the console cursor/keyboard/screen-blank from
- * painting over graphics.  See sys/arch/gba/NOTES.graphics for the full
- * design and the Phase 4 convergence that retires the guard.
+ * Single owner (roadmap #9): while a process holds the panel,
+ * gba_gfx_active() is true and the console, cursor, screen-blank and
+ * keyboard draw nothing to VRAM (the console's text state still advances);
+ * gpanel_close() then repaints the console from its backing store.  See
+ * sys/arch/gba/NOTES.graphics for the design.
  */
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -76,7 +77,7 @@ static int gpanel_active;
 static volatile unsigned short *fb_base = VRAM0;
 static int fb_w = GFB_W;
 static int fb_h = GFB_H;
-static int panel_mode5;		/* open panel is /dev/tft1 (Mode 5, double buffer) */
+static int panel_mode5;		/* open panel is tft1/tft2 (Mode 5, dbuf) */
 static int fb_front;		/* Mode 5: page index currently displayed (0/1) */
 
 int
@@ -171,8 +172,8 @@ rgb565_to_bgr555(int c)
 }
 
 /*
- * Kernel-internal primitives (BGR555 in, no conversion) - the single point
- * that touches VRAM, so the console can later route through it.
+ * Kernel-internal primitives (BGR555 in, no conversion), clamped to the
+ * current panel surface.
  */
 void
 gba_fb_pixel(int x, int y, unsigned short bgr555)

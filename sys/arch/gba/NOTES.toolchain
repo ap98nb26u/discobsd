@@ -1,10 +1,11 @@
-# GBA native C toolchain — Phase 0 spec (Smaller C ARM/Thumb retarget)
+# GBA native C toolchain (Smaller C ARM retarget) - design notes and log
 
 DiscoBSD/GBA. Goal: on-target self-hosted `cc/as/ld` emitting the GBA
-kernel's a.out. This is the read-only recon deliverable: the exact seams
-to fill for ARM/Thumb. No code changed.
+kernel's a.out. Sections 0-6 are the original survey of the seams to fill
+for ARM (written before any code); sections 7 on log the work, in order.
+Where a later section supersedes an earlier one, it says so.
 
-## 0. The pipeline that already exists in-tree (all BSD, MIPS today)
+## 0. The pipeline that existed in-tree (all BSD, originally MIPS only)
 
     cc (usr.bin/cc)  driver: cpp -> smlrc -> as -> ld
       usr.bin/cpp    preprocessor (Frunze)
@@ -35,7 +36,8 @@ Producer of the final executable = `usr.bin/ld`. It MUST match
   `struct reloc {flags, index, offset}` — all in tools/aoututils/include/
   {a.out.h,nlist.h}, which #include sys/exec_aout.h (shared container, no drift).
   `struct reloc` format nibble types today are MIPS (RWORD26, RHIGH16/S,
-  RGPREL...). **ARM needs new format types**: ABS32, ARM PC24 (BL/B),
+  RGPREL...). **ARM needs new format types** (added: RBYTE32 serves ABS32,
+  RARM_PC24 - see sections 8-9): ABS32, ARM PC24 (BL/B),
   Thumb BL/BLX pair, optionally movw/movt (R_ARM_MOVW/MOVT_ABS).
 
 ## 2. smlrc backend contract (what cgarm.c must implement)
@@ -144,8 +146,9 @@ REPLACE:
   veneer / long-branch island / Thumb-interworking / BLX / range-checking; it
   assumes every reloc fits in place. A GBA arm7tdmi thumb-interwork target MUST
   add: BL-range checks, veneer/island synthesis, Thumb-bit (BLX) mode-change.
-  This is the single biggest gap (and the historically delicate part here -
-  project_gba_wildjump_swap_crash).
+  This is the single biggest gap (and historically delicate here: a broken
+  Thumb->ARM veneer once crashed a whole cross-built link).  ld_arm still has
+  no veneers; it links all-ARM code (section 9).
 - **`BADDR 0x7f008000` (ld.c:52)** the MIPS load base -> GBA **0x02001800**
   (our verified __user_data_start); overridable with `-T`. Drop the MIPS
   `_gp`/`gpoffset=0x8000`(137)/RGPREL small-data path (dead on ARM).
@@ -167,8 +170,8 @@ flags=0. Only the load base (0x02001800) and the ARM reloc/veneer logic change.
   DiscoBSD/GBA; diff vs arm-elf-gcc+elf2aout.
 - Phase 2 (native): cross-build the ARM cc set itself into a.out, install to
   the GBA root /usr/{bin,libexec}, run `cc hello.c` on-target. Needs the
-  out-of-swap->kill kernel change (done, awaiting hw test) so a too-big
-  compile fails gracefully instead of panicking.
+  out-of-swap->kill kernel change (done: the scheduler SIGKILLs) so a
+  too-big compile fails gracefully instead of panicking.
 - Phase 3: build libc.a in ARM a.out (tools/aoututils host or native as/ld).
 
 ## 6. Risks
@@ -200,6 +203,8 @@ puts param1 at fp+2*SizeOfWord) AND is AAPCS-compatible:
   push {r4-r10}; ldr ip,=<locals>; sub sp,sp,ip
   => [fp+0]=oldfp [fp+4]=retaddr [fp+8..20]=param regs [fp+24..]=stack params
      fp = entry_sp-24, locals at fp-negative. Epilog restores r4-r11/sp, bx lr.
+  (Superseded by section 13: the saved r4-r10 overlapped the locals; the
+  prolog now saves only the registers used, below the locals.)
 The `<locals>` word is emitted fixed-width (`=0x%08X`) so the single-pass
 prolog is back-patched in place via fgetpos/fsetpos (same trick as cgmips).
 
@@ -216,7 +221,8 @@ instead. (MIPS is immune; its div isn't a call.)
 Calls (increment 2): direct `bl`, recursive, and indirect (function pointer,
 `mov lr,pc; bx ip`) all work for **<=4 args** (loaded into r0-r3 from the
 pushed arg area, arg1->r0 = AAPCS-correct, so it interoperates with the
-gcc-built libc for <=4-arg calls). >4 args -> errorInternal(200) for now.
+gcc-built libc for <=4-arg calls). >4 args -> errorInternal(200) for now
+(since supported: the 5th and later args go on the stack, AAPCS order).
 
 VALIDATION HARNESS (no qemu/sudo here): host-build smlrc with `gcc -DARM ...`;
 compile C -> ARM asm -> arm-none-eabi-as -march=armv4t -> arm-none-eabi-ld
@@ -229,8 +235,9 @@ while/for, &&/||, bitwise, unary, arrays (local+global), globals, pointer args
 params, recursion (fact/fib/gcd/sum), function pointers.
 
 Deferred (documented limits, NOT bugs): struct-by-value, float (both #ifdef'd
-off), >4 args, __interrupt functions (GenIsrProlog=errorInternal(201)), stack
-8-byte alignment for variadic/double libc calls.
+off), >4 args (since added), __interrupt functions
+(GenIsrProlog=errorInternal(201)), stack 8-byte alignment for
+variadic/double libc calls.
 
 cgarm.c committed 839dd10.
 
@@ -238,6 +245,7 @@ cgarm.c committed 839dd10.
 
 Prototype lives in usr.bin/as/arm-dev/ (asarm.c + Unicorn harnesses; a
 development prototype, NOT yet wired into the build - see its README).
+(Later integrated as usr.bin/as/as_arm.c, section 9.)
 
 asarm.c is a from-scratch ARMv4T assembler for the EXACT assembly subset
 cgarm.c emits (it was cleaner than retrofitting the MIPS as's deeply
@@ -356,7 +364,10 @@ loaded exactly like the kernel does - at 0x02001800, ARM entry, user stack with
 argc/argv/envp, syscall vector (rt/run_omagic.py). So `cc hello.c` now yields a
 GBA-loadable a.out that enters ARM and uses real syscalls.
 
-REMAINING for a complete Phase 1:
+REMAINING for a complete Phase 1 (at the time; since done unless noted -
+sections 12-13: on-hardware runs, stdio/printf/malloc, ld_arm -l/-L and
+archives, __aeabi_uidivmod/idivmod in clib.s, >4 args, Phase 2.  Still open:
+Thumb veneers in ld, struct-by-value, float):
 - On-hardware test: drop a built .out into the userland SD/ROM image and run it
   from the shell (needs the ISA-aware-exec kernel 0e9de6f). A proper lib
   Makefile to build crt0.o + libc.a with the native tools. More libc (printf,
@@ -382,7 +393,7 @@ ldarm.c`); harnesses run.py/run_asarm.py/run_ld.py in usr.bin/as/arm-dev/.
 
 Goal: compile smlrc.c ON the GBA with its own toolchain.  smlrc itself
 already streams (one pass, output written as it goes, fgetpos/fsetpos to
-back-patch frame sizes) and fits the 250 KB window.  This step makes the
+back-patch frame sizes) and fits the 249 KB window.  This step makes the
 native libc able to run it, and as_arm able to assemble it.
 
 Native libc (usr.bin/as/arm-dev/rt): new stdio.c.  FILE has the same
@@ -423,7 +434,7 @@ the rt sources and tests, in object and flat (-b) mode.  Device `as`:
 bss 184.5 KB -> 13.6 KB; peak heap for smlrc.s about 40 KB.
 
 Validated in Unicorn (host): native smlrc (smlrc.c compiled by smlrc-arm,
-assembled, linked with crt0 + the new libc.a; 177 KB in the 250 KB window)
+assembled, linked with crt0 + the new libc.a; 177 KB in the 249 KB window)
 compiles stdio.c and smlrc.c itself to output byte-identical to the host
 smlrc-arm (smlrc.c: 38,155 lines, ~32 s in Unicorn).  The cross-built
 device `as` assembles smlrc.s identically under run_file.py.
@@ -474,7 +485,7 @@ On real GBAED, selfhost.sh stage 2 dropped from 1 h 23 min to 7 min
 50 s (10.6x), still a fixed point.  Stage 1 (cross-built smlrc) is
 unchanged at 3 min 43 s.
 
-## 13. Speeding up the self-built compiler (2026-10-20, branch gba-cgarm-opt)
+## 13. Speeding up the self-built compiler (2026-10-20)
 
 rt/run_file.py --profile FILE writes per-basic-block run counts and
 sizes.  Profiling smlrc1 compiling smlrc.c (459 M instructions) showed

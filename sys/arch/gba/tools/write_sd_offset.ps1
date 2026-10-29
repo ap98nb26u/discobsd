@@ -15,8 +15,8 @@
   Physical disk number, as shown by "Get-Disk" (the "Number" column).
 
 .PARAMETER SourceFile
-  Path to the raw image to write (e.g. a DiscoBSD root filesystem
-  image with its own leading MBR/header already stripped).
+  Path to the raw image to write (e.g. the bare DiscoBSD root
+  filesystem image distrib/gba/rootfs.img).
 
 .PARAMETER Offset
   Byte offset on the physical disk to start writing at. This must be

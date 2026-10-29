@@ -178,7 +178,7 @@ BIOS mechanisms relied upon: the boot (header check, then a jump to
 and "bx lr" returns through the BIOS).
 
 
-Display power (roadmap #6, DONE):
+Display power:
   Console screen blanking is implemented as a plain register write, not a
   BIOS SWI. After console_blank_secs idle seconds (SCREEN_BLANK_SECS
   option, default 60; runtime-tunable via the machdep.console_blank
@@ -192,7 +192,7 @@ Display power (roadmap #6, DONE):
 FOLLOW-UP OPPORTUNITIES (not yet done)
 --------------------------------------
   * idle() busy-waits; BIOS Halt (swi 0x02) would additionally cut CPU
-    power/heat on real hardware (a complement to the display blanking of
-    #6). Needs a wake source -- likely keypad IRQ -- and would need
+    power/heat on real hardware (a complement to the display blanking
+    above). Needs a wake source -- likely keypad IRQ -- and would need
     checking in mGBA as well as on real hardware.
   * Keypad IRQ unused (polling suffices today; needed if Halt is added).

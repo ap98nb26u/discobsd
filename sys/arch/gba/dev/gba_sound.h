@@ -4,10 +4,9 @@
 #ifdef KERNEL
 
 /*
- * Minimal GBA sound (roadmap #4). Only the console beep so far; the PSG
- * square-wave channel drives it, no DMA. DirectSound PCM playback (from a
- * file on the root FS or the EverDrive FAT32 partition) is intended to
- * build on this later.
+ * Minimal GBA sound (roadmap #4): the console beep, driven by the PSG
+ * square-wave channel, no DMA. DirectSound PCM playback (/dev/audio) is a
+ * separate driver, gba_audio.h.
  */
 void gba_sound_init(void);	/* enable the sound hardware once, at boot */
 void gba_sound_prime(void);	/* absorb the post-enable dead triggers */

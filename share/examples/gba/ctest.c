@@ -1,5 +1,6 @@
 /*
- * Exercises shipped headers + expanded libc (needs a writable root, i.e. GBAED):
+ * Exercises shipped headers + expanded libc (GBAED only: the compiler needs
+ * its 249K user window, the GBA kernel's is 64K):
  *   cc /usr/share/examples/gba/ctest.c -o /tmp/ctest && /tmp/ctest
  */
 #include <stdio.h>

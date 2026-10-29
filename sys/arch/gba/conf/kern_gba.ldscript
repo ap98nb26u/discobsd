@@ -2,10 +2,12 @@
  * Kernel linker script for the plain GBA (ROM-root / mGBA) build.
  *
  * This build has NO real disk: the root filesystem is a bare UFS image
- * (distrib/gba/rootfs.img, no MBR/partition table) embedded into cartridge
- * ROM in the .fs section below, and served by the md memory-disk driver
- * (dev/md.c) as /dev/md0a. Swap (/dev/md0b) is a separate EWRAM region
- * (SWAP below), unrelated to the embedded image.
+ * (distrib/gba/mdroot.img, copied to sys/arch/gba/dev/rootfs.img; no
+ * MBR/partition table) embedded into cartridge ROM in the .fs section
+ * below, and served by the md memory-disk driver (dev/md.c) as /dev/md0a.
+ * Swap (/dev/md0b) is a separate EWRAM region (SWAP below), unrelated to
+ * the embedded image; run from an EverDrive with a writable root,
+ * md_gba.c moves it into the PSRAM after the image instead.
  *
  * The GBAED (real EverDrive SD) build uses kern_gbaed.ldscript instead; keep
  * the two in sync by hand for anything that is not deliberately per-build
@@ -42,8 +44,7 @@ MEMORY {
      * back to IWRAM for other use. Cost: process kernel-mode execution
      * (every syscall body, and hardclock()/softclock() work done while
      * "running as" a process) now stacks through EWRAM, which is slower
-     * than IWRAM to access - a correctness-over-speed tradeoff while this
-     * port is still getting to a stable interactive shell.
+     * than IWRAM to access - a correctness-over-speed tradeoff.
      */
     U0AREA  (rw!x) : ORIGIN = 0x02000000, LENGTH = 3K    /* 0x0200 0000 - 0x0200 0BFF */
     UAREA   (rw!x) : ORIGIN = 0x02000C00, LENGTH = 3K    /* 0x0200 0C00 - 0x0200 17FF */
@@ -167,13 +168,12 @@ SECTIONS {
     } > IWRAM
 
     /*
-     * dummy section to check free space of IWRAM - .data/.bss/.fast_text
-     * must not grow past SYSVEC. SYSVEC now sits high in IWRAM (0x03007E00,
-     * just below the BIOS-convention IRQ stack at 0x03007F00..0x03007FA0),
-     * so kernel .data/.bss may fill IWRAM right up to it - ~6.5K more than
-     * the old 0x03006400 cap. The SYS/USR kernel stack lives in EWRAM
-     * (locore0.S), so nothing but the small IRQ stack is above SYSVEC.
-     * Bound tracks ORIGIN(SYSVEC) directly so the two can never drift.
+     * Empty; the IWRAM bound is enforced by the top-level ASSERT below.
+     * .data/.bss/.fast_text must not grow past SYSVEC, which sits high in
+     * IWRAM (0x03007E00, just below the BIOS-convention IRQ stack at
+     * 0x03007F00..0x03007FA0), so kernel .data/.bss may fill IWRAM right
+     * up to it. The SYS/USR kernel stack lives in EWRAM (locore0.S), so
+     * nothing but the small IRQ stack is above SYSVEC.
      */
     .stack_check : {
         . = ALIGN(4);

@@ -7,7 +7,8 @@
 # device.
 # ----
 # The plain GBA (ROM-root) kernel instead roots on the ROM memory disk
-# md0a and is read-only (romroot: it skips the boot fsck/mount). The
+# md0a: read-only on a plain cartridge (kern.romroot: /etc/rc skips the
+# boot fsck/mount), writable when run from an EverDrive. The
 # top-level Makefile therefore swaps this file for distrib/gba/fstab.md
 # (/dev/md0a) in the ROM-embedded copy of the image only; the SD image
 # keeps this sd0b version. There is no separate /home partition in
