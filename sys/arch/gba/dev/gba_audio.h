@@ -6,11 +6,11 @@
 /*
  * GBA DirectSound PCM playback - /dev/audio.
  *
- * Writes are raw 8-bit SIGNED mono PCM samples. The driver streams them to
- * DirectSound channel A: hardware Timer1 clocks the sample rate, DMA1 feeds
- * the 8-bit FIFO, and a thick software ring (refilled from the Timer0
- * interrupt) decouples playback from the writer so an SD read stalling the
- * CPU does not immediately starve the FIFO. Default rate 8192 Hz.
+ * Writes are raw 8-bit SIGNED PCM samples: mono, or interleaved L,R for the
+ * stereo minors. Hardware Timer1 clocks the sample rate; DMA1 (and DMA2 for
+ * stereo) feed the DirectSound FIFOs from a thick IWRAM ring that write()
+ * fills and audio_tick() (Timer0 interrupt) tracks and wraps, so an SD read
+ * stalling the CPU does not immediately starve the FIFO. Default rate 8192 Hz.
  *
  * ioctls carry an int sample rate in Hz:
  *   AUDIO_SETRATE  set the playback sample rate (clamped, takes effect now)
@@ -26,7 +26,7 @@
 #ifdef KERNEL
 void audio_init(void);		/* one-time hardware/state setup, at boot */
 void audio_tick(void);		/* ring->FIFO bookkeeping, from Timer0 ISR */
-void audio_suspend(void);	/* pause sample clock across an SD transfer (ed.c) */
+void audio_suspend(void);	/* pause sample clock (SD DMA, swap copy) */
 void audio_resume(void);	/* resume it afterwards */
 
 int audioopen(dev_t dev, int flag, int mode);

@@ -3,9 +3,8 @@
  * sweep), roadmap #4. No DMA, no interrupt, no sample data - just a few
  * register writes that start a short self-terminating tone, so it is safe
  * to call from any context (including the tty output path in interrupt
- * context). DirectSound PCM playback via DMA1/2 - the eventual goal of
- * playing an audio file off the root FS or the EverDrive's FAT32 partition
- * - is a separate, larger piece meant to build on this.
+ * context). DirectSound PCM playback (/dev/audio) is a separate driver,
+ * gba_audio.c.
  *
  * Register/bit layout per GBATEK (problemkaputt.de/gbatek.htm). The GBA
  * PSG channels only work while the master sound enable (SOUNDCNT_X bit7)

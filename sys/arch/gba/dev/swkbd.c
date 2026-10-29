@@ -9,21 +9,22 @@
  * port's on-screen keyboard (3-clause BSD).
  *
  * Controls:
- *   SELECT      show / hide the keyboard (console output is confined to
- *               the rows above it while shown)
+ *   SELECT      show / hide the keyboard (the console always stays
+ *               confined to the rows above the keyboard band)
  *   D-pad       keyboard shown: move the cursor over the keys;
  *               keyboard hidden: send VT100 arrow-key escape sequences
  *               (ESC[A/B/C/D) so vi and other full-screen apps get real
  *               cursor-key input
  *   A           send the highlighted key
- *   B           send Enter (a shortcut for the En key)
+ *   B           send Enter (a shortcut for the Ent key)
  *   L           toggle shift (upper case / the alternate symbols); sticky
  *   R           toggle control; one-shot - the next key sends its ^char
- *               (e.g. c -> ^C, d -> ^D). The Sh and Ct keys on the
+ *               (e.g. c -> ^C, d -> ^D). The Sft and Ctl keys on the
  *               bottom row do the same and light up while active.
  *
- * swkbd_poll() is called from idle() (machdep.c), the same place the
- * serial console is polled, so both input paths coexist.
+ * swkbd_poll() is called from console_input_poll() (machdep.c) - from
+ * idle() and from the Timer0 interrupt - alongside the serial poll, so
+ * both input paths coexist.
  */
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -59,8 +60,8 @@ extern struct tty uartttys[];
 struct swkey {
 	char		n;	/* character sent / drawn, unshifted */
 	char		s;	/* character sent / drawn, shifted */
-	const char     *label;	/* 2 chars for a special key, else 0 */
-	unsigned char	kind;	/* K_CHAR / K_SHIFT / K_CTRL (0 by default) */
+	const char     *label;	/* 3 chars for a special key, else 0 */
+	unsigned char	kind;	/* K_CHAR (0), K_SHIFT, K_CTRL or K_DEL */
 };
 
 /* Every key is drawn KEY_CELLS text cells wide, so key i sits at
@@ -184,7 +185,7 @@ swkbd_show(int on)
 	} else {
 		/*
 		 * Blank the keyboard band, but keep the rows reserved: the
-		 * console stays a fixed 30x15 (pinned in gtxt_init) so its size
+		 * console stays a fixed 40x15 (pinned in gtxt_init) so its size
 		 * always matches the TIOCGWINSZ the kernel reports, which a
 		 * full-screen app (vi) relies on. The bottom band is simply left
 		 * blank while the keyboard is hidden.
@@ -276,19 +277,15 @@ swkbd_move(int dx, int dy)
 }
 
 /*
- * Auto-repeat: hold a movement key or A for SWKBD_REPEAT_DELAY and it
- * then fires every SWKBD_REPEAT_RATE. SELECT, shift and Enter never
- * repeat.
+ * Auto-repeat: hold a movement key or A for the repeat delay and it then
+ * fires at the repeat rate (both below). SELECT, the shoulder modifiers
+ * and B (Enter) never repeat.
  *
- * Timed off myticks (the ~100Hz Timer0 count), NOT the number of frames
- * this function actually processes. Both matter now that swkbd_poll() is
- * driven from the Timer0 interrupt as well as idle(): while a command's
- * output scrolls, each write() runs with interrupts masked (IME=0) so
- * the interrupt - and thus this poll's once-per-frame sampling - is
- * starved, and a frame-counted repeat would take many real seconds to
- * reach its delay (looked like "repeat doesn't work while scrolling").
- * myticks advances in real time regardless of how sparsely we sample, so
- * a held key repeats at the right wall-clock cadence even mid-scroll.
+ * Timed in real time (Timer3, below), NOT by the number of frames this
+ * function actually processes: while a command's output scrolls, each
+ * write() runs with interrupts masked (IME=0), so this poll's
+ * once-per-frame sampling is starved and a frame-counted repeat would
+ * take many real seconds to reach its delay.
  */
 /*
  * Auto-repeat timing is runtime-tunable via the machdep sysctls
@@ -372,12 +369,11 @@ swkbd_poll(void)
 	swkbd_prev = down;
 
 	/*
-	 * When a full-screen /dev/tft0 program exits (e.g. via the escape chord
-	 * below) the panel is released and gpanel_close() clears the screen, but
-	 * the on-screen keyboard - whose drawing was suppressed while graphics
-	 * owned the framebuffer - is left blank.  On the graphics->console
-	 * transition, repaint it if it was shown, so the console comes back with
-	 * its keyboard intact.
+	 * When a full-screen /dev/tft* program exits (e.g. via the escape chord
+	 * below) the panel is released and gpanel_close() repaints the console
+	 * from its backing store.  On the graphics->console transition, also
+	 * repaint the keyboard if it is shown, so its highlight and modifier
+	 * state are current.
 	 */
 	{
 		extern int gba_gfx_active(void);
@@ -398,13 +394,13 @@ swkbd_poll(void)
 	 *                             catches or ignores SIGINT)
 	 * sent to the console tty's foreground process group.  Purpose: an
 	 * always-available escape from a full-screen graphics program (holding
-	 * /dev/tft0, soft keyboard hidden) - the signal ends it, its close()
-	 * releases the panel (gpanel_close clears the screen) and the shell
+	 * /dev/tft*, soft keyboard hidden) - the signal ends it, its close()
+	 * releases the panel (gpanel_close repaints the console) and the shell
 	 * returns.  Signalling the pgrp directly (not via ttyinput) works even
 	 * if the tty is in raw mode; edge-triggered so a held chord does not
-	 * storm signals; the signal lands on the target's next syscall/trap
-	 * return (no preemptive delivery to a user compute loop), so a
-	 * continuously-drawing app is killed at once.  ttyflush drops any char a
+	 * storm signals; the signal is delivered on the target's next syscall
+	 * return or timer-interrupt preemption, so even a syscall-free compute
+	 * loop is stopped.  ttyflush drops any char a
 	 * single-key lead already queued.
 	 *
 	 * Not L/R/SELECT: the GBA reports certain 3-key combinations ambiguously
@@ -429,7 +425,7 @@ swkbd_poll(void)
 	}
 
 	/*
-	 * While a userland program owns the framebuffer (/dev/tft0) the ONLY
+	 * While a userland program owns the framebuffer (/dev/tft*) the ONLY
 	 * input that reaches the console is the escape chords above; every other
 	 * key - the soft keyboard, its SELECT toggle, the hidden-keyboard arrow
 	 * keys - is dropped here, so button activity in a graphics program
@@ -457,8 +453,8 @@ swkbd_poll(void)
 	 * Auto-repeat: while exactly the same repeatable key(s) stay held,
 	 * measure elapsed time with the free-running Timer3 (REG_TM3CNT_L,
 	 * ~HZ=100 Hz, IME-independent - it counts Timer2's hardware overflows,
-	 * see cpu_initclocks()). Wait SWKBD_REPEAT_DELAY for the first repeat,
-	 * then fire every SWKBD_REPEAT_RATE. Using real hardware time rather
+	 * see cpu_initclocks()). Wait the repeat delay for the first repeat,
+	 * then fire at the repeat rate. Using real hardware time rather
 	 * than a count of processed frames keeps the cadence correct even while
 	 * a command's scrolling output starves this poll (the interrupt-driven
 	 * clocks stall under IME=0, but Timer3 does not). All deltas are

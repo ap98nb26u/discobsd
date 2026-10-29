@@ -11,7 +11,6 @@
 architecture    "gba"
 cpu             "ARM7TDMI"                  # Processor variant
 board           "GBA"                       # Board type
-#ldscript        "GBA.ld"                    # Kernel memory linker script
 ldscript        "kern_gba.ldscript"             # Kernel memory linker script
 
 makeoptions     DEBUG="-g"                  # Debug symbols
@@ -37,7 +36,8 @@ options         "HANGDUMP"                  # L+R+SELECT: print where the kernel
 
 # Memory disk (dev/md.c): the root filesystem image linked into the ROM
 # (md0a: read-only, or writable where the "ROM" is RAM - an EverDrive) and
-# swap in EWRAM (md0b); md_gba.c adds the GBA hooks.
+# swap in EWRAM (md0b; in the PSRAM after the root when that root is
+# writable); md_gba.c adds the GBA hooks.
 device          md0
 options         "MD_MACHDEP"                # GBA hooks, arch/gba/dev/md_gba.c
 options         "MD_ROOTIMAGE"              # link the root image (make fs) for md0a

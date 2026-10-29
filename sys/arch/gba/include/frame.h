@@ -17,7 +17,9 @@
 #ifndef _MACHINE_FRAME_H_
 #define _MACHINE_FRAME_H_
 
-#define	INSN_SZ		2	/* Thumb are 2 bytes; some are 4 bytes. */
+#define	INSN_SZ		2	/* stm32 value (one Thumb svc); unused on GBA:
+				   syscall restart backs up SYSCALL_SEQ_SZ
+				   bytes, see gba/syscall.c. */
 
 #define	PSR_C		(1UL << 29U)	/* Carry bit. */
 
@@ -65,11 +67,9 @@ struct	clockframe {
 #define	cf_sp	cf_ip		/* Stack Pointer (as passed by IP) */
 
 /*
- * Exception stack frame of a fault exception.
- * A faultframe encapsulates the machine state when the fault occured.
- *
- * ARMv6-M fault types: HardFault
- * ARMv7-M fault types: HardFault, MemManage, BusFault, UsageFault
+ * Fault exception frame, kept from the stm32 port (Cortex-M HardFault
+ * etc.) for the shared declarations.  The GBA has no such fault
+ * exceptions and does not use it.
  */
 struct	faultframe {
 /* These 8 registers are pushed on stack by hardware in a fault exception. */

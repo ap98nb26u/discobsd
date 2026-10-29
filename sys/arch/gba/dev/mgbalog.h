@@ -44,8 +44,6 @@ void            uartstart(struct tty *tp);
 void            uartputc(dev_t dev, char c);
 char            uartgetc(dev_t dev);
 
-//extern struct tty uartttys[NUART];
-
 #endif /* KERNEL */
 
 #endif /* !_MGBAUART_H */

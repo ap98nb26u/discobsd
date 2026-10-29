@@ -8,9 +8,8 @@
  *
  * The plain GBA (ROM-root / mGBA) build uses kern_gba.ldscript, which embeds
  * the real bare root filesystem in .fs. Keep the two scripts in sync by hand
- * except where they deliberately diverge: the USERRAM/SWAP split is where
- * GBAED can reclaim the EWRAM swap region (ROM-root build only) to enlarge USERRAM -
- * that large-capacity work edits THIS file (and machparam.h's -DGBAED path).
+ * except where they deliberately diverge: GBAED has no EWRAM swap region
+ * (that is ROM-root build only) and gives that space to USERRAM instead.
  */
 
 MEMORY {
@@ -42,53 +41,22 @@ MEMORY {
      * back to IWRAM for other use. Cost: process kernel-mode execution
      * (every syscall body, and hardclock()/softclock() work done while
      * "running as" a process) now stacks through EWRAM, which is slower
-     * than IWRAM to access - a correctness-over-speed tradeoff while this
-     * port is still getting to a stable interactive shell.
+     * than IWRAM to access - a correctness-over-speed tradeoff.
      */
     U0AREA  (rw!x) : ORIGIN = 0x02000000, LENGTH = 3K    /* 0x0200 0000 - 0x0200 0BFF */
     UAREA   (rw!x) : ORIGIN = 0x02000C00, LENGTH = 3K    /* 0x0200 0C00 - 0x0200 17FF */
     /*
-     * USERRAM is just the user process's own addressable data+stack
-     * window; SWAP is md.c's (GBA/mGBA-only) swap staging area, a
-     * *real* EWRAM range that md.c copies to/from
-     * directly (see __swap_start/__swap_end there) - it is NOT a disk
-     * partition on this config.  (GBAED swaps to EverDrive PSRAM
-     * instead - see kern_gbaed.ldscript.)
+     * USERRAM is the user process's own addressable data+stack window
+     * (see kern_gba.ldscript for the history of its size).
      *
-     * USERRAM used to sit right after UAREA's *old* IWRAM location, with
-     * SWAP filling the rest of EWRAM after it (68K) - once u0/uarea
-     * moved to EWRAM (see above), that left ~150K of EWRAM completely
-     * unused between UAREA's new end and USERRAM's old start. Moved
-     * USERRAM to directly follow UAREA and grew SWAP to fill everything
-     * else, reclaiming that dead space: with only one process fitting in
-     * USERRAM at a time, every other loaded-but-not-running process's
-     * data+stack+u-area sits parked in SWAP until sched() finds room to
-     * swap it in (see vm_sched.c).
-     *
-     * Raised from 32K to 64K after /bin/sh (data+bss ~46K, far bigger
-     * than /sbin/init's ~28K) silently overran USERRAM's old end into
-     * SWAP during exec: exec_estab()'s overflow check compared against
-     * MAXMEM (a stale 128K, unrelated to this port's actual physical
-     * window - see machparam.h) instead of the real USERRAM size, so it
-     * never caught the mismatch, and the too-large image was read
-     * straight over both the SWAP region and the fixed stack address
-     * exec_setupstack() computed from the old, too-small window - both
-     * mGBA and real GBAED hardware just went silent right after
-     * "reading a.out image", no crash. MAXMEM now matches USERRAM's
-     * length so this fails cleanly (ENOMEM) instead, for anything still
-     * too big (e.g. /sbin/fsck, ~67K). Every KB added here comes
-     * straight out of SWAP, which must keep shrinking to match - keep
-     * USERRAM, MAXMEM (param.h/machparam.h), and USER_DATA_SIZE
-     * (machparam.h) all in sync by hand if this moves again.
-     */
-    /*
      * GBAED LARGE-CAPACITY LAYOUT: unlike the plain GBA/ROM-root build, GBAED's
      * swap lives in EverDrive PSRAM (PSRAM_SWAP below), so the EWRAM SWAP staging
-     * region that the ROM-root build needs is dead weight here. Reclaim it: USERRAM fills
-     * ALL of EWRAM after the u/u0 area (0x02001800..0x02040000 = 250K, vs the
-     * ROM-root build's 64K), so a single resident process can be up to 250K and
-     * far more can be parked in PSRAM swap. kern_gba.ldscript keeps the 64K
-     * USERRAM + 186K EWRAM SWAP split. Keep LENGTH here in sync with
+     * region that the ROM-root build needs is dead weight here. Reclaim
+     * it: USERRAM fills ALL of EWRAM after the u/u0 area but the last 1K
+     * (0x02001800..0x0203FC00 = 249K, vs the ROM-root build's 64K), so a
+     * single resident process can be up to 249K and far more can be
+     * parked in PSRAM swap. kern_gba.ldscript keeps the 64K USERRAM +
+     * 186K EWRAM SWAP split. Keep LENGTH here in sync with
      * machparam.h's -DGBAED USER_DATA_SIZE and MAXMEM (all 249K) by hand.
      *
      * The last 1K of EWRAM (KEWRAM) is kernel .bss that IWRAM has no room
@@ -118,7 +86,7 @@ __user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
  * independent of the user RAM window).
  *
  * To resize, change PSRAM_SWAP_SIZE/START. The region must stay clear of
- * the kernel image at ORIGIN(FLASH) (~132 KB today; the 1 MB start offset
+ * the kernel image at ORIGIN(FLASH) (about 110 KB; the 1 MB start offset
  * leaves ample margin) and inside the first 16MB of cartridge space: with
  * the configuration ed.c's probe writes (registers on, PSRAM write-enabled)
  * the EverDrive shows only its first 16MB of PSRAM, and 0x09000000 up
@@ -127,7 +95,7 @@ __user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
  * This backs the "big swap, EWRAM stays the exec window" model - many
  * processes (each parked at its real size) rather than one giant process;
  * enough for e.g. a native Smaller C self-host pipeline whose stages each
- * fit the 250 KB EWRAM window and park here between runs.
+ * fit the 249 KB EWRAM window and park here between runs.
  */
 PSRAM_SWAP_SIZE		= 15M;
 PSRAM_SWAP_START	= ORIGIN(FLASH) + 1M;	/* 0x08100000 .. 0x09000000 */
@@ -207,13 +175,12 @@ SECTIONS {
     } > IWRAM
 
     /*
-     * dummy section to check free space of IWRAM - .data/.bss/.fast_text
-     * must not grow past SYSVEC. SYSVEC now sits high in IWRAM (0x03007E00,
-     * just below the BIOS-convention IRQ stack at 0x03007F00..0x03007FA0),
-     * so kernel .data/.bss may fill IWRAM right up to it - ~6.5K more than
-     * the old 0x03006400 cap. The SYS/USR kernel stack lives in EWRAM
-     * (locore0.S), so nothing but the small IRQ stack is above SYSVEC.
-     * Bound tracks ORIGIN(SYSVEC) directly so the two can never drift.
+     * Empty; the IWRAM bound is enforced by the top-level ASSERT below.
+     * .data/.bss/.fast_text must not grow past SYSVEC, which sits high in
+     * IWRAM (0x03007E00, just below the BIOS-convention IRQ stack at
+     * 0x03007F00..0x03007FA0), so kernel .data/.bss may fill IWRAM right
+     * up to it. The SYS/USR kernel stack lives in EWRAM (locore0.S), so
+     * nothing but the small IRQ stack is above SYSVEC.
      */
     .stack_check : {
         . = ALIGN(4);

@@ -144,11 +144,9 @@ ed_sd_speed(uint16_t speed)
 }
 
 /*
- * Same fix as ed_sd_dat_wr()/ed_sd_dat_rd() below - these are the
- * command-line equivalents (sd_cmd()'s per-byte command/response
- * transfer in sd.c), found by re-auditing this file for any
- * remaining unbounded ED_STAT_SD_BUSY waits after the data-line pair
- * turned out not to be the only ones left.
+ * Command-line equivalents of ed_sd_dat_wr()/ed_sd_dat_rd() below
+ * (sd_cmd()'s per-byte command/response transfer in sd.c), with the
+ * same bounded ED_STAT_SD_BUSY wait.
  */
 void
 ed_sd_cmd_wr(uint8_t data)
@@ -183,22 +181,12 @@ ed_sd_cmd_val(void)
 
 /*
  * These two are called once per byte during multi-block writes
- * (sd_write_sectors()'s CRC/token handshake in sd.c) - by far the
- * hottest and, until now, the only remaining unbounded
- * ED_STAT_SD_BUSY waits left in this file (see ed_sd_wait_f0()'s and
- * ed_dma_wait()'s comments for the earlier fixes in this same class
- * of bug). Confirmed by real-hardware testing: fsck -p's first
- * preen-mode repair write hung forever here, right where the earlier
- * fixes (ed_sd_wait_f0(), ed_dma_wait()) didn't reach - this is the
- * first code path in this whole port to exercise a real multi-byte
- * SD write handshake under load. Neither function's signature has a
- * failure return (ed_sd_dat_rd() returns the byte read, not a status
- * code, and threading an error path through every caller in
- * sd_write_sectors() is a bigger change than this needs) - just
- * bound the wait so a stuck card times out instead of freezing the
- * kernel forever; the caller ends up using possibly-stale status
- * bits on timeout, but that's a far smaller problem than a total
- * hang.
+ * (sd_write_sectors()'s CRC/token handshake in sd.c), the hottest
+ * ED_STAT_SD_BUSY waits in this file. The wait is bounded so a stuck
+ * card times out instead of freezing the kernel (fsck -p's first
+ * preen-mode repair write once hung here). There is no error return:
+ * on a timeout the caller sees possibly-stale status bits, and
+ * ed_sd_dat_rd() flags it in ed_sd_dat_rd_wedged.
  */
 void
 ed_sd_dat_wr(uint8_t data)
@@ -216,11 +204,11 @@ ed_sd_dat_wr(uint8_t data)
  * Set by ed_sd_dat_rd() on every call: nonzero if that call's inner
  * ED_STAT_SD_BUSY wait ran all the way to its 50000-iteration cap
  * without the FPGA/card ever releasing BUSY (a "wedge"), zero if BUSY
- * cleared normally. sd_write_sectors()'s per-block ready wait reads it
- * to tell a wedged card (bail at once, so a large outer bound can't
- * multiply the inner cap into a multi-hour hang) from one that is
- * merely slow to finish programming (keep polling) - see the comment
- * there.
+ * cleared normally. sd_write_sectors()'s per-block ready wait and
+ * sd_close_rw()'s post-CMD12 wait read it to tell a wedged card (bail
+ * at once, so a large outer bound can't multiply the inner cap into a
+ * multi-hour hang) from one that is merely slow to finish programming
+ * (keep polling) - see the comment there.
  */
 int ed_sd_dat_rd_wedged;
 
@@ -277,12 +265,7 @@ ed_sd_wait_f0(void)
          * I/O) - this used to be an unbounded "for (;;)", hanging the
          * whole kernel forever with interrupts masked. Bound it and
          * report a timeout like every other wait in this file does,
-         * rather than spin forever. (A post-execve crash right after
-         * this fix was first added turned out to be caused by
-         * booting unix.bin directly as \GBASYS\GBAOS.gba on the
-         * EverDrive rather than through its stock menu - unrelated
-         * to this loop; confirmed by reverting this exact change and
-         * seeing the same crash. Restored as originally written.)
+         * rather than spin forever.
          */
         for (busywait = 0; busywait < 50000; busywait++) {
             resp = ed_reg_rd(ED_REG_STATUS);
@@ -290,9 +273,8 @@ ed_sd_wait_f0(void)
                 break;
         }
         /*
-         * Distinct return codes (2026-09-06) so the read path can
-         * report *why* a fresh CMD18 stream failed to deliver data -
-         * the two conditions need different recovery:
+         * Distinct return codes, kept for diagnosis (sd.c currently
+         * treats any nonzero as a failed read):
          *   1 = ED_STAT_SD_BUSY never cleared (controller wedged busy)
          *   2 = ED_STAT_SDC_TOUT kept asserting for the whole outer
          *       loop (the card itself is signalling a read/command
@@ -313,7 +295,7 @@ ed_sd_dma_wr(const void *src)
 {
     ed_reg_wr(ED_REG_SD_RAM, 0);
     ed_sd_mode(ED_SD_MODE4);
-    audio_suspend();			/* keep the sound DMA off the bus - see above */
+    audio_suspend();		/* sound DMA off the bus: see ed_sd_dma_rd() */
     DMA_SRC = (uint32_t)src;
     DMA_DST = (uint32_t)(ED_REG_BASE + ED_REG_SD_DAT * 2);
     DMA_LEN = 256;
@@ -346,8 +328,10 @@ ed_sd_read_crc_ram(void *dst)
 }
 
 /*
- * DMA into cartridge ROM space (flash-backed SRAM window), needed
- * because a normal 16-bit DMA can't write ROM directly.
+ * Read SD sectors straight into EverDrive PSRAM (cartridge ROM space).
+ * With ED_CFG_AUTO_WE set, the FPGA writes the SD data into PSRAM as
+ * the DMA reads each address; the DMA's own destination is a scratch
+ * buffer.
  */
 static uint8_t
 ed_sd_dma_to_rom(void *dst, int slen)
@@ -383,12 +367,11 @@ ed_sd_dma_rd(void *dst, int slen)
 
     while (slen) {
         /*
-         * Distinct return codes so the caller can report *which*
-         * stage failed (2026-09-06):
+         * Distinct return codes, kept for diagnosis (sd.c currently
+         * treats any nonzero as a failed read):
          *   1 = ED_STAT_SD_BUSY stuck (controller wedged),
          *   2 = card SDC_TOUT (card timed out / never accepted CMD18),
          *   3 = the DMA transfer itself timed out.
-         * These mean very different things for recovery.
          */
         uint8_t wf = ed_sd_wait_f0();
         if (wf != 0)

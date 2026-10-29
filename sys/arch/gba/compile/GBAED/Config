@@ -65,7 +65,7 @@ options         "DST=0"                     # JST has no daylight saving
 # Root filesystem on the SD card (sd0b, 2nd MBR partition). Swap, however,
 # lives in the EverDrive's PSRAM (the md0b "memory disk"), NOT on the SD
 # card: the cartridge ROM/PSRAM window is almost entirely unused on this
-# build (kernel ~132 KB of a 32 MB window) and is writable at runtime
+# build (kernel about 110 KB of a 32 MB window) and is writable at runtime
 # (ed_probe leaves ROM_WE on), so swapping there is far faster than the SD
 # card and removes all swap/SD contention. Swap is volatile, which is fine.
 # See conf/kern_gbaed.ldscript (PSRAM_SWAP_*) and dev/md.c. Crash dumps

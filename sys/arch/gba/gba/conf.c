@@ -97,9 +97,8 @@ nosize(dev_t dev __unused)
 		nosize,		noioctl,	0
 
 /*
- * The RetroDisks require the same master number as the disk entry in the
- * rdisk.c file.  A bit of a bind, but it means that the RetroDisk
- * devices must be numbered from master 0 upwards.
+ * Block major numbers are kept in step with the other DiscoBSD ports;
+ * unused slots stay NOBDEV.
  */
 const struct bdevsw bdevsw[] = {
 	{	/* 0 - sd */
@@ -126,7 +125,7 @@ const struct bdevsw bdevsw[] = {
 	{	/* 5 - spirams */
 		NOBDEV
 	},
-	{	/* 6 - md: memory disk (root image in ROM, swap in RAM) */
+	{	/* 6 - md: memory disk (GBA: root + swap; GBAED: PSRAM swap) */
 #ifdef MD_ENABLED
 		mdopen,		mdclose,	mdstrategy,
 		mdsize,		mdioctl,	0
@@ -242,10 +241,10 @@ const struct cdevsw cdevsw[] = {
 	{	/* 14 - pwm */
 		NOCDEV
 	},
-	{	/* 15 - picga */	/* Ignore this for now - it's WIP. */
+	{	/* 15 - picga (unused; slot kept to preserve major numbers) */
 		NOCDEV
 	},
-	{	/* 16 - gpanel: graphics panel, /dev/tft0 (GBA Mode 3 framebuffer) */
+	{	/* 16 - gpanel: /dev/tft0 (Mode 3), tft1/tft2 (Mode 5) */
 #if GPANEL_MAJOR != 16
 #error Wrong GPANEL_MAJOR value!
 #endif
@@ -326,10 +325,10 @@ isdisk(dev_t dev, int type)
 		return 0;
 
 	switch (major(dev)) {
-	case 0:				/* rd0 */
-	case 1:				/* rd1 */
-	case 2:				/* rd2 */
-	case 3:				/* rd3 */
+	case 0:				/* sd */
+	case 1:				/* sramc */
+	case 2:				/* sdramp */
+	case 3:				/* mrams */
 	case 4:				/* sw */
 	case 6:				/* md */
 		return 1;

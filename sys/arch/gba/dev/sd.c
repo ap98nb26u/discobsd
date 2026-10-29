@@ -123,10 +123,10 @@
  * How many times card_write() re-issues a whole failed multi-block
  * write before giving up (mirrors card_read()'s recovery). Real
  * hardware shows the dominant write failure is a per-block ready wait
- * timing out on a responsive-but-slow card under sustained swap-stream
- * writes; a retry re-sends CMD25 after the card has had more real time
- * to finish programming, which reliably clears it (the swap layer's own
- * retry already recovered these before this existed).
+ * timing out on a responsive-but-slow card under sustained writes
+ * (first seen when swap was still on the SD card); a retry re-sends
+ * CMD25 after the card has had more real time to finish programming,
+ * which reliably clears it.
  */
 #define SD_WRITE_RETRIES        5
 
@@ -149,7 +149,7 @@ static uint32_t sd_disk_addr;          /* currently open 512-byte sector, or ~0 
 
 /*
  * Set the moment a CMD18/CMD25 is *issued*, cleared only once a CMD12
- * has actually been sent to close it (2026-09-06).
+ * has actually been sent to close it.
  *
  * sd_disk_addr alone could not distinguish "no transfer is open, so
  * there is nothing to close" from "a transfer was started but we don't
@@ -412,7 +412,7 @@ sd_close_rw(void)
      * This wait used to be a single bound of 800 polls, the same value
      * the per-block wait outgrew for the same reason.  Real GBAED
      * hardware still hit it on a responsive card during a long
-     * compile (smlrc self-build, 2026-10-19): the write was then
+     * compile (the smlrc self-build): the write was then
      * redone by card_write()'s retry, so nothing was lost, but each
      * hit printed a warning and rewrote the whole transfer.
      * sd_shutdown_flush widens the budget for the final pre-reboot
@@ -457,8 +457,8 @@ sd_open_read(uint32_t saddr)
      * ed_sd_dma_rd() - but ONLY when sd_open_settle is set. On real
      * GBAED hardware this SDHC card intermittently ACKs CMD18 (sd_cmd
      * returned 0 above) yet then stalls the data stream so the first
-     * data-ready wait times out (ed_sd_wait_f0() -> SDC_TOUT, i.e.
-     * "dma failed 2 (fresh stream)"). A brief delay after CMD18 lets
+     * data-ready wait times out (ed_sd_wait_f0() -> SDC_TOUT). A brief
+     * delay after CMD18 lets
      * the card prepare the multi-block stream and avoids that.
      *
      * It is gated on sd_open_settle rather than done on every open
@@ -469,8 +469,8 @@ sd_open_read(uint32_t saddr)
      * for its retry after a failed read - the common seek stays fast,
      * and the rare stall is recovered cheaply here instead of by the
      * heavy card_init() path. Plain CPU busy-wait (no usable timebase
-     * on this port); interrupts left enabled - this runs during normal
-     * block I/O and must not stall the scheduler.
+     * on this port); like all kernel code it runs with interrupts
+     * masked, so keep it short.
      */
     if (sd_open_settle) {
         volatile uint32_t settle;
@@ -508,8 +508,8 @@ sd_read_sectors(uint32_t sd_addr, void *dst, uint16_t slen)
     resp = ed_sd_dma_rd(dst, slen);
     if (resp) {
         /*
-         * Tear the streaming read down before reporting failure
-         * (2026-09-06). The fast path above deliberately keeps a
+         * Tear the streaming read down before failing. The fast path
+         * above deliberately keeps a
          * multi-block read (SD_CMD18) open across calls and skips the
          * close/reopen whenever the caller asks for exactly the next
          * sequential sector - but a failed DMA leaves that stream
@@ -621,11 +621,11 @@ sd_write_sectors(uint32_t sd_addr, const void *src, uint16_t slen)
          *
          *  - Card responsive but still programming: each ed_sd_dat_rd()
          *    returns promptly (inner BUSY wait clears, wedged==0) with a
-         *    non-0xff byte; the card simply needs more polls. Real-
-         *    hardware telemetry across three SD cards found this wait
-         *    needing up to ~730 iterations under sustained swap-stream
-         *    writes, worst right after a cold boot, and EVERY timeout
-         *    observed was a responsive card, never a wedge. The polls
+         *    non-0xff byte; the card simply needs more polls. Real-hardware
+         *    telemetry across three SD cards found this wait needing up to
+         *    ~730 iterations under sustained swap-stream writes (when swap
+         *    was on the SD card), worst right after a cold boot, and EVERY
+         *    timeout observed was a responsive card, never a wedge. The polls
          *    are cheap, so give the responsive case a generous budget.
          *
          *  - Card/FPGA wedged: ed_sd_dat_rd()'s own inner BUSY wait runs
@@ -949,13 +949,10 @@ card_write(int unit, unsigned offset, char *data, unsigned bcount)
      * Retry a failed write in full, mirroring card_read()'s recovery
      * loop. The dominant real-hardware write failure is a per-block
      * ready wait timing out mid-stream on a responsive-but-slow card
-     * under sustained swap-stream writes (see sd_write_sectors()); each
-     * retry re-issues CMD25 from the start after the card has had more
-     * real time to finish programming, which is exactly why the swap
-     * layer's own outer retry already recovered these. Doing it here too
-     * means ordinary filesystem writes - which have no such retry above
-     * them - get the same recovery, and the transient no longer surfaces
-     * as an EIO or floods the console.
+     * under sustained writes (see sd_write_sectors()); each retry
+     * re-issues CMD25 from the start after the card has had more real
+     * time to finish programming. Filesystem writes have no retry above
+     * them, so without this the transient would surface as an EIO.
      */
     for (tries = 0; tries < SD_WRITE_RETRIES; tries++) {
         if (sd_write_sectors(sd_addr, data, slen) == 0)
@@ -1213,8 +1210,9 @@ bad:    bp->b_flags |= B_ERROR;
 #endif
 
     /*
-     * A failed card_read()/card_write() is an I/O error: swap() then
-     * panics instead of carrying on with stale data.
+     * A failed card_read()/card_write() is an I/O error (EIO), so
+     * callers such as exec and the filesystem never carry on with stale
+     * data.
      */
     if (bp->b_flags & B_READ) {
         if (!card_read(unit, offset, bp->b_addr, bp->b_bcount)) {

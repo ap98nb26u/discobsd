@@ -27,10 +27,10 @@ dir /tmp
 #
 # This list is the set both reference ports (pic32 AND stm32) ship - their
 # agreed common headers. Headers where the two ports diverge are left out
-# pending a separate decision: stm32-only fault.h/intr.h/mpuvar.h; the
-# per-port hardware-register header (pic32 ships pic32mx.h, the GBA analog
-# is gba.h); and the GBA-only gba_syscall.h/syscall.h/sched_test.h that
-# neither reference port has.
+# pending a separate decision: intr.h and mpuvar.h (stm32 has them, pic32
+# does not); the per-port hardware-register header (pic32 ships pic32mx.h,
+# the GBA analog is gba.h); and the GBA-only gba_syscall.h that neither
+# reference port has.
 #
 default
 filemode 0664

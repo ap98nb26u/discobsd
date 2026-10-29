@@ -44,7 +44,8 @@ EverDrive's PSRAM). The card uses an MBR partition table:
 
  * Partition 1 - the EverDrive's own FAT32 boot partition (menu / firmware).
  * Partition 2 - the DiscoBSD root file system.
- * Partition 3 - crash dumps (optional).
+ * Partition 3 - unused (reserved for crash dumps, which the port does not
+   implement).
 
 Write the DiscoBSD root file system image `rootfs.img` (built by the top-level
 `make`, see below) onto partition 2 of the SD card, for example with `dd`:
@@ -75,13 +76,16 @@ Shut the system down with:
 
 ## Building DiscoBSD/gba on a Unix-like host
 
-Build both kernels (GBA and GBAED) and the root file system image with:
+Build the kernels (GBA, GBALOG and GBAED) and the root file system image
+with:
   ```sh
-    $ make MACHINE=gba MACHINE_ARCH=arm all
+    $ make MACHINE=gba MACHINE_ARCH=arm distribution
   ```
+(`make ... all` builds the same, but does not install a fresh `/etc` into
+the image.)
 
 This produces `distrib/gba/rootfs.img` and the `unix.bin` / `unix.hex` kernels
-in `sys/arch/gba/compile/GBA` and `sys/arch/gba/compile/GBAED`.
+in `sys/arch/gba/compile/GBA`, `GBALOG` and `GBAED`.
 
 A single kernel can be built independently, for example:
   ```sh

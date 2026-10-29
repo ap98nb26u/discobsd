@@ -28,14 +28,11 @@ void cpu_initclocks(void) {
     REG_TM0CNT_H = 0x00C3;
 
     /*
-     * Timer1 is intentionally left UNCONFIGURED here - it is reserved free
-     * for PCM sound DMA. The GBA can clock the DirectSound FIFO only off
-     * Timer0 or Timer1 (SOUNDCNT_H timer-select bit), and Timer0 is the
-     * hardclock, so Timer1 is the one audio can use. The software keyboard
-     * used to run its auto-repeat timing off a free-running Timer1 here,
-     * but that was moved to the free-running Timer3 (the clock catch-up
-     * counter, also IME-independent and read-only shared - see swkbd.c and
-     * the Timer2/Timer3 setup below), freeing Timer1 entirely.
+     * Timer1 is not configured here: gba_audio.c uses it as the PCM sample
+     * clock. The GBA can clock the DirectSound FIFO only off Timer0 or
+     * Timer1 (SOUNDCNT_H timer-select bit), and Timer0 is the hardclock.
+     * The software keyboard times its auto-repeat off Timer3 (see swkbd.c
+     * and the Timer2/Timer3 setup below).
      */
 
     /*
@@ -43,24 +40,25 @@ void cpu_initclocks(void) {
      * software clock cannot lose time under load.
      *
      * A GBA timer interrupt has no pending count: every Timer0 overflow
-     * that happens while IME=0 (the whole of every syscall, and any
-     * splhigh/splbio region) collapses into the single interrupt serviced
+     * that happens while IME=0 (the whole of every syscall) collapses
+     * into the single interrupt serviced
      * when IME is re-enabled, so hardclock() ran once for however many
      * ticks really elapsed and the clock drifted long in proportion to
      * load (`sleep`/`time`/itimers all overshot). To recover the lost
      * ticks the Timer0 ISR needs to know how many overflows really
-     * happened; a free-running counter provides that.
+     * happened; a hardware counter that keeps counting under IME=0
+     * provides that.
      *
-     * Timer2 is a second free-running timer clocked exactly like Timer0
-     * (same /1024 prescaler and reload), so it overflows at the same HZ
-     * rate in real hardware time, IRQ bit off. Timer3 is chained to it in
-     * count-up mode (increments once per Timer2 overflow): GBA count-up
-     * timers count the *preceding* timer's overflows, so Timer3 counts
-     * Timer2 (not Timer0 - Timer1 is the PCM sample clock and is left
-     * alone). Timer3 therefore advances once per intended hardclock
-     * tick regardless of the IME mask; gba_do_schedule() reads its delta
-     * and replays exactly that many hardclock() calls. Timer3 wraps only
-     * every 65536 ticks (~11 min), far longer than any masked window.
+     * Timer2 is a second timer clocked exactly like Timer0 (same /1024
+     * prescaler and reload, so it wraps every tick), so it overflows at the
+     * same HZ rate in real hardware time, IRQ bit off. Timer3 is chained to
+     * it in count-up mode (increments once per Timer2 overflow): GBA count-up
+     * timers count the *preceding* timer's overflows, so Timer3 counts Timer2
+     * (not Timer0 - Timer1 is the PCM sample clock and is left alone). Timer3
+     * therefore advances once per intended hardclock tick regardless of the
+     * IME mask; gba_do_schedule() reads its delta and replays exactly that
+     * many hardclock() calls. Timer3 wraps only every 65536 ticks (~11 min),
+     * far longer than any masked window.
      *
      * 0x0083 = enable | /1024 prescaler (no IRQ); 0x0084 = enable |
      * count-up (prescaler ignored). Order matters: start Timer2 before the

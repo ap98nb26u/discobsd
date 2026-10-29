@@ -69,8 +69,7 @@ longjmp:
 	.globl	resume
 	.type	resume, %function
 resume:
-	@ u0area/uarea live in EWRAM now, not IWRAM - see kern_gba.ldscript's
-	@ U0AREA/UAREA MEMORY block for the current addresses and why.
+	@ u0 and u live in EWRAM (U0AREA/UAREA in kern_gba*.ldscript).
 	/* Disable interrupts. */
 	mrs r3, cpsr
 	orr r3, r3, #0x80
@@ -85,14 +84,8 @@ resume:
 	/*
 	 * No remap needed - this is the "process 0 resuming itself" case
 	 * (u.u_procp->p_addr already equals u, so a1==r2 here). Label 2:
-	 * below is ordinary ARM code within this same .arm-scoped function
-	 * (no mode switch between here and there), so a plain branch stays
-	 * in ARM - unlike the removed "ldr r3,=(2f+1); bx r3", which forced
-	 * the Thumb bit and made the CPU decode those ARM-encoded bytes as
-	 * Thumb instead, corrupting execution. This path is only exercised
-	 * the first time process 0 resumes via its own u_rsave (every other
-	 * resume() call in this port always had a genuine u/u0 remap to do,
-	 * taking the 1: branch below instead, which never hit this bug).
+	 * below is ARM code in this same function, so a plain branch keeps
+	 * ARM state.
 	 */
 	b	2f
 	.pool				/* Insert literal pool for labels. */
@@ -140,7 +133,6 @@ resume:
 	.globl	icode
 	.type	icode, %object
 icode:
-	@.thumb_func
 	.type	icode1, %function
 icode1:
 	movs	r0, #(sbininit - icode)	/* Offset for /sbin/init path. */
@@ -161,12 +153,12 @@ icode1:
 	ldr	r12, =(__user_data_end - 1024)
 
 	.globl	simulate_swi_via_inline_data
-	@svc     #11			/* Make SYS_execv syscall. */
+	@ SYS_execv
 	ldr	r3, =simulate_swi_via_inline_data
 	mov	lr, pc			/* lr = addr of the .word below, */
 	bx	r3			/*   matching CALL_SIMSYS's convention. */
 	.word	11
-	@svc     #1			/* Make SYS_exit syscall. */
+	@ SYS_exit
 	ldr	r3, =simulate_swi_via_inline_data
 	mov	lr, pc
 	bx	r3

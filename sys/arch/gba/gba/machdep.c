@@ -184,9 +184,9 @@ gba_hang_dump(void)
  * - serviced while a command runs, so the keyboard stays usable during
  * scrolling output and a ^C lands as a posted SIGINT the command takes
  * at its next syscall return (userret); output-heavy commands syscall
- * constantly, so it is prompt. (A pure compute loop that never syscalls
- * still won't see it until it does - the interrupt return path does not
- * run userret - but that is rare and out of scope here.)
+ * constantly, so it is prompt. (A loop that never syscalls is sent
+ * through one by the interrupt return path instead - see
+ * gba_irq_preempt().)
  *
  * console_poll_busy guards re-entrancy: idle() runs this with interrupts
  * enabled, so a Timer0 tick can land in the middle of it and re-enter -
@@ -305,27 +305,24 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
          * Advance the kernel clock: this IS the Timer0 interrupt, so
          * hardclock() - which advances lbolt and processes the
          * timeout/callout queue - must be called here directly.
-         * (Earlier it was missing entirely: TIMER0's interrupt fired,
-         * but nothing called hardclock(), so a tsleep() with a real
-         * timeout - e.g. select()'s ts argument - computed a valid
-         * wakeup tick and then waited forever, since nothing ever
-         * checked whether it had expired.)
          *
-         * Catch-up: a GBA timer interrupt has no pending count, so every
-         * Timer0 overflow that happens while IME=0 (the whole of every
-         * syscall, plus any splhigh/splbio region) collapses into the one
-         * interrupt serviced when IME is re-enabled - one hardclock() for
-         * however many ticks really elapsed. That made the software clock
-         * run slow in proportion to system load (`sleep`, `time`, itimers
-         * all drifted long). Timer3 counts one per intended tick in real
-         * hardware time regardless of the IME mask (a count-up cascade off
-         * the free-running Timer2 - see cpu_initclocks()), so its delta
-         * since the last service is exactly how many ticks we owe. Call
-         * hardclock() that many times; the callout wheel and schedcpu()
-         * re-arm on their own periods, so each timeout fires at its correct
-         * caught-up tick rather than N times. Bounded so a one-off long
-         * freeze can't spin the ISR unreasonably (a residual above the cap
-         * is picked up on the following interrupts).
+         * Catch-up: a GBA timer interrupt has no pending count, so
+         * every Timer0 overflow that happens while IME=0 (the whole
+         * of every syscall) collapses into the one interrupt
+         * serviced when IME is re-enabled - one hardclock() for
+         * however many ticks really elapsed. That made the software
+         * clock run slow in proportion to system load (`sleep`,
+         * `time`, itimers all drifted long). Timer3 counts one per
+         * intended tick in real hardware time regardless of the IME
+         * mask (a count-up cascade off Timer2, which wraps at
+         * Timer0's 100 Hz rate - see cpu_initclocks()), so its delta
+         * since the last service is exactly how many ticks we owe.
+         * Call hardclock() that many times; the callout wheel and
+         * schedcpu() re-arm on their own periods, so each timeout
+         * fires at its correct caught-up tick rather than N times.
+         * Bounded so a one-off long freeze can't spin the ISR
+         * unreasonably (a residual above the cap is picked up on the
+         * following interrupts).
          */
         {
             static uint16_t last_tm3;
@@ -468,9 +465,8 @@ startup(void)
 	/*
 	 * Enable the GBA ROM prefetch buffer (WAITCNT bit 14). The cartridge
 	 * bus powers up at its slowest setting (WAITCNT=0x0000: WS0 4/2
-	 * cycles, prefetch off - confirmed on real GBAED hardware), and this
-	 * port runs entirely from ROM yet never configured it, so every
-	 * instruction fetch paid the full waitstate. Prefetch speeds up
+	 * cycles, prefetch off - confirmed on real GBAED hardware), so every
+	 * ROM instruction fetch pays the full waitstate. Prefetch speeds up
 	 * sequential opcode fetch from ROM with no effect on the timing of
 	 * data accesses (LDR/STR to the EverDrive FPGA registers and SD DMA),
 	 * so it does not disturb the reliability-critical cart/SD transfer
@@ -584,8 +580,8 @@ extern void cpu_initclocks(void);
 
 /*
  * Set by the RTC driver's probe (gba/dev/rtc.c) when a real-time clock
- * is found. Left NULL on builds/hardware without one (e.g. the mGBA
- * config, which does not compile rtc.c) so inittodr() below can fall
+ * is found. Left NULL on builds/hardware without one (e.g. the GBA and
+ * GBALOG configs, which do not configure rtc0) so inittodr() below can fall
  * back cleanly. A function pointer rather than a direct call avoids an
  * unresolved reference to the RTC driver when it isn't configured in.
  */
@@ -679,20 +675,15 @@ config(void)
 
 /*
  * Toggle the GBA's global interrupt master enable around swtch()'s idle
- * wait. The syscall trampoline (gba/syscall.c) keeps REG_IME=0 for the
- * entire duration of syscall_handler(), because it uses r0-r2 as live
- * scratch across several raw instructions with no protection against a
- * reentrant interrupt (confirmed via GDB: enabling REG_IME mid-trampoline
- * let an interrupt clobber r0-r2 with garbage, crashing the very next
- * syscall). But that leaves a real deadlock: select()'s tsleep()+swtch()
- * can genuinely block waiting on a timeout, and swtch()'s idle() loop is
- * ordinary compiler-generated C (a normal function call boundary, so no
- * live scratch registers to protect) - if TIMER0 can never fire while
- * idling, hardclock()/softclock() can never run to expire that timeout,
- * so the sleeper can never be woken. Bracketing exactly the idle() call
- * with these keeps interrupts enabled only while there is truly nothing
- * else running, then re-masks them before resuming whatever process was
- * found, restoring the invariant the syscall trampoline depends on.
+ * wait. The kernel runs with REG_IME=0 (the syscall trampoline in
+ * gba/syscall.c clears it on entry): spl*() are no-ops on this port (see
+ * <machine/intr.h>), so masking IME is the kernel's only protection from
+ * its interrupt handler. That alone would deadlock a sleeper waiting on a
+ * timeout (select()'s tsleep()+swtch()): if TIMER0 can never fire while
+ * idling, hardclock()/softclock() can never run to expire the timeout.
+ * Bracketing exactly the idle() call with these lets interrupts in only
+ * while nothing else runs, and masks them again before swtch() resumes
+ * a process.
  */
 void
 gba_irq_allow(void)
@@ -716,11 +707,9 @@ idle(void)
 	 * Let TIMER0 fire while we idle so a sleeper blocked with a real
 	 * timeout (e.g. select()) can eventually be woken by hardclock()/
 	 * softclock(); re-masked before returning (below), before swtch()
-	 * resumes any process, to restore the invariant the syscall
-	 * trampoline (gba/syscall.c) depends on. This bracketing used to
-	 * live in the MI swtch() (kern/kern_synch.c); moved here to keep
-	 * that file machine-independent. gba_irq_allow/block just toggle
-	 * REG_IME (see gba_irq_allow() above for the full rationale).
+	 * resumes any process, since the kernel runs with IME=0.
+	 * gba_irq_allow/block just toggle REG_IME (see gba_irq_allow()
+	 * above for the full rationale).
 	 */
 	gba_irq_allow();
 
@@ -733,14 +722,13 @@ idle(void)
 	led_control(LED_KERNEL, 0);
 
 	/*
-	 * No RX interrupt exists on this port's UART (see the big comment
-	 * on uart_poll_input() in arch/gba/dev/mgba_uart.c for the full
-	 * story) - poll for waiting input here instead, since this is the
-	 * one place in the scheduler loop guaranteed to run with
-	 * interrupts enabled and no live scratch registers to protect,
-	 * and it's called in a tight loop by swtch() precisely when
-	 * nothing is runnable (e.g. a process blocked in ttread()'s
-	 * sleep() waiting for console input).
+	 * No RX interrupt exists on this port's UART (see the big comment on
+	 * uart_poll_input() in arch/gba/dev/mgba_uart.c for the full story) -
+	 * poll for waiting input here instead, since this is the one place in
+	 * the scheduler loop guaranteed to run with interrupts enabled, and
+	 * it's called in a tight loop by swtch() precisely when nothing is
+	 * runnable (e.g. a process blocked in ttread()'s sleep() waiting for
+	 * console input).
 	 */
 	{
 		/*
@@ -840,8 +828,9 @@ cpu_reboot(void)
 	 * Wipe EWRAM below our own stack so no stale RAM from the previous
 	 * session survives into the next boot: the u/u0 process-context area and
 	 * other fixed-address EWRAM are not covered by reset:'s .bss clear, and
-	 * stale contents there made the rebooted init wild-jump. (Leave the top
-	 * few KB - this function is running on the EWRAM stack at 0x0203FFF8.)
+	 * stale contents there made the rebooted init wild-jump. This runs on
+	 * the kernel stack in UAREA, which the loop clears too, so nothing may
+	 * use the stack after it; the jump below does not return.
 	 */
 	{
 		volatile uint32_t *p = (volatile uint32_t *)0x02000000;
@@ -918,17 +907,7 @@ boot(dev_t dev, int howto)
 			 */
 			(*dump)(dumpdev);
 		}
-		/* Restart from dev, howto. */
-
-		/*
-		 * Reset microcontroller. Was left as a commented-out
-		 * NVIC_SystemReset() (an STM32 call, meaningless on GBA)
-		 * with no GBA-appropriate replacement, so a real reboot(8)
-		 * request (RB_HALT not set) fell all the way through to
-		 * the halt-and-wait-for-a-keypress path below exactly like
-		 * halt(8) does - reboot(8) never actually rebooted
-		 * unattended, silently waiting for a keypress instead.
-		 */
+		/* Restart from dev, howto: see cpu_reboot(). */
 		cpu_reboot();
 		/* NOTREACHED */
 	}
@@ -1083,16 +1062,10 @@ baduaddr(caddr_t addr)
  * UAREA only - see __kernel_data_start/end in kern_gba.ldscript), IWRAM,
  * and flash/ROM.
  *
- * __kernel_data_start/end only ever covered that narrow EWRAM slice,
- * not IWRAM - where this port's actual kernel .data/.bss (every
- * ordinary kernel global, including proc[]/nproc that ps(1) reads via
- * /dev/kmem) lives (see kern_gba.ldscript's IWRAM block and the .data/.bss
- * VMAs in the linked image). Confirmed via ps failing "/dev/kmem: Bad
- * address" on every attempt: mmrw() (dev/mem.c) rejects any address
- * that's *both* badkaddr() and baduaddr(), and an IWRAM address is
- * neither in this narrow EWRAM range nor in USERRAM, so every kernel
- * global outside that one small EWRAM slice was unreadable through
- * /dev/kmem.
+ * IWRAM holds the kernel's .data/.bss (proc[], nproc and the other
+ * globals ps(1) reads via /dev/kmem), so it must be accepted here:
+ * mmrw() (dev/mem.c) rejects an address that is both badkaddr() and
+ * baduaddr().
  */
 int
 badkaddr(caddr_t addr)
@@ -1233,7 +1206,6 @@ bcmp(const void *m1, const void *m2, size_t nbytes)
 int
 copyout(caddr_t from, caddr_t to, u_int nbytes)
 {
-	/* printf("copyout(from=%p, to=%p, nbytes=%u)\n", from, to, nbytes); */
 	if (baduaddr(to) || baduaddr(to + nbytes - 1))
 		return EFAULT;
 	bcopy(from, to, nbytes);

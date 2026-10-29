@@ -16,10 +16,6 @@
 
 #include <machine/frame.h>
 
-#if 0
-#define DIAGNOSTIC
-#endif
-
 /*
  * Send an interrupt to process.
  *
@@ -109,10 +105,10 @@ sendsig(sig_t p, int sig, long mask)
  * has been taken.  Reset signal mask and
  * stack state from context left by sendsig (above).
  * Return to previous pc and ps as specified by
- * context left by sendsig. Check carefully to
- * make sure that the user has not modified the
- * ps to gain improper priviledges or to cause
- * a machine fault.
+ * context left by sendsig. Only the condition
+ * flags of sc_psr reach the CPU (the syscall
+ * return does msr cpsr_f), so a forged ps cannot
+ * change the mode or interrupt masks.
  */
 void
 sigreturn(void)

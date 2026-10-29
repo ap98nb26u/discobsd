@@ -33,8 +33,8 @@ dir /var/run
 # Major Minor Name  Device
 # -------------------------
 #   0     0   sd0   Main SD card
-#   0     1   sd0a  Partition 1: root file system
-#   0     2   sd0b  Partition 2: swap space
+#   0     1   sd0a  Partition 1: EverDrive FAT32 boot partition
+#   0     2   sd0b  Partition 2: root file system (GBAED)
 #   0     3   sd0c  Partition 3
 #   0     4   sd0d  Partition 4
 #   0     8   sd1   Second SD card
@@ -55,8 +55,8 @@ dir /var/run
 #   4     2   swap2 Virtual i/o area, allocated from swap space
 #   5     0   sr0   Volatile disk - serial RAM on SPI port (spirams)
 #   6     0   md0   Memory disk: root image in ROM, swap in RAM (md)
-#   6     1   md0a  Partition a: root filesystem
-#   6     2   md0b  Partition b: swap space
+#   6     1   md0a  Partition a: root filesystem (GBA)
+#   6     2   md0b  Partition b: swap space (EWRAM, or EverDrive PSRAM)
 #
 bdev /dev/sd0
 major 0             # Main SD card

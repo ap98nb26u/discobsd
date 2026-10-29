@@ -46,12 +46,9 @@
  * Maximum core (text+data+bss+stack) a single process may occupy - on
  * this port that's a hard physical limit, not just a policy knob: only
  * one process's core is ever resident at a time (see kern_gba.ldscript's
- * USERRAM), so this MUST match USERRAM's LENGTH exactly. Previously a
- * stale 128K (unrelated to the actual 32K window of the time), which let
- * exec_estab()'s overflow check silently pass a too-large /bin/sh image
- * that then overran USERRAM into SWAP - see kern_gba.ldscript for the full
- * story. Keep in sync with USER_DATA_SIZE below and with USERRAM by hand
- * if either ever moves again.
+ * USERRAM), so this MUST match USERRAM's LENGTH exactly: exec_estab()'s
+ * overflow check uses it to refuse an image too big for the window. Keep
+ * in sync with USER_DATA_SIZE below and with USERRAM by hand.
  */
 #ifdef GBAED
 /*
@@ -88,7 +85,7 @@
  * keep pace. Cost is IWRAM .bss (struct file 24B, inode 108B, proc ~92B;
  * NNAMECACHE and SMAPSIZ scale off these), which must stay below the
  * syscall vector SYSVEC at 0x03007E00 - the ldscript ASSERT enforces it,
- * and on GBAED only a few hundred bytes are left there now.  Shared by
+ * and on GBAED only ~130 bytes are left there now.  Shared by
  * both the GBA (ROM-root) and GBAED builds - rebuild both when changing these.
  */
 #ifndef NPROC
@@ -226,18 +223,13 @@ __gba_user_data_end(void)
  */
 #define USERMODE(psr)   0 /* ((psr & IPSR_ISR_Msk) == 0) */ /* No exceptions. */
 /*
- * Ported from stm32 (Cortex-M's BASEPRI register, real hardware
- * priority-level masking) as a literal "0" stub, i.e. always false.
- * hardclock() (kern_clock.c) only calls softclock() - which actually
- * runs due callout-queue entries, including tsleep()'s timeout wakeup
- * via endtsleep() - when "needsoft && BASEPRI(ps)" is true. Since GBA
- * has no such hardware and this port's IRQ handling is a single,
- * non-nested level (see gba_intr_handler in locore0.S), there's no
- * priority conflict to guard against here: it's always safe to run
- * softclock(). Left at 0 (always false), tsleep()'s timeout could be
- * correctly registered and hardclock() would tick it down to zero, but
- * softclock() would never actually run to fire it - a real timeout
- * would sit expired forever instead of waking its sleeper.
+ * Always true. hardclock() (kern_clock.c) only calls softclock() - which
+ * runs due callout-queue entries, including tsleep()'s timeout wakeup via
+ * endtsleep() - when "needsoft && BASEPRI(ps)" is true. stm32 tests
+ * Cortex-M's BASEPRI register here; the GBA has no priority hardware and
+ * its IRQ handling is a single, non-nested level (gba_intr_handler in
+ * locore0.S), so it is always safe to run softclock(). A 0 here (the
+ * stm32 stub value) would let timeouts expire without ever firing.
  */
 #define BASEPRI(psr)    1
 
@@ -259,7 +251,8 @@ void mdelay(unsigned msec);
 void clkstart(void);
 
 /*
- * Control LEDs, installed on the board.
+ * LED hooks, kept for the shared callers (sd.c); the GBA has no LEDs,
+ * so led_control() is a no-op.
  */
 #define LED_TTY         0x08
 #define LED_SWAP        0x04
@@ -268,8 +261,6 @@ void clkstart(void);
 #define LED_ALL         (LED_TTY | LED_SWAP | LED_DISK | LED_KERNEL)
 
 void led_control(int mask, int on);
-
-/* void LL_GPIO_EnableClock(GPIO_TypeDef *GPIOx); */
 
 #endif /* KERNEL */
 

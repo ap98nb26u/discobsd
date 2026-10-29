@@ -6,12 +6,11 @@
  * Ported from Adrian O'Grady's fivemouse.com GBA text demo/library
  * (http://www.fivemouse.com/gba/).
  *
- * Behaves like a scrolling terminal: characters are drawn on the
- * bottom text row; the whole screen is shifted up one character row
- * on '\n' or when the row fills up. Intended as a real-hardware
- * substitute for the mGBA-only debug log console (mgba_uart.c), since
- * real GBA hardware has nowhere else visible to show kernel output
- * until UART is wired up.
+ * Behaves like a scrolling VT100-subset terminal confined to the 40x15
+ * cells above the on-screen keyboard: output starts on the bottom row
+ * and the console region scrolls up one character row on '\n' or when
+ * a row fills up. This is the console's display: the console tty
+ * (mgba_uart.c) draws every character here.
  */
 #include <sys/param.h>
 
@@ -22,10 +21,10 @@
 extern const unsigned char gtxt_font[2048];
 
 /*
- * True while a userland process owns the graphics panel (/dev/tft0).  The
- * console and the on-screen keyboard share the one Mode 3 framebuffer with
- * it, so every function here that writes VRAM bows out while it is set: the
- * panel is the sole drawer, and the console's text STATE still advances so
+ * True while a userland process owns the graphics panel (/dev/tft0-2).  The
+ * console and the on-screen keyboard share VRAM with it, so every function
+ * here that writes VRAM bows out while it is set: the panel is the sole
+ * drawer, and the console's text STATE still advances so
  * output is not lost, it just is not painted until the panel is released
  * (on release gtxt_restore() repaints it from the character backing store -
  * Phase 4b, see gtxt_cells below).  This gives the framebuffer a single owner
@@ -49,9 +48,10 @@ static unsigned short gtxt_fg_normal;	/* console fg to restore after a msg */
  * VT100-subset terminal emulation state (roadmap #6/vi). Full-screen apps
  * (vi) drive the console with ANSI/VT100 escape sequences; gtxt_putc()
  * feeds them through this little state machine (gtxt_esc_feed/gtxt_csi)
- * instead of printing them as glyphs. Only what vi emits is handled:
- * cursor addressing (ESC[r;cH), cursor up (ESC[A), clear-to-EOL (ESC[K),
- * clear-to-EOS (ESC[J) and standout on/off (ESC[7m / ESC[0m).
+ * instead of printing them as glyphs. Handled: cursor addressing
+ * (ESC[r;cH / ESC[r;cf), cursor up/down/right/left (ESC[A..D), erase in
+ * line/display (ESC[K / ESC[J, modes 0-2) and standout on/off (ESC[7m /
+ * ESC[0m); anything else is dropped.
  */
 static int gtxt_estate;			/* 0=text, 1=saw ESC, 2=in CSI */
 #define GTXT_MAXPARM	4
@@ -226,7 +226,7 @@ gtxt_linefeed(void)
 /*
  * Draw one character at text-cell (col,row) from the top-left, in the
  * given fg/bg (inverted for a highlighted key). Public so swkbd.c can
- * paint its keyboard without scrolling the console. row/col are in 8x8
+ * paint its keyboard without scrolling the console. row/col are in 6x8
  * cells; no bounds checking beyond the caller's.
  */
 void
@@ -300,7 +300,7 @@ gtxt_rows(void)
  * Idempotent, so idle()'s once-a-pass blink call is free unless the state
  * changes; the VRAM work runs only on an actual on<->off transition.
  *
- * The cursor is drawn by XOR-inverting the 8x8 cell rather than filling it,
+ * The cursor is drawn by XOR-inverting the 6x8 cell rather than filling it,
  * so it is NON-DESTRUCTIVE: over a blank cell (the shell's input position)
  * it shows as a solid block, over a glyph (a full-screen app's cursor sitting
  * on live text) it shows as that glyph in reverse video, and toggling it off

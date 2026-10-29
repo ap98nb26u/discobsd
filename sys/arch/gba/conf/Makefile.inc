@@ -8,12 +8,14 @@ ROM=		${KERNDIR}/${KERN}.bin
 # image in the top-level Makefile). Setting PORT_CUSTOM_FSIMAGE switches
 # off that generic ${FSIMG}: / installfs rule so the ones below are used.
 #
-# The GBA image is a BARE root filesystem (no MBR/partition table). The
-# plain GBA (ROM-root/mGBA) kernel embeds it in ROM (sys/arch/gba/dev/rootfs.img);
-# on real EverDrive hardware the same image is written onto the DiscoBSD
-# root partition (sd0b, MBR #2), leaving the EverDrive's own FAT32 boot
-# partition (#1) intact. There is deliberately no full-disk image: swap is
-# a separate region (EWRAM for the ROM-root build, EverDrive PSRAM for GBAED) and the build has
+# The GBA image is a BARE root filesystem (no MBR/partition table). On
+# real EverDrive hardware it is written onto the DiscoBSD root partition
+# (sd0b, MBR #2) for GBAED, leaving the EverDrive's own FAT32 boot
+# partition (#1) intact; the plain GBA (ROM-root/mGBA) kernel embeds a
+# smaller image of the same files in ROM instead (MDROOT_SRC, below).
+# There is deliberately no full-disk image: swap is a separate region
+# (EverDrive PSRAM for GBAED; EWRAM for the ROM-root build, or the PSRAM
+# after its root when that root is writable) and the build has
 # no FAT32 tooling to populate the EverDrive boot partition, so a sector-0
 # image would not be directly usable anyway.
 #

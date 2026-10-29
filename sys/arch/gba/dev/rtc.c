@@ -52,8 +52,8 @@
 /*
  * Registered with machdep.c's inittodr() when the RTC is found, so
  * the machine-independent boot path can read the clock without any
- * arch-specific reference when the RTC is absent (e.g. the mGBA build,
- * which does not compile this file at all).
+ * arch-specific reference when the RTC is absent (the plain GBA and
+ * GBALOG builds, which have no ed0 and do not compile this file).
  */
 extern int (*md_rtc_gettime)(time_t *);
 
@@ -178,8 +178,9 @@ is_leap(int y)
 
 /*
  * Convert a decoded calendar datetime to seconds since the Unix epoch
- * (1970-01-01 00:00:00 UTC). The RTC keeps local wall-clock time; any
- * timezone handling is left to userland.
+ * (1970-01-01 00:00:00 UTC). The fields are decoded as if UTC; if the
+ * clock keeps local time, inittodr()/resettodr() (machdep.c) correct for
+ * it with kern.rtc_offset.
  */
 static time_t
 ymdhms_to_secs(int year, int mon, int day, int hour, int min, int sec)
@@ -202,15 +203,16 @@ ymdhms_to_secs(int year, int mon, int day, int hour, int min, int sec)
         (time_t)min * 60 + sec;
 }
 
+/* Last successfully decoded reading, for the probe's announcement. */
+static int rtc_last_year, rtc_last_mon, rtc_last_day;
+static int rtc_last_hour, rtc_last_min, rtc_last_sec;
+
 /*
  * Read the RTC and return the current time in *tp. Returns 0 on a
  * plausible reading, nonzero if the values are out of range (e.g. an
  * unset or absent clock), so the caller can fall back to another time
  * source rather than trust garbage.
  */
-/* Last successfully decoded reading, for the probe's announcement. */
-static int rtc_last_year, rtc_last_mon, rtc_last_day;
-static int rtc_last_hour, rtc_last_min, rtc_last_sec;
 
 int
 rtc_gettime(time_t *tp)

@@ -4,10 +4,10 @@
  * (http://www.fivemouse.com/gba/).
  *
  * The SIO port in UART mode uses hardware CTS/RTS flow control on
- * the link cable's SD/SC lines: sndChar() blocks until the far end
- * asserts CTS, rcvChar() blocks until a full byte has arrived. There
- * is no timeout, matching the reference library -- if nothing is
- * connected to the cable, console output blocks here forever.
+ * the link cable's SD/SC lines.  Output waits for CTS with a bound; if
+ * no peer ever raises it the port is marked dead and console output
+ * goes to the LCD only.  Input is taken from the 4-byte receive FIFO
+ * into a ring (see below).
  */
 #include <sys/param.h>
 #include <sys/user.h>
@@ -142,13 +142,13 @@ gsio_since(unsigned long then)
 }
 #endif /* SERIAL_CONSOLE: only /dev/sio times the line */
 
+int gsio_owned;				/* 1: /dev/sio has the port */
+
 /*
  * Move every byte now in the hardware RX FIFO into the ring. The caller must
  * ensure the SIO interrupt cannot run concurrently: gsio_rx_isr() is already
  * in IRQ context, and gsio_rx_service() masks the SIO IRQ around its call.
  */
-int gsio_owned;				/* 1: /dev/sio has the port */
-
 static void
 gsio_fifo_drain(void)
 {
@@ -251,11 +251,9 @@ gsio_init(unsigned int baud)
 }
 
 /*
- * Non-blocking peek: is a fully-received byte currently sitting in
- * REG_SIODATA8? Pure read of the status bit gsio_getc()'s own wait
- * loop blocks on below - no side effects, so it's safe to call from
- * select() without disturbing a pending byte the way calling
- * gsio_getc() itself (which re-arms the flag first) would.
+ * Non-blocking peek: does the receive FIFO hold a byte (SIOCNT d05
+ * clear)? A pure status read with no side effects, unlike gsio_getc()
+ * (which re-arms the flag first); used by the halt/reboot key wait.
  */
 int
 gsio_avail(void)
