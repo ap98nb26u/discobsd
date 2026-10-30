@@ -6,9 +6,6 @@ typedef unsigned short uint16_t;
 #define ARM_CODE	__attribute__((target("arm")))
 #define THUMB_CODE	__attribute__((target("thumb")))
 
-#define IWRAM_CODE	__attribute__((section(".iwram")))
-#define EWRAM_CODE	__attribute__((section(".ewram")))
-
 #define REG_BASE	0x04000000
 
 #define REG_DISPCNT	(*(volatile uint16_t *)(REG_BASE+0x0000))
