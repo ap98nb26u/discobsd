@@ -1044,25 +1044,32 @@ baduaddr(caddr_t addr)
 
 /*
  * Return 0 if a kernel address is valid.
- * There are three memory regions allowed for kernel: EWRAM (U0AREA/
- * UAREA only - see __kernel_data_start/end in kern_gba.ldscript), IWRAM,
- * and flash/ROM.
+ * The kernel's memory regions are: EWRAM (U0AREA/UAREA only - see
+ * __kernel_data_start/end in kern_gba.ldscript), IWRAM, flash/ROM and,
+ * on GBAED, KEWRAM.
  *
  * IWRAM holds the kernel's .data/.bss (proc[], nproc and the other
  * globals ps(1) reads via /dev/kmem), so it must be accepted here:
  * mmrw() (dev/mem.c) rejects an address that is both badkaddr() and
- * baduaddr().
+ * baduaddr(). The same goes for KEWRAM, the last 1K of EWRAM on GBAED
+ * (__kewram_start/end, empty on the other builds), which holds the
+ * pseudo-terminals. Accept the whole region, as for IWRAM: a stdio
+ * reader such as od(1) reads it in 1K blocks.
  */
 int
 badkaddr(caddr_t addr)
 {
 	extern char __iwram_start[], __iwram_end[];
+	extern char __kewram_start[], __kewram_end[];
 
 	if (addr >= (caddr_t)__kernel_data_start &&
 	    addr < (caddr_t)__kernel_data_end)
 		return 0;
 	if (addr >= (caddr_t)__iwram_start &&
 	    addr < (caddr_t)__iwram_end)
+		return 0;
+	if (addr >= (caddr_t)__kewram_start &&
+	    addr < (caddr_t)__kewram_end)
 		return 0;
 	if (addr >= (caddr_t)__kernel_flash_start &&
 	    addr < (caddr_t)__kernel_flash_end)
