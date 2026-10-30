@@ -807,8 +807,9 @@ cpu_reboot(void)
 	 * Instead: mask interrupts and quiet the peripherals whose leftover state
 	 * would otherwise feed the next boot before it re-inits (display, DMA,
 	 * timers, sound), then warm-jump to the cartridge ROM entry (0x08000000).
-	 * reset: in locore0.S re-initialises .data/.bss/.fast_text, the stack and
-	 * the IRQ vector exactly as on a cold boot.
+	 * reset: in locore0.S re-initialises .data/.bss/.fast_text, clears
+	 * EWRAM and sets up the stack and the IRQ vector exactly as on a cold
+	 * boot. EWRAM is not cleared here: this function's own stack is in it.
 	 */
 	int i;
 
@@ -823,21 +824,6 @@ cpu_reboot(void)
 	REG_TM3CNT_H = 0;
 	REG_SOUNDCNT_X = 0;		/* master sound off */
 	REG_DISPCNT = 0x0080;		/* forced blank - clear stale video output */
-
-	/*
-	 * Wipe EWRAM below our own stack so no stale RAM from the previous
-	 * session survives into the next boot: the u/u0 process-context area and
-	 * other fixed-address EWRAM are not covered by reset:'s .bss clear, and
-	 * stale contents there made the rebooted init wild-jump. This runs on
-	 * the kernel stack in UAREA, which the loop clears too, so nothing may
-	 * use the stack after it; the jump below does not return.
-	 */
-	{
-		volatile uint32_t *p = (volatile uint32_t *)0x02000000;
-		int n = (0x0203F000 - 0x02000000) / 4;
-		for (i = 0; i < n; i++)
-			p[i] = 0;
-	}
 
 	((void (*)(void))0x08000000)();	/* warm boot (ARM ROM entry); never returns */
 }

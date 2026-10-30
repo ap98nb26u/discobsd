@@ -93,25 +93,25 @@ bss_loop:
     strlt r2, [r0], #4
     blt bss_loop
 
-    @ --- clear the kernel .bss kept in EWRAM (GBAED; empty on GBA) ---
-    ldr r0, =__ewram_bss_start
-    ldr r1, =__ewram_bss_end
-ewram_bss_loop:
+    @ --- clear all of EWRAM ---
+    @ This covers the u0/u process-context slots (U0AREA/UAREA) and the
+    @ kernel .bss kept at the end of EWRAM on GBAED, neither of which is
+    @ part of .bss.  On a cold boot EWRAM holds garbage, and on a reboot
+    @ (cpu_reboot() jumps here) it holds the previous session; the MI
+    @ boot path relies on u starting zeroed (e.g. u_uid/u_ruid/u_svuid/
+    @ u_groups[0] are never set before init runs, so a nonzero uid made
+    @ init exit at once), and stale fixed-address EWRAM made a rebooted
+    @ init wild-jump.  Done here in assembly, before any stack is used,
+    @ rather than in cpu_reboot(), which runs on a stack inside EWRAM.
+    ldr r0, =0x02000000 @ EWRAM start
+    ldr r1, =0x02040000 @ EWRAM end
+    mov r3, #0
+    mov r4, #0
+    mov r5, #0
+ewram_loop:
     cmp r0, r1
-    strlt r2, [r0], #4
-    blt ewram_bss_loop
-
-    @ --- clear the u0/u process-context slots (U0AREA/UAREA, EWRAM) ---
-    @ They are not part of .bss, and on a cold boot EWRAM holds garbage;
-    @ the MI boot path relies on u starting zeroed (e.g. u_uid/u_ruid/
-    @ u_svuid/u_groups[0] are never set before init runs, so a nonzero
-    @ uid made init exit at once).  cpu_reboot() wipes them on a warm boot.
-    ldr r0, =u0
-    ldr r1, =u_end
-uarea_loop:
-    cmp r0, r1
-    strlt r2, [r0], #4
-    blt uarea_loop
+    stmltia r0!, {r2-r5}
+    blt ewram_loop
 
     @ kernel stack: the top of u
     ldr r0, =u
