@@ -150,8 +150,8 @@ Completion is POLLED, for two INDEPENDENT reasons -- keep them separate:
 No BIOS SWI is issued by the GBA and GBAED kernels.
 
   - Reboot (cpu_reboot(), machdep.c) masks interrupts, stops DMA,
-    timers and sound, blanks the display, clears EWRAM, and jumps to
-    the ROM entry 0x08000000; locore0.S then reinitialises everything
+    timers and sound, blanks the display, and jumps to the ROM entry
+    0x08000000; locore0.S then clears EWRAM and reinitialises everything
     as on a cold boot.  The BIOS resets were dropped: HardReset (swi
     0x26, undocumented) hangs mGBA, and SoftReset (swi 0x00) left stale
     I/O state that made the next boot misbehave.
