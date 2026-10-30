@@ -63,6 +63,7 @@
 #include <sys/config.h>
 #include <sys/stdint.h>
 
+#include <machine/gba.h>
 #include <gba/dev/sd.h>
 #include <gba/dev/ed.h>
 
@@ -703,32 +704,27 @@ card_init(int unit)
      */
     {
         /*
-         * This runs from config() (init_main.c's main(), before
-         * proc[0]/u are set up), but cpu_initclocks() (also called
-         * from config(), just before device probing) has already
-         * armed TIMER0 - so a busy-wait this long left interrupts
-         * enabled through several timer ticks, and this session's
-         * first attempt at this delay (interrupts left alone)
-         * regressed a previously-working A-button/menu boot into
-         * crash-rebooting at the same spot every time. Almost
-         * certainly hardclock()/schedcpu() firing against process
-         * state that doesn't exist yet. Block interrupts for the
-         * duration and explicitly re-enable after - nothing between
-         * here and the real interrupt-enable point later in boot
-         * needs them.
+         * Keep interrupts masked for the busy-wait, then put REG_IME
+         * back as it was. card_init() runs at boot (sd_probe(), from
+         * config()) and again later from sd_setup() and the stall
+         * recovery in card_read(); the kernel runs with IME=0 on all
+         * of those paths, and forcing IME=1 here would let the Timer0
+         * interrupt (hardclock(), the console poll) run in the middle
+         * of kernel code until the next syscall return or idle().
+         * An interrupt during this delay at boot, before proc[0]/u
+         * are set up, made the boot crash-reboot here.
          */
-        extern void gba_irq_allow(void);
-        extern void gba_irq_block(void);
+        uint16_t ime = REG_IME;
         volatile uint32_t settle;
 
         /*
          * 100000 was not always enough: sd0 then went unrecognized on
-         * some cold boots.  Paid once, at boot.
+         * some cold boots.
          */
-        gba_irq_block();
+        REG_IME = 0;
         for (settle = 0; settle < 400000; settle++)
             ;
-        gba_irq_allow();
+        REG_IME = ime;
     }
 
     sd_card_flags = 0;
