@@ -9,12 +9,13 @@ the authoritative code; this file is a map, not a spec.
 1. INTERRUPTS
 -------------
 
-Enabled hardware interrupt sources (REG_IE = IRQ_TIMER0):
+Enabled hardware interrupt sources (REG_IE, set in clock.c:cpu_initclocks()):
 
     bit3  Timer0 overflow   system clock -> hardclock()   (IRQ_TIMER0)
-                            clock.c:cpu_initclocks()
+    bit7  SIO               serial console backstop       (IRQ_SERIAL,
+                            SERIAL_CONSOLE builds = GBAED only, see below)
 
-Timer0 is the ONLY enabled source. VBLANK (bit0, IRQ_VBLANK) was
+Timer0 is the only source on the GBA build. VBLANK (bit0, IRQ_VBLANK) was
 formerly enabled too (DISPSTAT bit3 + REG_IE bit0) but its handler only
 set vblank_flag, which nothing read, so it was removed -- on-screen
 input and the cursor blink are polled via REG_VCOUNT/lbolt, not a VBLANK
@@ -26,7 +27,7 @@ it fires on send-full, receive-EMPTY or error, never on a byte arriving,
 so the receive FIFO is still emptied by polling (gba_sio_uart.c).
 
 (GBA REG_IE bit numbering: bit0=VBLANK, bit1=HBlank, bit2=VCount,
-bit3=Timer0, bit12=Keypad -- see gba.h IRQ_* defines.)
+bit3=Timer0, bit7=SIO, bit12=Keypad -- see gba.h IRQ_* defines.)
 
 Control registers:
     REG_IME       0x4000208   master enable
