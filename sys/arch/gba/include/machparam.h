@@ -220,8 +220,13 @@ __gba_user_data_end(void)
 
 /*
  * Macros to decode processor status word.
+ *
+ * User and kernel both run in SYS mode, so the CPSR cannot say which one
+ * a clock tick interrupted. The Timer0 interrupt decides from the
+ * interrupted pc instead and passes hardclock() a ps of 1 for user code,
+ * 0 otherwise (gba_do_schedule(), machdep.c).
  */
-#define USERMODE(psr)   0 /* ((psr & IPSR_ISR_Msk) == 0) */ /* No exceptions. */
+#define USERMODE(ps)    ((ps) != 0)
 /*
  * Always true. hardclock() (kern_clock.c) only calls softclock() - which
  * runs due callout-queue entries, including tsleep()'s timeout wakeup via

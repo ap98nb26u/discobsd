@@ -172,9 +172,10 @@ void simulate_swi_via_inline_data(void) {
         /* -------------------------------------------------------------
          5. Call the C handler
          ------------------------------------------------------------- */
-        // This port has no privilege separation (USERMODE() is always 0):
-        // switching to SVC mode here would bank sp/lr, and "mov r1, sp"
-        // below would get the uninitialized sp_svc instead of the frame.
+        // This port has no privilege separation (user code runs in SYS
+        // mode too): switching to SVC mode here would bank sp/lr, and
+        // "mov r1, sp" below would get the uninitialized sp_svc instead of
+        // the frame.
         // Stay in the caller's mode (SYS).
         //
         // Do not turn interrupts back on yet: this naked function keeps live
@@ -214,6 +215,13 @@ void simulate_swi_via_inline_data(void) {
         // arrived as 0x04000200 (init's argv[1] read as NULL on hardware).
         "mov r1, #0x04000000\n\t"
         "add r1, #0x200\n\t"
+        // A Timer0 interrupt pending here fell due inside the syscall; it
+        // is taken as soon as IME goes on, with a user pc. Note it so the
+        // clock charges that tick to the system (gba_do_schedule()).
+        "ldrh r2, [r1, #0x02]\n\t"   // REG_IF
+        "and r2, r2, #8\n\t"         // IRQ_TIMER0
+        "ldr r0, =gba_tick_in_kernel\n\t"
+        "str r2, [r0]\n\t"
         "mov r2, #1\n\t"
         "strh r2, [r1, #0x08]\n\t"   // REG_IME = 1 (interrupts on)
 

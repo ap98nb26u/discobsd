@@ -126,8 +126,24 @@ int (*dump)(dev_t) = nodump;
 dev_t	pipedev;
 daddr_t	dumplo = (daddr_t)1024;
 
-void gba_do_schedule(void);
+void gba_do_schedule(unsigned pc);
 int gba_irq_preempt(unsigned pc);
+
+/*
+ * Set by the syscall return (syscall.c) when a Timer0 interrupt is
+ * already pending as it turns interrupts back on: that tick fell inside
+ * the syscall, although the interrupt will see a user pc.
+ */
+volatile int gba_tick_in_kernel;
+
+static inline int
+gba_user_pc(unsigned pc)
+{
+    extern char __user_data_start[], __user_data_end[];
+
+    return pc >= (unsigned)__user_data_start &&
+        pc < (unsigned)__user_data_end;
+}
 
 volatile uint32_t myticks = 1;
 
@@ -267,10 +283,11 @@ console_input_poll(void)
 extern int gsio_fastpoll_on;            /* gba_sio_uart.c: /dev/sio open */
 #endif
 
-IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
+IWRAM_CODE THUMB_CODE void gba_do_schedule(unsigned pc)
 {
     uint16_t flag = REG_IF;
     uint16_t ack = 0;
+    int ps = 0;                 /* hardclock()'s USERMODE() flag */
 
 #ifdef SERIAL_CONSOLE
     if (flag & IRQ_SERIAL) {    // SIO: overrun/error, send full, receive empty
@@ -281,6 +298,14 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
 #endif
     if (flag & IRQ_TIMER0) { // TIMER0
         ack |= IRQ_TIMER0;
+        /*
+         * Charge this tick to user time only if it interrupted user code
+         * and did not fall due inside a syscall.
+         */
+        if (gba_tick_in_kernel)
+            gba_tick_in_kernel = 0;
+        else
+            ps = gba_user_pc(pc);
 #ifdef SERIAL_CONSOLE
         /*
          * While /dev/sio is open, Timer0 runs at ~4 kHz (gsio_fastpoll())
@@ -344,8 +369,10 @@ IWRAM_CODE THUMB_CODE void gba_do_schedule(void)
                  */
                 if (++drift >= CLOCK_DRIFT_SKIP)
                     drift = 0;          /* skip: do not advance the clock */
+                else if (elapsed == 1 && ps)
+                    hardclock((caddr_t)pc, 1);  /* the tick just taken */
                 else
-                    hardclock((caddr_t)0, 0);
+                    hardclock((caddr_t)0, 0);   /* caught up: masked time */
             } while (--elapsed);
         }
 #ifdef SERIAL_CONSOLE
@@ -406,10 +433,9 @@ timer0_done:
 int
 gba_irq_preempt(unsigned pc)
 {
-    extern char __user_data_start[], __user_data_end[];
     struct proc *p;
 
-    if (pc < (unsigned)__user_data_start || pc >= (unsigned)__user_data_end)
+    if (!gba_user_pc(pc))
         return 0;
     if (runrun)
         return 1;

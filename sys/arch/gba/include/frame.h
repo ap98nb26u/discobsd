@@ -49,8 +49,9 @@ struct	trapframe {
 
 /*
  * Clock interrupt frame, kept from the stm32 port for the shared
- * declarations.  The GBA does not use it: the Timer0 interrupt calls
- * hardclock() with a null pc and ps (gba_do_schedule(), machdep.c).
+ * declarations.  The GBA does not use it: the Timer0 interrupt passes
+ * hardclock() the interrupted pc and a ps of its own (gba_do_schedule(),
+ * machdep.c).
  */
 struct	clockframe {
 /* These 8 registers are pushed on stack by hardware in an exception. */

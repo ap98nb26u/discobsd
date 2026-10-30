@@ -172,8 +172,10 @@ gba_intr_handler:
     @ next time that code does "bx lr" after the interrupt returns.
     push {lr}
 
-    @ call prep
+    @ call prep: the interrupted pc, for the clock's user/system split
 .global gba_do_schedule
+    ldr r0, [r4, #(14*4 + 20)]  @ the interrupted pc + 4 (BIOS frame lr)
+    sub r0, r0, #4
     bl gba_do_schedule
 
     @ Preemption. The kernel only switches processes and delivers
