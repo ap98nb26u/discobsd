@@ -418,43 +418,6 @@ gba_irq_preempt(unsigned pc)
         ((p->p_flag & P_TRACED) || (p->p_sig & ~p->p_sigmask) != 0);
 }
 
-void irq_enable(void)
-{
-	REG_IME = 0;
-
-	REG_TM0CNT_H = 0;
-	//REG_TM0CNT_L = 65263;//60Hz 65536 - (16777216 / 1024 / HZ);
-	REG_TM0CNT_L = 65372;//100Hz 65536 - (16777216 / 1024 / HZ);
-
-	// 0x0040: interrupt enable
-	// 0x0003: prescaler 1/1024
-	// 0x0080: start
-	REG_TM0CNT_H = 0x00C3;
-
-	/*
-	 * Only Timer0 (IRQ_TIMER0 = bit3) drives anything - it runs
-	 * hardclock(). VBLANK (bit0) was previously enabled too (DISPSTAT
-	 * bit3 + REG_IE bit0) but its handler only ever set vblank_flag,
-	 * which nothing read; on-screen input and the cursor blink are
-	 * polled via REG_VCOUNT/lbolt, not the VBLANK IRQ. Leaving it out
-	 * so the only interrupt that fires is the one that has real work.
-	 *
-	 * IRQ_SERIAL (bit7) is added on the serial-console build. In UART mode
-	 * it fires on an error (an overrun), a full send buffer or an EMPTY
-	 * receive buffer - never on a byte arriving - and gsio_rx_isr()
-	 * (gba_sio_uart.c) drains the FIFO; receive is otherwise polled - see
-	 * there.
-	 */
-#ifdef SERIAL_CONSOLE
-	REG_IE = IRQ_TIMER0 | IRQ_SERIAL;
-#else
-	REG_IE = IRQ_TIMER0;
-#endif
-
-	REG_IME = 1;
-}
-
-
 /*
  * Machine dependent startup code.
  */

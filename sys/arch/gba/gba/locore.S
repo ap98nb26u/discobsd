@@ -141,17 +141,6 @@ icode1:
 	adds	r0, r2			/* execv() *name argument. */
 	adds	r1, r2			/* execv() *argv[] argument. */
 
-	/*
-	 * icode never uses a stack, so r12 is whatever garbage the last
-	 * function call (locore0.S's debug printf) happened to leave
-	 * behind - unspecified per AAPCS, and observed to differ between
-	 * builds/platforms. syscall_handler() reads r12 back as tf_sp
-	 * (the process's stack pointer) for its stack bounds check, so
-	 * give it the same deterministic value init_main.c already uses
-	 * for p_saddr instead of leaving it undefined.
-	 */
-	ldr	r12, =(__user_data_end - 1024)
-
 	.globl	simulate_swi_via_inline_data
 	@ SYS_execv
 	ldr	r3, =simulate_swi_via_inline_data

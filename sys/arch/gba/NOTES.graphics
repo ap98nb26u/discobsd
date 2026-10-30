@@ -187,7 +187,7 @@ disappears: there is no async scribble because there is one arbiter.
 
 Scope (why this is tractable, not a rewrite): gba_text.c's direct VRAM
 pokes are already concentrated in four helpers -
-    gtxt_shift / gtxt_shift_full  -> panel blit-scroll (bulk row copy)
+    gtxt_shift (scroll_rows)      -> panel blit-scroll (bulk row copy)
     gtxt_draw_cell                -> panel draw_glyph (also swkbd's only path)
     gtxt_cursor                   -> panel xor-cell  (p[] ^= 0x7FFF invert)
     gtxt_cls                      -> panel clear
