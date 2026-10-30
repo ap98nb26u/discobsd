@@ -202,17 +202,6 @@ gtxt_shift(void)
     gtxt_scroll_rows(GTXT_BOTTOM + 1);
 }
 
-/*
- * Scroll the WHOLE screen (overlay region included) up one character
- * row. Used only when the keyboard is shown and the input line would
- * otherwise be left underneath it - see gtxt_reserve_bottom().
- */
-static void
-gtxt_shift_full(void)
-{
-    gtxt_scroll_rows(GTXT_ROWS);
-}
-
 /* Advance to the next line, scrolling the console region when at the bottom. */
 static void
 gtxt_linefeed(void)
@@ -253,33 +242,6 @@ gtxt_draw_cell(char c, int col, int row, unsigned short fg, unsigned short bg)
             bits <<= 1;
         }
         p += GTXT_SCREEN_W;
-    }
-}
-
-/*
- * Reserve `pixels` at the bottom of the screen for an overlay, confining
- * the scrolling console above it. Called by swkbd.c when it shows/hides
- * (0 restores full-screen console).
- *
- * When SHRINKING the console (overlay appearing) the current input line
- * may end up below the new region - under the keyboard. Scroll the whole
- * screen up until it sits on the new bottom row, so it stays visible
- * above the overlay and the cursor tracks with it. When GROWING it again
- * (overlay hidden) nothing scrolls: the input line stays exactly where
- * it was rather than jumping back down to the screen's last row.
- */
-void
-gtxt_reserve_bottom(int pixels)
-{
-    if (pixels < 0)
-        pixels = 0;
-    if (pixels > GTXT_SCREEN_H - GTXT_CHAR_H)
-        pixels = GTXT_SCREEN_H - GTXT_CHAR_H;
-    gtxt_cursor(0);
-    gtxt_reserved = pixels;
-    while (gtxt_cury > GTXT_BOTTOM) {
-        gtxt_shift_full();
-        gtxt_cury--;
     }
 }
 

@@ -222,19 +222,5 @@ gba_intr_handler:
 
     bx lr @ return through the BIOS
 
-.align 2
-.arm
-.global savectx
-savectx:
-    @ r0 is label_t *env (usualy &u.u_rsav)
-    @ val[0..7]: r4-11
-    @ val[8]   : lr
-    @ val[9]   : sp
-    stmia r0!, {r4-r11, lr} @ save r4-r11, lr (9 regs)
-    str sp, [r0] @ save sp as 10th reg
-
-    mov r0, #0 @ return value 0
-    bx lr @ return to callee (Thumb/ARM auto detect)
-
 .ltorg @ put out data for handler
     @ end

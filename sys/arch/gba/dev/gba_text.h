@@ -32,7 +32,6 @@ void gtxt_restore(void);
 /* Overlay support for the on-screen keyboard (swkbd.c). */
 void gtxt_draw_cell(char c, int col, int row, unsigned short fg,
 	unsigned short bg);
-void gtxt_reserve_bottom(int pixels);
 int gtxt_cols(void);
 int gtxt_rows(void);
 void gtxt_cursor(int on);

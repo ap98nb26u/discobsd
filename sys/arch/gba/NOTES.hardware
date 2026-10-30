@@ -12,7 +12,7 @@ the authoritative code; this file is a map, not a spec.
 Enabled hardware interrupt sources (REG_IE = IRQ_TIMER0):
 
     bit3  Timer0 overflow   system clock -> hardclock()   (IRQ_TIMER0)
-                            clock.c:cpu_initclocks(), machdep.c:irq_enable()
+                            clock.c:cpu_initclocks()
 
 Timer0 is the ONLY enabled source. VBLANK (bit0, IRQ_VBLANK) was
 formerly enabled too (DISPSTAT bit3 + REG_IE bit0) but its handler only
