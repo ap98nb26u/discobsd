@@ -355,13 +355,20 @@ syscall_handler(int sys_num, struct trapframe *frame)
 		(*callp->sy_call)();		/* Make syscall. */
 
 		/*
-		 * After a successful exec: clear lr, which still points into
-		 * the old image, so the new program cannot return into it.
-		 * Both execv (11, icode's hand-made call at boot) and execve
-		 * (59, how /sbin/init starts everything else).
+		 * After a successful exec, replace the lr and psr that the MI
+		 * exec_setupstack() set on its __thumb__ path: those are
+		 * Cortex-M (stm32) values - lr 0xffffffff and the EPSR Thumb
+		 * bit, which is a reserved bit in the ARM7TDMI CPSR. Here the
+		 * entry state comes from bit 0 of tf_pc, and only the
+		 * condition flags of tf_psr reach the CPU, so start the new
+		 * program with lr 0 and clear flags. Both execv (11, icode's
+		 * hand-made call at boot) and execve (59, how /sbin/init
+		 * starts everything else).
 		 */
-		if ((code == 11 || code == 59) && u.u_error == 0)
+		if ((code == 11 || code == 59) && u.u_error == 0) {
 			u.u_frame->tf_lr = 0;
+			u.u_frame->tf_psr = 0;
+		}
 	}
 
 	switch (u.u_error) {
