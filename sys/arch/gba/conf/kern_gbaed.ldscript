@@ -122,8 +122,6 @@ SECTIONS {
     .fast_text : ALIGN(4) {
         __fast_start = .;
         *(.iwram_text)
-        *longjmp.o(.text)
-        *setjmp.o(.text)
         . = ALIGN(4);
         __fast_end = .;
     } > IWRAM AT > FLASH
