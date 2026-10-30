@@ -283,7 +283,7 @@ console_input_poll(void)
 extern int gsio_fastpoll_on;            /* gba_sio_uart.c: /dev/sio open */
 #endif
 
-IWRAM_CODE THUMB_CODE void gba_do_schedule(unsigned pc)
+THUMB_CODE void gba_do_schedule(unsigned pc)
 {
     uint16_t flag = REG_IF;
     uint16_t ack = 0;

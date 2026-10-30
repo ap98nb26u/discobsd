@@ -17,9 +17,8 @@
  * SRAM hardware rules (GBATEK): the region at 0x0E000000 is 32KB on an 8-bit
  * data bus, accessed one byte at a time (LDRB/STRB, never 16/32-bit, never
  * DMA), WAITCNT's SRAM field set to 8 cycles, and reads executed from RAM -
- * so the byte accessors live in .iwram_text (the section locore0.S actually
- * copies into IWRAM; the IWRAM_CODE/.iwram macro does NOT - it is orphaned
- * into ROM).
+ * so the byte accessors live in .iwram_text, the section locore0.S copies
+ * into IWRAM.
  */
 #include <sys/param.h>
 #include <sys/systm.h>
