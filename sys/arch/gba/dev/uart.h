@@ -1,7 +1,7 @@
 #ifndef _UART_H
 #define _UART_H
 
-#define NUART   6
+#define NUART   1
 
 #ifdef KERNEL
 
