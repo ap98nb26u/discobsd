@@ -52,7 +52,13 @@ sendsig(sig_t p, int sig, long mask)
 	} else
 		sfp = (struct sigframe *)regs->tf_sp;
 
-	sfp--;
+	/*
+	 * Start the handler on an 8-byte aligned stack, as AAPCS requires
+	 * at a call (gcc's va_arg(double) relies on it). The user sp is
+	 * usually 4 mod 8 here: the libc syscall stub has pushed lr.
+	 * sigreturn() restores the original sp from sc_sp.
+	 */
+	sfp = (struct sigframe *)((u_int)(sfp - 1) & ~7);
 	if (!(u.u_sigstk.ss_flags & SA_ONSTACK)) {
 		if ((caddr_t)sfp < (caddr_t)u.u_procp->p_daddr + u.u_dsize) {
 			/*
