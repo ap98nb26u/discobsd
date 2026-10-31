@@ -9,10 +9,32 @@
  * bit-bang protocol at 0x080000C4-C8, not through any EverDrive-
  * specific register.
  *
- * The bit-bang sequence below is ported from the BSD-licensed
- * GBA_RTCRead by megaboyexe (referenced from krikzz forum topic
- * 10360), kept as close to verbatim as possible so the exact command
- * timing the S-3511 needs is preserved.
+ * The bit-bang sequence below is ported from megaboyexe's GBA_RTCRead
+ * (https://github.com/megaboyexe/GBA_RTCRead, referenced from krikzz
+ * forum topic 10360), kept as close to verbatim as possible so the
+ * exact command timing the S-3511 needs is preserved. GBA_RTCRead took
+ * these RTC functions from Jonas Minnberg's pogoshell, under this
+ * license:
+ *
+ * Copyright (c) 2002-2004 Jonas Minnberg
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 
 #include <sys/param.h>

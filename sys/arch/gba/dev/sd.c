@@ -4,8 +4,8 @@
  * The EverDrive has no generic SPI/SDIO peripheral: its FPGA exposes a
  * dedicated SD command/data port (ed_sd_* in ed.c) that speaks the SD
  * protocol directly. The command framing and DMA transfer sequence
- * below are ported from EverDrive's own disk.c sample source; the CSD
- * (card size) decoding is ported from the pic32 port's sd.c, since
+ * below are ported from EverDrive's disk.c (see the license below); the
+ * CSD (card size) decoding is ported from the pic32 port's sd.c, since
  * the CSD register format is standard SD spec, independent of
  * transport.
  *
@@ -23,6 +23,31 @@
  *   0     2     sd0b  2-nd partition
  *   0     3     sd0c  3-rd partition
  *   0     4     sd0d  4-th partition
+ *
+ * disk.c is part of krikzz's EverDrive GBA mini dev sources
+ * (https://github.com/krikzz/gba-ed-pub), which carry this license:
+ *
+ * Copyright (c) 2024 krikzz
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * The rest follows the pic32 port's sd.c:
  *
  * Copyright (C) 2010-2015 Serge Vakulenko, <serge@vak.ru>
  *

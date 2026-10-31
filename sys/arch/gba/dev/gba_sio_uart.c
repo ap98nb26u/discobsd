@@ -61,8 +61,8 @@
 /*
  * Receive, with the UART's 4-byte hardware FIFO.
  *
- * The GBA UART has a 4-entry receive FIFO (AGB Programming Manual 13.3,
- * SIOCNT d08), previously left disabled. With it off the SIO holds only ONE
+ * The GBA UART has a 4-entry receive FIFO (GBATEK, "SIO UART Mode":
+ * SIOCNT bit 8), previously left disabled. With it off the SIO holds only ONE
  * received byte in REG_SIODATA8, so a fast multi-byte burst - an arrow key's
  * ESC[C, three bytes in ~260us at 115200 - overran that single register far
  * quicker than any poll could drain it, dropping the middle byte and leaving
@@ -239,9 +239,9 @@ gsio_init(unsigned int baud)
     REG_RCNT = 0;		/* RCNT[15:14]=0 -> serial (UART) mode */
     REG_SIOCNT = rate | SIO_CTS | SIO_LENGTH_8 | SIO_USE_UART;
     /*
-     * Enter UART mode with the FIFO disabled first - this initializes the
-     * FIFO sequencer (AGB Programming Manual 13.3) - then turn the 4-byte
-     * FIFO and the receive interrupt on.
+     * Enter UART mode with the FIFO still disabled, then turn the 4-byte
+     * FIFO (GBATEK, "SIO UART Mode": SIOCNT bit 8) and the receive
+     * interrupt on, so the FIFO starts out empty.
      */
     REG_SIOCNT = rate | SIO_CTS | SIO_LENGTH_8 | SIO_SEND_ENABLE |
                  SIO_RECV_ENABLE | SIO_USE_UART;
