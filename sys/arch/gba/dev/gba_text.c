@@ -109,21 +109,6 @@ static int gtxt_npal;				/* entries of gtxt_pal[] in use */
 #define GTXT_UNFI(v)	(((v) >> 8) & 0x0f)
 #define GTXT_UNBI(v)	(((v) >> 12) & 0x0f)
 
-/*
- * Fill a run of pixels 32 bits (two pixels) at a time; the
- * runs used here start on 4-byte boundaries and are an even number
- * of pixels long.
- */
-static void
-gtxt_fill32(volatile unsigned short *p, unsigned short c, int npix)
-{
-    volatile unsigned long *w = (volatile unsigned long *)p;
-    unsigned long v = (unsigned long)c << 16 | c;
-
-    for (npix /= 2; npix > 0; npix--)
-        *w++ = v;
-}
-
 /* Map a BGR555 colour to a palette index, adding it if new (table full -> 0). */
 static int
 gtxt_pal_index(unsigned short color)
@@ -236,11 +221,18 @@ gtxt_linefeed(void)
 void
 gtxt_draw_cell(char c, int col, int row, unsigned short fg, unsigned short bg)
 {
-    volatile unsigned short *p = VRAM + (row * GTXT_CHAR_H * GTXT_SCREEN_W)
-        + (col * GTXT_CHAR_W);
+    /*
+     * A cell is 6 pixels = 12 bytes wide, so every cell row starts on a
+     * 4-byte boundary and is written as three 32-bit words of two pixels
+     * each.  pair[] holds the word for each 2-bit slice of a font row:
+     * bit 1 is the left pixel (low halfword), bit 0 the right one.
+     */
+    volatile unsigned long *w = (volatile unsigned long *)(VRAM +
+        row * GTXT_ROW_PIXELS + col * GTXT_CHAR_W);
     const unsigned char *glyph = &gtxt_font[(unsigned char)c * GTXT_CHAR_H];
-    int r, col2;
-    unsigned char bits;
+    unsigned long pair[4];
+    unsigned bits;
+    int r;
 
     /* Record glyph+colour into the backing store first - even while the panel
        is owned, so console output that advances unpainted can be restored
@@ -250,11 +242,16 @@ gtxt_draw_cell(char c, int col, int row, unsigned short fg, unsigned short bg)
             GTXT_PACK(c, gtxt_pal_index(fg), gtxt_pal_index(bg));
     if (gba_gfx_active())		/* panel owned: console + swkbd stay silent */
         return;
+    pair[0] = (unsigned long)bg << 16 | bg;
+    pair[1] = (unsigned long)fg << 16 | bg;
+    pair[2] = (unsigned long)bg << 16 | fg;
+    pair[3] = (unsigned long)fg << 16 | fg;
     for (r = 0; r < GTXT_CHAR_H; r++) {
         bits = glyph[r];
-        for (col2 = 0; col2 < GTXT_CHAR_W; col2++)
-            p[col2] = (bits & (0x80 >> col2)) ? fg : bg;
-        p += GTXT_SCREEN_W;
+        w[0] = pair[bits >> 6 & 3];
+        w[1] = pair[bits >> 4 & 3];
+        w[2] = pair[bits >> 2 & 3];
+        w += GTXT_SCREEN_W / 2;
     }
 }
 
@@ -327,15 +324,13 @@ gtxt_cursor(int on)
 void
 gtxt_cls(void)
 {
-    volatile unsigned short *p = VRAM;
-    volatile unsigned short *end = VRAM + (GTXT_SCREEN_W * GTXT_SCREEN_H);
     int r, c;
 
     for (r = 0; r < GTXT_ROWS; r++)
         for (c = 0; c < GTXT_COLS; c++)
             gtxt_cell_blank(r, c);
     if (!gba_gfx_active())
-        gtxt_fill32(p, gtxt_bg, end - p);
+        gtxt_dma16(VRAM, 0, GTXT_SCREEN_W * GTXT_SCREEN_H, 1);
     gtxt_curx = 0;
     gtxt_cury = GTXT_BOTTOM;	/* start at the bottom, like a terminal */
     gtxt_cursor_on = 0;		/* cleared along with the rest of VRAM */
@@ -370,10 +365,10 @@ gtxt_restore(void)
 void
 gtxt_init(unsigned short fg, unsigned short bg)
 {
-    REG_DISPCNT = 0x0403;   /* Mode 3, enable BG2 */
+    REG_DISPCNT = 0x0403; /* Mode 3, Screen Display BG2 */
     gtxt_fg = fg;
-    gtxt_fg_normal = fg;
     gtxt_bg = bg;
+    gtxt_fg_normal = fg;
     /*
      * Permanently reserve the bottom 5 rows for the on-screen keyboard so
      * the console is a fixed 40x15 (roadmap: vi/terminal support, "Option
@@ -382,7 +377,7 @@ gtxt_init(unsigned short fg, unsigned short bg)
      * keyboard happens to be drawn (swkbd.c paints/blanks that band but no
      * longer grows the console back to 20 rows when hidden).
      */
-    gtxt_reserved = 5 * GTXT_CHAR_H;
+    gtxt_reserved = GTXT_CHAR_H * 5;
     gtxt_cls();
 }
 
@@ -426,7 +421,7 @@ gtxt_blank(int on)
         *(volatile unsigned short *)0x5000000 = 0x0000; /* backdrop -> black */
         REG_DISPCNT = 3;              /* Mode 3, BG2 OFF -> backdrop only */
     } else {
-        REG_DISPCNT = 0x0403;  /* Mode 3, BG2 ON  -> text visible */
+        REG_DISPCNT = 3 | (1 << 10);  /* Mode 3, BG2 ON  -> text visible */
     }
 }
 
