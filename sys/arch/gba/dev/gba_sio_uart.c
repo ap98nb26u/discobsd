@@ -1,13 +1,14 @@
 /*
  * Real hardware UART over the GBA's Serial I/O (link cable) port.
  * It began from Adrian O'Grady's fivemouse.com GBA UART demo
- * (http://www.fivemouse.com/gba/), but none of that code remains.
+ * (http://www.fivemouse.com/gba/), but none of that code remains; the
+ * register use follows GBATEK, "SIO UART Mode".
  *
  * The SIO port in UART mode uses hardware CTS/RTS flow control on
- * the link cable's SD/SC lines.  Output waits for CTS with a bound; if
- * no peer ever raises it the port is marked dead and console output
- * goes to the LCD only.  Input is taken from the 4-byte receive FIFO
- * into a ring (see below).
+ * the link cable's SD/SC lines.  Output waits for room in the send
+ * FIFO with a bound; if it never drains, no peer is taking data, so
+ * the port is marked dead and console output goes to the LCD only.
+ * Input is taken from the 4-byte receive FIFO into a ring (see below).
  */
 #include <sys/param.h>
 #include <sys/user.h>
@@ -37,18 +38,16 @@
 #define SIO_BAUD_57600  0x0002
 #define SIO_BAUD_115200 0x0003
 
-#define SIO_CTS         0x0004
-#define SIO_SEND_DATA   0x0010 /* 0=send register empty, 1=still full/busy */
+#define SIO_CTS         0x0004	/* SIOCNT d02: send only while SC is low */
+#define SIO_SEND_DATA   0x0010	/* SIOCNT d04: 1 = send FIFO full */
 
 /*
- * Bounds for gsio_putc()'s waits. CTS is a busy-wait only hit at the
- * very start if there IS a peer; if there is none (cable-less GBA), one
- * timeout of this length is paid once and serial is then dropped, so it
- * can be generous. The send-complete wait always finishes on its own
- * (internal-clock UART) in ~1500 cycles; bound it only against a wedge.
+ * How long gsio_putc() waits for room in the send FIFO.  With a peer it
+ * drains a byte per byte time (1 ms at 9600); it stays full only when
+ * nothing lowers SC - no cable, or a peer that has stopped reading - so
+ * the wait can be generous: it is paid once, then serial is dropped.
  */
-#define GSIO_CTS_LIMIT   1000000
-#define GSIO_SEND_LIMIT  100000
+#define GSIO_SEND_LIMIT  1000000
 #define SIO_LENGTH_8    0x0080
 #define SIO_SEND_ENABLE 0x0400
 #define SIO_RECV_ENABLE 0x0800
@@ -213,7 +212,7 @@ static unsigned int gsio_baud;		/* current rate, for /dev/sio */
 void
 gsio_init(unsigned int baud)
 {
-    unsigned short rate;
+    unsigned short rate, cnt;
 
     gsio_baud = baud;
 
@@ -233,40 +232,39 @@ gsio_init(unsigned int baud)
     }
 
     /*
-     * Enter UART mode with send and receive still off, so nothing
-     * stale goes out, then switch them on.
+     * RCNT bit 15 = 0 puts the link port in one of the SIO modes, and
+     * SIOCNT bits 12-13 pick UART.  Enter UART mode with the FIFOs, send
+     * and receive all off: turning the FIFOs off empties them (GBATEK),
+     * so when send is enabled there is nothing stale to go out.  Then
+     * switch on the FIFOs, send, receive and the SIO interrupt.
      */
-    REG_RCNT = 0;		/* RCNT[15:14]=0 -> serial (UART) mode */
-    REG_SIOCNT = rate | SIO_CTS | SIO_LENGTH_8 | SIO_USE_UART;
-    /*
-     * Enter UART mode with the FIFO still disabled, then turn the 4-byte
-     * FIFO (GBATEK, "SIO UART Mode": SIOCNT bit 8) and the receive
-     * interrupt on, so the FIFO starts out empty.
-     */
-    REG_SIOCNT = rate | SIO_CTS | SIO_LENGTH_8 | SIO_SEND_ENABLE |
-                 SIO_RECV_ENABLE | SIO_USE_UART;
-    REG_SIOCNT = REG_SIOCNT | SIO_FIFO_ENABLE | SIO_IRQ_ENABLE;
+    REG_RCNT = 0;
+    cnt = rate | SIO_CTS | SIO_LENGTH_8 | SIO_USE_UART;
+    REG_SIOCNT = cnt;
+    REG_SIOCNT = cnt | SIO_FIFO_ENABLE | SIO_SEND_ENABLE | SIO_RECV_ENABLE |
+                 SIO_IRQ_ENABLE;
 }
 
 /*
  * Non-blocking peek: does the receive FIFO hold a byte (SIOCNT d05
- * clear)? A pure status read with no side effects, unlike gsio_getc()
- * (which re-arms the flag first); used by the halt/reboot key wait.
+ * clear)?  A pure status read with no side effects; used by the
+ * halt/reboot key wait.
  */
 int
 gsio_avail(void)
 {
-    return (REG_SIOCNT & 0x0020) == 0;
+    return (REG_SIOCNT & SIO_RECV_DATA) == 0;
 }
 
+/* Wait for and return the next received byte, through the ring. */
 unsigned char
 gsio_getc(void)
 {
-    /* SIOCNT bit 5 is set while the receive buffer is empty. */
-    while (REG_SIOCNT & 0x0020)
-        ;
+    int b;
 
-    return (unsigned char)REG_SIODATA8;
+    while ((b = gsio_rx_pop()) < 0)
+        gsio_rx_service();
+    return (unsigned char)b;
 }
 
 void
@@ -276,10 +274,10 @@ gsio_putc(unsigned char c)
 
     /*
      * Flow control is the hardware's: with SIO_CTS set the SIO sends
-     * only while SC (the peer's RTS) is low.  So just wait for the
-     * send buffer to empty.  If it stays full, nothing is taking data -
+     * only while SC (the peer's RTS) is low.  So just wait for room in
+     * the 4-byte send FIFO.  If it stays full, nothing is taking data -
      * a GBA without a cable, say - and the first boot printf would
-     * otherwise wait for ever: stop sending (see
+     * otherwise wait for ever: stop sending until a byte arrives (see
      * gsio_fifo_drain()), and the LCD console carries on alone.
      */
     if (gsio_dead)
