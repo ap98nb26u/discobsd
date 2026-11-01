@@ -810,6 +810,7 @@ file /usr/share/examples/gba/down15th.s8
 file /usr/share/examples/gba/down15th-st.s8
 file /usr/share/examples/gba/jacques.mml
 file /usr/share/examples/gba/minuet.mml
+file /usr/share/examples/gba/grace.mml
 
 default
 filemode 0775

@@ -1,0 +1,20 @@
+; Amazing Grace (the tune "New Britain", 1829 - public domain), arranged
+; for this port, about 29 seconds.  It shows the pitch effects: vibrato
+; on the melody, a portamento up to its high note, and a pad that glides
+; from chord to chord.
+; Play it with: mml /usr/share/examples/gba/grace.mml
+
+ABC t100
+
+; A: the melody, with a vibrato that starts an eighth into each note
+A o4 l4 @wd2 v11 @v5,3,8
+A d  g2 b8 g8  b2 a  g2 e  d2 d  g2 b8 g8  b2 a
+A @p40 >d2.^2 @p0 <b  >d2 <b8 g8  b2 a  g2 e  d2 d  g2 b8 g8  b2 a  g2.^2.
+
+; B: a soft pad, gliding between the chords
+B o4 l2. @wd1 v5 @p6 @v3,1,4
+B r4 d d e d  d d f+ d  d d e d  d f+ d^2.
+
+; C: the bass on the wave channel
+C o3 l2. v2
+C r4 g g >c< g  g g d g  g g >c< g  g d g^2.

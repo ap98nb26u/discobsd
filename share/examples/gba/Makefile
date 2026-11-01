@@ -25,7 +25,8 @@ PROG=		tetris gball gball5 gball5i imgdemo fontchart fontsampler \
 		gfxtest gfxtest2 gfxtest3 gfxtest4 keytest beeptest infloop \
 		sigrestart
 SRCONLY=	hello.c ctest.c
-SOUNDS=		SOUNDS down15th.s8 down15th-st.s8 jacques.mml minuet.mml
+SOUNDS=		SOUNDS down15th.s8 down15th-st.s8 jacques.mml minuet.mml \
+		grace.mml
 
 FONTS=		5x7.o 6x9.o digits20.o lucidasans9.o lucidasans15.o verdana7.o
 

@@ -30,11 +30,17 @@ minuet.mml      Minuet in G major, BWV Anh. 114, from the Notebook for
                 Petzold; public domain): the melody, the melody an
                 octave lower and a simple bass, about 26 seconds.
 
-Both arrangements were written for this port from the music itself, not
+grace.mml       "Amazing Grace" (the tune "New Britain", 1829; public
+                domain): the melody with a vibrato and a portamento, a
+                pad gliding between the chords and a bass, about 29
+                seconds.
+
+All three arrangements were written for this port from the music itself, not
 taken from other MML files, and are under this tree's license.
 
 	mml /usr/share/examples/gba/jacques.mml
 	mml /usr/share/examples/gba/minuet.mml
+	mml /usr/share/examples/gba/grace.mml
 
 Playing it while a PCM sample plays on /dev/audio shows the GBA mixing
 the two.
