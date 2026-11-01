@@ -572,7 +572,6 @@ file /usr/bin/rev
 file /bin/rm
 file /bin/rmail
 file /bin/rmdir
-file /usr/bin/rz
 file /usr/bin/scc
 file /usr/bin/scm
 file /usr/bin/sed
@@ -589,7 +588,6 @@ mode 04755
 file /usr/bin/sum
 file /bin/sync
 file /sbin/sysctl
-file /usr/bin/sz
 file /usr/bin/tail
 file /bin/tar
 file /usr/bin/tclsh
@@ -646,16 +644,6 @@ link /usr/bin/chfn
 target /usr/bin/chpass
 link /usr/bin/chsh
 target /usr/bin/chpass
-
-link /usr/bin/rb
-target /usr/bin/rz
-link /usr/bin/rx
-target /usr/bin/rz
-
-link /usr/bin/sb
-target /usr/bin/sz
-link /usr/bin/sx
-target /usr/bin/sz
 
 link /usr/bin/machine
 target /usr/bin/arch
