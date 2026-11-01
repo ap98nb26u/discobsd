@@ -110,6 +110,11 @@
 #define SNDH_MONO	(0x0002 | 0x0004 | 0x0100 | 0x0200 | 0x0400)
 #define SNDH_STEREO	(0x0002 | 0x0004 | 0x0200 | 0x0400 \
 			         | 0x0008 | 0x1000 | 0x4000)
+/*
+ * Bits 0-1 are the PSG's share of the mix, which /dev/psg may change
+ * (gba_psg.c): keep them as they are.
+ */
+#define SNDH_PSGMIX	(REG_SOUNDCNT_H & 3)
 #define SNDH_FIFO_RESET_A	0x0800
 #define SNDH_FIFO_RESET_B	0x8000
 
@@ -247,7 +252,8 @@ audio_hw_start(void)
 	REG_DMA2CNT_H = 0;
 
 	if (audio_stereo) {
-		REG_SOUNDCNT_H = SNDH_STEREO | SNDH_FIFO_RESET_A | SNDH_FIFO_RESET_B;
+		REG_SOUNDCNT_H = SNDH_PSGMIX | (SNDH_STEREO & ~3) |
+		    SNDH_FIFO_RESET_A | SNDH_FIFO_RESET_B;
 		REG_DMA1SAD = (uint32_t)&abuf[off];	/* left */
 		REG_DMA1DAD = (uint32_t)FIFO_A;
 		REG_DMA1CNT_L = 0;
@@ -257,7 +263,7 @@ audio_hw_start(void)
 		REG_DMA1CNT_H = DMA1_SOUND;
 		REG_DMA2CNT_H = DMA1_SOUND;		/* both prime now */
 	} else {
-		REG_SOUNDCNT_H = SNDH_MONO | SNDH_FIFO_RESET_A;
+		REG_SOUNDCNT_H = SNDH_PSGMIX | (SNDH_MONO & ~3) | SNDH_FIFO_RESET_A;
 		REG_DMA1SAD = (uint32_t)&abuf[off];
 		REG_DMA1DAD = (uint32_t)FIFO_A;
 		REG_DMA1CNT_L = 0;
@@ -283,8 +289,8 @@ audio_hw_stop(void)
 	REG_TM1CNT_H = 0;			/* stop the sample clock first */
 	REG_DMA1CNT_H = 0;			/* disable sound DMA(s) */
 	REG_DMA2CNT_H = 0;
-	REG_SOUNDCNT_H = SNDH_FIFO_RESET_A | SNDH_FIFO_RESET_B;	/* clear FIFOs */
-	REG_SOUNDCNT_H = 0x0002;		/* back to PSG-only (beep) */
+	REG_SOUNDCNT_H = SNDH_PSGMIX | SNDH_FIFO_RESET_A | SNDH_FIFO_RESET_B;
+	REG_SOUNDCNT_H = SNDH_PSGMIX;		/* back to PSG only */
 	audio_playing = 0;
 }
 

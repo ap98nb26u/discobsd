@@ -18,6 +18,7 @@ void timeout(void (*)(caddr_t), caddr_t, int);
 
 #include <machine/gba.h>
 #include <gba/dev/gba_sound.h>
+#include <gba/dev/gba_psg.h>
 
 /*
  * Beep pitch and duration.
@@ -79,6 +80,8 @@ gba_sound_prime(void)
 void
 gba_beep(void)
 {
+	if (psg_busy())
+		return;		/* /dev/psg is playing: no bell over the music */
 	REG_SOUND1CNT_L = 0x0000;			/* no frequency sweep */
 	/* initial envelope volume 15 (no decay), 50% duty, length field */
 	REG_SOUND1CNT_H = 0xF000 | 0x0080 | (BEEP_LENGTH & 0x3F);

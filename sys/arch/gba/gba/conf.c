@@ -26,6 +26,7 @@
 #endif
 #include <gba/dev/uart.h>
 #include <gba/dev/gba_sio_uart.h>
+#include <gba/dev/gba_psg.h>
 
 #ifdef SD_ENABLED
 #include <gba/dev/sd.h>
@@ -280,6 +281,11 @@ const struct cdevsw cdevsw[] = {
 #else
 		NOCDEV
 #endif
+	},
+	{	/* 21 - psg: timed PSG register writes, /dev/psg */
+		psgopen,	psgclose,	norw,		psgwrite,
+		psgioctl,	nullstop,	0,		seltrue,
+		nostrategy,	0,		0,
 	},
 
 	/*

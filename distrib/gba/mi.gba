@@ -426,6 +426,14 @@ minor 5
 mode 666
 
 #
+# PSG sound channels, a timed stream of register writes (mml -o output).
+#
+cdev /dev/psg
+major 21
+minor 0
+mode 666
+
+#
 # Files: /root
 #
 dir /root

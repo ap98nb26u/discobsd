@@ -33,6 +33,7 @@
 #include <gba/dev/mgbalog.h>
 #include <gba/dev/gba_sio_uart.h>
 #include <gba/dev/gba_audio.h>
+#include <gba/dev/gba_psg.h>
 #include <machine/gba_syscall.h>
 
 int cpu_khz = 16777;
@@ -387,6 +388,7 @@ THUMB_CODE void gba_do_schedule(unsigned pc)
          * sound DMA once per interrupt. Cheap no-op when nothing is playing.
          */
         audio_tick();
+        psg_tick();             /* /dev/psg: due PSG register writes */
 #ifdef HANGDUMP
         gba_hang_dump();
 #endif
