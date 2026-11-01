@@ -577,6 +577,7 @@ file /usr/bin/scc
 file /usr/bin/scm
 file /usr/bin/sed
 file /usr/bin/setty
+file /usr/bin/sixelshot
 file /bin/sh
 file /usr/bin/sl
 file /bin/sleep
