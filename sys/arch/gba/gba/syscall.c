@@ -427,6 +427,14 @@ bad:
 			    (unsigned)frame->tf_r0, (unsigned)frame->tf_r1,
 			    (unsigned)frame->tf_r2, (unsigned)frame->tf_r3,
 			    (unsigned)frame->tf_lr, (unsigned)frame->tf_psr);
+			/*
+			 * Jumping there would run whatever is at that
+			 * address, typically hanging the machine: kill the
+			 * process instead (userret() below delivers it
+			 * before the return).  SIGKILL, as it cannot be
+			 * caught: a handler is in the same broken image.
+			 */
+			psignal(u.u_procp, SIGKILL);
 		}
 	}
 #endif
