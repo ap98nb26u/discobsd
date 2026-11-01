@@ -6,7 +6,10 @@
 TOPSRC!=cd ..; pwd
 include ${TOPSRC}/share/mk/sys.mk
 
-MDSUBDIR!=if [ x"${MACHINE_ARCH}" = x"arm" ] ; then \
+# GBA-only: ekermit uses the link-cable UART's /dev/sio.
+MDSUBDIR!=if [ x"${MACHINE}" = x"gba" ] ; then \
+		echo "lex ekermit" ; \
+	elif [ x"${MACHINE_ARCH}" = x"arm" ] ; then \
 		echo "lex" ; \
 	elif [ x"${MACHINE_ARCH}" = x"mips" ] ; then \
 		echo "adb smlrc" ; \

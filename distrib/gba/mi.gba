@@ -505,6 +505,7 @@ file /usr/bin/du
 file /bin/echo
 file /bin/ed
 file /usr/bin/egrep
+file /usr/bin/ek
 file /usr/bin/emg
 file /usr/bin/env
 file /bin/expr
