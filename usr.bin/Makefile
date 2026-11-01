@@ -6,10 +6,10 @@
 TOPSRC!=cd ..; pwd
 include ${TOPSRC}/share/mk/sys.mk
 
-# GBA-only: ekermit uses the link-cable UART's /dev/sio, sixelshot
-# reads the GBA frame buffer.
+# GBA-only: ekermit uses the link-cable UART's /dev/sio, mml the PSG
+# through /dev/psg, sixelshot reads the GBA frame buffer.
 MDSUBDIR!=if [ x"${MACHINE}" = x"gba" ] ; then \
-		echo "lex ekermit sixelshot" ; \
+		echo "lex ekermit mml sixelshot" ; \
 	elif [ x"${MACHINE_ARCH}" = x"arm" ] ; then \
 		echo "lex" ; \
 	elif [ x"${MACHINE_ARCH}" = x"mips" ] ; then \

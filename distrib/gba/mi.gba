@@ -554,6 +554,7 @@ file /bin/md5
 file /usr/bin/med
 file /usr/bin/mesg
 file /bin/mkdir
+file /usr/bin/mml
 file /usr/bin/more
 file /usr/bin/msec
 file /bin/mv
@@ -807,6 +808,8 @@ file /usr/share/examples/gba/sigrestart.c
 file /usr/share/examples/gba/SOUNDS
 file /usr/share/examples/gba/down15th.s8
 file /usr/share/examples/gba/down15th-st.s8
+file /usr/share/examples/gba/jacques.mml
+file /usr/share/examples/gba/minuet.mml
 
 default
 filemode 0775

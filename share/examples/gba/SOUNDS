@@ -17,3 +17,24 @@ https://freesound.org/people/akelley6/sounds/554787/
 licensed under CC BY 4.0, https://creativecommons.org/licenses/by/4.0/
 Changes: converted from the original 44.1 kHz stereo WAV to raw 8-bit
 signed PCM at 8192 Hz, mono and stereo.
+
+PSG music for mml(1) (/dev/psg)
+===============================
+
+jacques.mml     "Frere Jacques" (traditional, public domain) as a
+                three-part round with a noise drum, arranged for this
+                port; it uses all four PSG channels.
+
+minuet.mml      Minuet in G major, BWV Anh. 114, from the Notebook for
+                Anna Magdalena Bach (now attributed to Christian
+                Petzold; public domain): the melody, the melody an
+                octave lower and a simple bass, about 26 seconds.
+
+Both arrangements were written for this port from the music itself, not
+taken from other MML files, and are under this tree's license.
+
+	mml /usr/share/examples/gba/jacques.mml
+	mml /usr/share/examples/gba/minuet.mml
+
+Playing it while a PCM sample plays on /dev/audio shows the GBA mixing
+the two.

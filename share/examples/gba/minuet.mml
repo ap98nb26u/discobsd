@@ -1,0 +1,30 @@
+; Minuet in G major, BWV Anh. 114, from the Notebook for Anna Magdalena
+; Bach (now attributed to Christian Petzold) - public domain.  Melody as
+; written; the bass is a simple one following the harmony.  Arranged for
+; this port, about 26 seconds.
+; Play it with: mml /usr/share/examples/gba/minuet.mml
+
+; bars 1-6, played twice
+@@1 = { o5 d4 o4 g a b o5 c  o5 d4 o4 g4 g4  o5 e4 c d e f+  o5 g4 o4 g4 g4
+        o5 c4 d c o4 b a  o4 b4 o5 c o4 b a g }
+
+ABC t110
+
+; A: the melody, plucked like a harpsichord
+A l8 @wd2 @ve-3 v13
+A @@1 o4 f+4 g a b g  o4 a2.
+A @@1 o4 a4 b a g f+  o4 g2.
+
+; B: the melody an octave lower, quietly
+B l8 @wd0 @ve-2 v6
+B [ o4 d4 o3 g a b o4 c  o4 d4 o3 g4 g4  o4 e4 c d e f+  o4 g4 o3 g4 g4
+B   o4 c4 d c o3 b a  o3 b4 o4 c o3 b a g ]1
+B o3 f+4 g a b g  o3 a2.
+B [ o4 d4 o3 g a b o4 c  o4 d4 o3 g4 g4  o4 e4 c d e f+  o4 g4 o3 g4 g4
+B   o4 c4 d c o3 b a  o3 b4 o4 c o3 b a g ]1
+B o3 a4 b a g f+  o3 g2.
+
+; C: the bass, on the wave channel
+C l4 v3
+C o3 g2 a  b2.  o4 c2.  o3 b2.  a2.  g2.  o4 d o3 b g  o4 d o3 d f+
+C o3 g2 a  b2.  o4 c2.  o3 b2.  a2 f+  g2 b  o4 c d o3 d  g2 o2 g

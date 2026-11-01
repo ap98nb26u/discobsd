@@ -1,8 +1,9 @@
 # GBA examples: gpanel (/dev/tft0..2) demos and test programs, a port of
 # share/examples/gpanel's tftetris, a PSG sound test (beeptest), a
 # preemption test (infloop), a syscall restart test (sigrestart), plus
-# small sources for the on-device C toolchain, and PCM sound samples for
-# /dev/audio (see SOUNDS for their source and license).
+# small sources for the on-device C toolchain, PCM sound samples for
+# /dev/audio (see SOUNDS for their source and license), and MML songs
+# for mml(1) and /dev/psg.
 #
 # Like the rest of share/examples, the sources are installed in
 # /usr/share/examples/gba.  But the GBA's native cc cannot build gpanel
@@ -24,7 +25,7 @@ PROG=		tetris gball gball5 gball5i imgdemo fontchart fontsampler \
 		gfxtest gfxtest2 gfxtest3 gfxtest4 keytest beeptest infloop \
 		sigrestart
 SRCONLY=	hello.c ctest.c
-SOUNDS=		SOUNDS down15th.s8 down15th-st.s8
+SOUNDS=		SOUNDS down15th.s8 down15th-st.s8 jacques.mml minuet.mml
 
 FONTS=		5x7.o 6x9.o digits20.o lucidasans9.o lucidasans15.o verdana7.o
 
