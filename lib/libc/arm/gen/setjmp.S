@@ -27,12 +27,12 @@
 	.globl	setjmp
 	.type	setjmp, %function
 setjmp:
-	push	{lr}			/* Save return address. */
+	mov	ip, sp			/* Save caller's stack pointer (via ip).. */
+	push	{lr}			/*   before pushing the return address. */
 	movs	r1, #1			/* When saving sigmask, env[0]=1.. */
 	str	r1, [r0]		/*   so longjmp restores sigmask; */
 	adds	r0, r0, #(2 * 4)	/*   skip over sigmask in env[1]. */
 	adds	r1, r0, #0		/* Save env for sigprocmask. */
-	mov	ip, sp			/* Save stack pointer (via ip). */
 #ifdef __thumb2__
 	stmia	r0, {r4-r11,ip,lr}	/* Save regs in env[2-11]. */
 #else /* __thumb__ */
