@@ -41,10 +41,9 @@ void uartinit(int unit) {
      *                     set ONLY in the emulator-only GBALOG config, never
      *                     in the plain GBA/GBAED kernels that run on real
      *                     hardware.
-     *   SERIAL_CONSOLE  - real UART over the link cable (gsio), for
-     *                     interactive debugging; the GBAED build enables
-     *                     it, the cable-free GBA demo build does not (it
-     *                     would otherwise spin on CTS with no peer).
+     *   SERIAL_CONSOLE  - real UART over the link cable (gsio), set in
+     *                     all three configs; with no cable gsio_putc()
+     *                     waits once and then drops serial.
      * Only the console unit is set up here (the GBA has a single UART;
      * uartprobe() would init any other unit).
      */

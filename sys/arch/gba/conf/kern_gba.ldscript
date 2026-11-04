@@ -77,13 +77,20 @@ MEMORY {
      * mGBA and real GBAED hardware just went silent right after
      * "reading a.out image", no crash. MAXMEM now matches USERRAM's
      * length so this fails cleanly (ENOMEM) instead, for anything still
-     * too big (e.g. /sbin/fsck, ~67K). Every KB added here comes
-     * straight out of SWAP, which must keep shrinking to match - keep
-     * USERRAM, MAXMEM (param.h/machparam.h), and USER_DATA_SIZE
-     * (machparam.h) all in sync by hand if this moves again.
+     * too big (/sbin/fsck was, at ~67K; it is ~53K now). Every KB added
+     * here comes straight out of SWAP, which must keep shrinking to
+     * match - keep USERRAM, MAXMEM (param.h/machparam.h), and
+     * USER_DATA_SIZE (machparam.h) all in sync by hand if this moves
+     * again.
      */
     USERRAM (rw!x) : ORIGIN = 0x02001800, LENGTH = 64K   /* 0x0200 1800 - 0x0201 17FF */
-    SWAP    (rw!x) : ORIGIN = 0x02011800, LENGTH = 186K  /* 0x0201 1800 - 0x0203 FFFF */
+    SWAP    (rw!x) : ORIGIN = 0x02011800, LENGTH = 185K  /* 0x0201 1800 - 0x0203 FBFF */
+    /*
+     * The last 1K of EWRAM (KEWRAM) is kernel .bss that IWRAM has no room
+     * for: the pseudo-terminals (tty_pty.o, for telnet logins through
+     * slipd), as in kern_gbaed.ldscript.  SWAP was 186K before that.
+     */
+    KEWRAM  (rw!x) : ORIGIN = 0x0203FC00, LENGTH = 1K    /* 0x0203 FC00 - 0x0204 0000 (to EWRAM end) */
 }
 
 __kernel_flash_start	= ORIGIN(FLASH);
@@ -92,8 +99,8 @@ __kernel_data_start	= ORIGIN(EWRAM);
 __kernel_data_end	= ORIGIN(USERRAM);
 __iwram_start		= ORIGIN(IWRAM);
 __iwram_end		= ORIGIN(IWRAM) + LENGTH(IWRAM);
-__kewram_start		= 0;	/* no KEWRAM on this build */
-__kewram_end		= 0;
+__kewram_start		= ORIGIN(KEWRAM);
+__kewram_end		= ORIGIN(KEWRAM) + LENGTH(KEWRAM);
 __user_data_start	= ORIGIN(USERRAM);
 __user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
 __swap_start		= ORIGIN(SWAP);
@@ -104,10 +111,6 @@ u0			= ORIGIN(U0AREA);
 u			= ORIGIN(UAREA);
 u_end			= ORIGIN(UAREA) + LENGTH(UAREA);
 _estack			= u_end;
-
-/* No kernel .bss in EWRAM on this build (see kern_gbaed.ldscript). */
-__ewram_bss_start	= 0;
-__ewram_bss_end		= 0;
 
 ENTRY(_start)
 
@@ -156,6 +159,17 @@ SECTIONS {
     } > IWRAM AT > FLASH
 
     _sidata = LOADADDR(.data);
+
+    /*
+     * Kernel .bss kept out of IWRAM (see KEWRAM above); listed before .bss
+     * so these input sections land here.  locore0.S zeroes it at boot.
+     */
+    .ewram_bss (NOLOAD) : {
+        __ewram_bss_start = .;
+        *tty_pty.o(.bss .bss.* COMMON)
+        . = ALIGN(4);
+        __ewram_bss_end = .;
+    } > KEWRAM
 
     .bss : {
         __bss_start__ = .;

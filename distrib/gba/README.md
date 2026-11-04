@@ -62,9 +62,11 @@ same files, `distrib/gba/mdroot.img`, directly in the ROM.
 The primary console is the on-screen LCD text console, with an on-screen
 software keyboard for input. No external hardware is required.
 
-The GBAED build also supports an optional serial console over the link cable
-(115200 baud), which can be used with a link-cable-to-serial adapter and a
-terminal program such as `cu`, `screen`, `minicom`, or `putty`.
+The GBA and GBAED builds also support an optional serial console over the
+link cable (115200 baud), which can be used with a link-cable-to-serial
+adapter and a terminal program such as `cu`, `screen`, `minicom`, or `putty`.
+The plain GBA build needs no EverDrive for this. With no cable, or in an
+emulator, the serial side switches itself off and the LCD console runs alone.
 
 Log in to DiscoBSD with user `root` and a blank password.
 

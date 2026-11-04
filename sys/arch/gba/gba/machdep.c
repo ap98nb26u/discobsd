@@ -899,7 +899,7 @@ boot(dev_t dev, int howto)
 	 * hardware (GBA/GBAED) and in the emulators. REG_KEYINPUT bits are
 	 * active-low (0 = pressed); wait until any of the ten keys is down.
 	 *
-	 * On a build with a serial console (GBAED), also accept a byte on the
+	 * With a serial console (SERIAL_CONSOLE), also accept a byte on the
 	 * serial link so a host at the other end of the cable can reboot without
 	 * touching the GBA - gsio_avail() is a side-effect-free peek at the
 	 * receive-data flag, so polling it here does not disturb anything.
@@ -1036,14 +1036,14 @@ baduaddr(caddr_t addr)
 /*
  * Return 0 if a kernel address is valid.
  * The kernel's memory regions are: EWRAM (U0AREA/UAREA only - see
- * __kernel_data_start/end in kern_gba.ldscript), IWRAM, flash/ROM and,
- * on GBAED, KEWRAM.
+ * __kernel_data_start/end in kern_gba.ldscript), IWRAM, flash/ROM and
+ * KEWRAM.
  *
  * IWRAM holds the kernel's .data/.bss (proc[], nproc and the other
  * globals ps(1) reads via /dev/kmem), so it must be accepted here:
  * mmrw() (dev/mem.c) rejects an address that is both badkaddr() and
- * baduaddr(). The same goes for KEWRAM, the last 1K of EWRAM on GBAED
- * (__kewram_start/end, empty on the other builds), which holds the
+ * baduaddr(). The same goes for KEWRAM, the last 1K of EWRAM
+ * (__kewram_start/end), which holds the
  * pseudo-terminals. Accept the whole region, as for IWRAM: a stdio
  * reader such as od(1) reads it in 1K blocks.
  */

@@ -1,10 +1,10 @@
 GBA SLIP networking - host side
 ===============================
 
-The GBA (GBAED build) runs a small IP host, /usr/sbin/slipd, on its
-link-cable UART through /dev/sio.  These two scripts connect it to a
-Linux IP interface when the link cable is on a Windows PC and Linux runs
-in WSL2 (whose kernel has no SLIP driver):
+The GBA (GBA or GBAED build, with a serial cable) runs a small IP host,
+/usr/sbin/slipd, on its link-cable UART through /dev/sio.  These two
+scripts connect it to a Linux IP interface when the link cable is on a
+Windows PC and Linux runs in WSL2 (whose kernel has no SLIP driver):
 
     GBA --link cable/USB serial (COM3)-- com_bridge.ps1 (Windows)
         --TCP localhost:5555-- slip_tun.py (WSL2) --TUN gba0-- Linux IP
@@ -40,6 +40,9 @@ Logging in over telnet:
  3. WSL2, terminal 1:    python3 tools/gbanet/slip_tun.py
     Windows (or from WSL2 through powershell.exe), terminal 2:
         powershell -ExecutionPolicy Bypass -File C:\Users\Public\com_bridge.ps1
+    (From WSL2 without the Windows PATH, give it in full:
+    /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe.)
+    Nothing answers until both are running.
     It prints "com_bridge: COM3 at 115200 ..."; -Baud must match
     slipd's rate (default 115200 for both, the serial console's too).
  4. WSL2:  ping 192.168.7.2      (RTT about 50-60 ms)

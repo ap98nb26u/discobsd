@@ -54,17 +54,20 @@ options         "UART_BAUD=115200"          # default speed
 
 # Console. Output always goes to the on-screen LCD text console (gtxt),
 # and input always comes from the on-screen software keyboard (swkbd);
-# those are unconditional. This is the plain GBA kernel: no emulator log is
-# compiled in, so it stays fully self-contained on real (non-EverDrive)
-# hardware. For a headless emulator console log (mGBA / VisualBoyAdvance)
-# use the GBALOG config, which is this config plus options "AGBPRINT".
-#
-# SERIAL_CONSOLE is deliberately NOT set: this standalone build runs with
-# no serial cable, and the SIO/UART link-cable console (gsio) busy-waits
-# on CTS / a per-byte send-complete flag that never complete with nothing
-# wired up (~0.5s per character, and it would also mirror output to any
-# peer). Leaving it out keeps the LCD console full-speed and cable-free;
-# GBAED opts in to SERIAL_CONSOLE for interactive debugging over a cable.
+# those are unconditional. SERIAL_CONSOLE also mirrors output to, and takes
+# input from, the SIO/UART link-cable console (gsio), so a GBA with a serial
+# cable can be used from a terminal and run slipd. With no cable nothing
+# drains the send FIFO: gsio_putc() waits once, then drops serial until a
+# byte arrives, so a cable-free GBA keeps a full-speed LCD console.
+# This is the plain GBA kernel: no emulator log is compiled in, so it
+# runs on real hardware with or without an EverDrive. For a headless
+# emulator console log (mGBA / VisualBoyAdvance) use the GBALOG config,
+# which is this config plus options "AGBPRINT".
 options         "CONS_MAJOR=UART_MAJOR"     # console is the uart tty
 options         "CONS_MINOR=0"              # uart1 is /dev/tty0
+options         "SERIAL_CONSOLE"            # UART console over the link cable
 
+# Pseudo-terminals, for telnet logins through slipd (usr.sbin/slipd).
+# Their tty structures live in the last 1K of EWRAM (KEWRAM in
+# kern_gba.ldscript) - IWRAM has no room left.
+service         pty     2

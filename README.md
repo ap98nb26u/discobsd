@@ -19,7 +19,7 @@ This fork adds a `DiscoBSD/gba` port to the Arm7TDMI Game Boy Advance: a
 handheld with a fixed 256 Kbytes of RAM and no MMU. It runs on GBA emulators
 and on EverDrive GBA X5 flash cartridges, driving an on-screen soft keyboard
 and an LCD text console in place of a serial terminal (a real serial console
-is also available on the EverDrive). Prebuilt images to try it without a
+over the link cable is also available, with or without an EverDrive). Prebuilt images to try it without a
 toolchain are on the [`gba-2.7-prebuilt`][28] branch.
 
 Source code to the system is freely available under a BSD-like license.

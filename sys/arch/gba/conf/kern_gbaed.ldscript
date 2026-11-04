@@ -56,8 +56,9 @@ MEMORY {
      * (0x02001800..0x0203FC00 = 249K, vs the ROM-root build's 64K), so a
      * single resident process can be up to 249K and far more can be
      * parked in PSRAM swap. kern_gba.ldscript keeps the 64K USERRAM +
-     * 186K EWRAM SWAP split. Keep LENGTH here in sync with
-     * machparam.h's -DGBAED USER_DATA_SIZE and MAXMEM (all 249K) by hand.
+     * 185K EWRAM SWAP split (and the same 1K KEWRAM). Keep LENGTH here in
+     * sync with machparam.h's -DGBAED USER_DATA_SIZE and MAXMEM (all 249K)
+     * by hand.
      *
      * The last 1K of EWRAM (KEWRAM) is kernel .bss that IWRAM has no room
      * for: the pseudo-terminals (tty_pty.o, for telnet logins through

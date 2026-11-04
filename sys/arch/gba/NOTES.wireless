@@ -40,7 +40,7 @@ adapter yet.  Sources at the end.
 
 - Driver: a new link-port mode next to gba_sio_uart.c (SIO Normal 32-bit,
   master clock), selected instead of the UART - e.g. a /dev/rfu device
-  that, like /dev/sio, owns the port while open.  On GBAED the console
+  that, like /dev/sio, owns the port while open.  The console
   then lives on the LCD/soft keyboard only.
 - Timers: gba-link-connection's LinkWireless drives its transfers from a
   hardware timer (default Timer3), but all four are taken here: Timer0

@@ -13,16 +13,16 @@ Enabled hardware interrupt sources (REG_IE, set in clock.c:cpu_initclocks()):
 
     bit3  Timer0 overflow   system clock -> hardclock()   (IRQ_TIMER0)
     bit7  SIO               serial console backstop       (IRQ_SERIAL,
-                            SERIAL_CONSOLE builds = GBAED only, see below)
+                            SERIAL_CONSOLE builds = all three, see below)
 
-Timer0 is the only source on the GBA build. VBLANK (bit0, IRQ_VBLANK) was
+Timer0 and SIO are the only sources. VBLANK (bit0, IRQ_VBLANK) was
 formerly enabled too (DISPSTAT bit3 + REG_IE bit0) but its handler only
 set vblank_flag, which nothing read, so it was removed -- on-screen
 input and the cursor blink are polled via REG_VCOUNT/lbolt, not a VBLANK
 IRQ. Keypad, SIO (serial), DMA-completion, HBlank and VCount interrupts
 are all UNUSED -- input and video timing are polled (swkbd.c reads
 REG_KEYINPUT and REG_VCOUNT directly).  Exception: SERIAL_CONSOLE builds
-(GBAED) also enable the SIO interrupt (bit7) as a backstop - in UART mode
+(GBA, GBALOG, GBAED) also enable the SIO interrupt (bit7) as a backstop - in UART mode
 it fires on send-full, receive-EMPTY or error, never on a byte arriving,
 so the receive FIFO is still emptied by polling (gba_sio_uart.c).
 
@@ -156,8 +156,8 @@ No BIOS SWI is issued by the GBA and GBAED kernels.
     as on a cold boot.  The BIOS resets were dropped: HardReset (swi
     0x26, undocumented) hangs mGBA, and SoftReset (swi 0x00) left stale
     I/O state that made the next boot misbehave.
-  - Halt (machdep.c) polls REG_KEYINPUT (and, on GBAED, the serial
-    line) for a key to reboot.
+  - Halt (machdep.c) polls REG_KEYINPUT (and, with SERIAL_CONSOLE, the
+    serial line) for a key to reboot.
   - System calls do NOT use a real SWI. The GBA SWI vector 0x00000008
     is BIOS ROM (unwritable), so this port uses a software-simulated
     SWI: RAM address SYSCALL_VECTOR_ADDR = 0x03007E00 (machparam.h,

@@ -104,6 +104,8 @@ static volatile unsigned short gsio_rxhead, gsio_rxtail;
 
 unsigned long gsio_nrx, gsio_nerr;	/* bytes received, receive errors */
 static int gsio_dead;			/* no serial peer: send nothing, LCD only */
+static int gsio_absent;			/* no working UART at all (see gsio_init) */
+static int gsio_probed;
 
 #ifdef SERIAL_CONSOLE
 /*
@@ -153,6 +155,8 @@ gsio_fifo_drain(void)
 {
     unsigned short cnt;
 
+    if (gsio_absent)
+        return;
     while (((cnt = REG_SIOCNT) & SIO_RECV_DATA) == 0) {	/* a byte is waiting */
         unsigned short nh = GSIO_NEXT(gsio_rxhead);
 
@@ -189,6 +193,8 @@ gsio_rx_isr(void)
 void
 gsio_rx_service(void)
 {
+    if (gsio_absent)
+        return;			/* and keep the SIO interrupt off */
     REG_SIOCNT = REG_SIOCNT & (unsigned short)~SIO_IRQ_ENABLE;
     gsio_fifo_drain();
     REG_SIOCNT = REG_SIOCNT | SIO_IRQ_ENABLE;
@@ -213,6 +219,7 @@ void
 gsio_init(unsigned int baud)
 {
     unsigned short rate, cnt;
+    int i;
 
     gsio_baud = baud;
 
@@ -243,6 +250,29 @@ gsio_init(unsigned int baud)
     REG_SIOCNT = cnt;
     REG_SIOCNT = cnt | SIO_FIFO_ENABLE | SIO_SEND_ENABLE | SIO_RECV_ENABLE |
                  SIO_IRQ_ENABLE;
+
+    /*
+     * Is there a real UART?  The receive FIFO was just emptied and holds at
+     * most four bytes, so on hardware the "byte waiting" flag clears within
+     * a few reads.  An emulator without UART mode (mGBA) reports a byte
+     * waiting for ever and returns junk, which would flood the console and
+     * end the halt key wait at once.  If the flag survives eight reads,
+     * leave the SIO off and run with the LCD console alone.  Only at the
+     * first call: later ones (a /dev/sio rate change) have a live line.
+     */
+    if (gsio_probed)
+        return;
+    gsio_probed = 1;
+    for (i = 0; ; i++) {
+        if (REG_SIOCNT & SIO_RECV_DATA)
+            break;			/* empty: a real UART */
+        if (i == 8) {
+            gsio_absent = 1;
+            REG_SIOCNT = cnt;		/* FIFOs, send, receive, IRQ off */
+            break;
+        }
+        (void)REG_SIODATA8;
+    }
 }
 
 /*
@@ -253,7 +283,7 @@ gsio_init(unsigned int baud)
 int
 gsio_avail(void)
 {
-    return (REG_SIOCNT & SIO_RECV_DATA) == 0;
+    return !gsio_absent && (REG_SIOCNT & SIO_RECV_DATA) == 0;
 }
 
 /* Wait for and return the next received byte, through the ring. */
@@ -262,6 +292,8 @@ gsio_getc(void)
 {
     int b;
 
+    if (gsio_absent)
+        return 0;
     while ((b = gsio_rx_pop()) < 0)
         gsio_rx_service();
     return (unsigned char)b;
@@ -280,7 +312,7 @@ gsio_putc(unsigned char c)
      * otherwise wait for ever: stop sending until a byte arrives (see
      * gsio_fifo_drain()), and the LCD console carries on alone.
      */
-    if (gsio_dead)
+    if (gsio_dead || gsio_absent)
         return;
     for (i = 0; REG_SIOCNT & SIO_SEND_DATA; i++)
         if (i > GSIO_SEND_LIMIT) {
@@ -363,6 +395,8 @@ sio_poll(void)
 int
 sioopen(dev_t dev, int flag, int mode)
 {
+    if (gsio_absent)
+        return ENXIO;
     if (gsio_owned)
         return EBUSY;
     gsio_owned = 1;

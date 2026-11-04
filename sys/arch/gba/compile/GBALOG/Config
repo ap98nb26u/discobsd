@@ -62,13 +62,15 @@ options         "UART_BAUD=115200"          # default speed
 # this config is for EMULATORS ONLY - never run it on real hardware. (For
 # real hardware use the plain GBA or GBAED config.)
 #
-# SERIAL_CONSOLE is deliberately NOT set: this standalone build runs with
-# no serial cable, and the SIO/UART link-cable console (gsio) busy-waits
-# on CTS / a per-byte send-complete flag that never complete with nothing
-# wired up (~0.5s per character, and it would also mirror output to any
-# peer). Leaving it out keeps the LCD console full-speed and cable-free;
-# GBAED opts in to SERIAL_CONSOLE for interactive debugging over a cable.
+# SERIAL_CONSOLE is set as in the GBA config, so an emulator run also covers
+# the no-cable path: gsio_putc() waits once for the send FIFO, then drops
+# serial and the LCD console runs alone.
 options         "CONS_MAJOR=UART_MAJOR"     # console is the uart tty
 options         "CONS_MINOR=0"              # uart1 is /dev/tty0
+options         "SERIAL_CONSOLE"            # UART console over the link cable
 options         "AGBPRINT"                  # mirror console to AGBPrint (mGBA/VBA log)
 
+# Pseudo-terminals, for telnet logins through slipd (usr.sbin/slipd).
+# Their tty structures live in the last 1K of EWRAM (KEWRAM in
+# kern_gba.ldscript) - IWRAM has no room left.
+service         pty     2
