@@ -53,7 +53,14 @@ static unsigned short gtxt_fg_normal;	/* console fg to restore after a msg */
  * line/display (ESC[K / ESC[J, modes 0-2) and standout on/off (ESC[7m /
  * ESC[0m); anything else is dropped.
  */
-static int gtxt_estate;			/* 0=text, 1=saw ESC, 2=in CSI */
+static int gtxt_estate;			/* GTXT_ES_*: text, ESC, CSI, DCS, sixel */
+#define GTXT_ES_TEXT	0
+#define GTXT_ES_ESC	1		/* saw ESC */
+#define GTXT_ES_CSI	2		/* in ESC [ ... */
+#define GTXT_ES_DCS	3		/* in ESC P parameters */
+#define GTXT_ES_SIXEL	4		/* in sixel data (ESC P ... q) */
+#define GTXT_ES_STR	5		/* in another DCS string: drop it */
+#define GTXT_ES_ST	6		/* saw ESC inside a DCS string */
 #define GTXT_MAXPARM	4
 static int gtxt_parm[GTXT_MAXPARM];	/* CSI numeric parameters */
 static int gtxt_nparm;			/* index of the current parameter */
@@ -506,21 +513,301 @@ gtxt_csi(unsigned char f)
     }
 }
 
+
+/*
+ * Sixel graphics: ESC P p1;p2;p3 q <data> ESC \ draws an image on the LCD
+ * console, from the cursor's cell down, the way a VT340 or xterm does
+ * (the same bytes on the serial line show on a sixel terminal there).
+ * Sixel data is bands six pixels high, drawn left to right: '?'..'~' is a
+ * column of six pixels (bit 0 at the top), "!n" repeats the next one n
+ * times, '$' returns to the band's start, '-' moves to the next band,
+ * "#n" picks colour register n and "#n;2;r;g;b" (percent) or
+ * "#n;1;h;l;s" (DEC hue: 0 is blue) sets it, and "Pan;Pad;Ph;Pv" gives the
+ * size.  Pixels are written as they arrive, so no image buffer is needed;
+ * a band that would run below the console scrolls it up one text row
+ * first, and anything right of the screen is clipped.  When the image
+ * ends the cursor goes to the start of its last text row.
+ *
+ * Background: with p2 = 1 the pixels left as 0 stay as they were;
+ * otherwise the area the raster attributes give is cleared to the console
+ * background first.  An image without them just draws its 1 bits.
+ *
+ * The 256 colour registers live in the sprite (OBJ) palette RAM, which
+ * this port never uses: the BG palette's entry 0 is the backdrop colour
+ * shown while the screen is blanked, so it must stay black.  The parser
+ * state is in KEWRAM (the end of EWRAM): IWRAM has no room.
+ */
+#define SIX_PAL		((volatile unsigned short *)0x05000200)
+#define SIX_NPARM	5
+
+struct sixel {
+	int x0, y0;		/* image origin on screen, pixels */
+	int x, y;		/* position in the image (y: top of band) */
+	int w, h;		/* extent drawn so far */
+	int color;		/* current colour register */
+	int rep;		/* repeat count for the next sixel */
+	int cmd;		/* '#', '!' or '"' while reading its numbers */
+	int np;			/* parameters read for cmd */
+	int parm[SIX_NPARM];
+	int keep0;		/* p2 = 1: leave 0 pixels alone */
+};
+static struct sixel six __attribute__((section(".kewram_bss")));
+
+/* VT340 default colour registers 0-15, percent RGB. */
+static const unsigned char six_vt340[16][3] = {
+	{ 0, 0, 0}, {20,20,80}, {80,13,13}, {20,80,20},
+	{80,20,80}, {20,80,80}, {80,80,20}, {53,53,53},
+	{26,26,26}, {33,33,60}, {60,26,26}, {33,60,33},
+	{60,33,60}, {33,60,60}, {60,60,33}, {80,80,80},
+};
+
+/* Percent (0-100) RGB to a BGR555 colour. */
+static unsigned short
+six_rgb(int r, int g, int b)
+{
+	if (r > 100) r = 100;
+	if (g > 100) g = 100;
+	if (b > 100) b = 100;
+	r = (r * 31 + 50) / 100;
+	g = (g * 31 + 50) / 100;
+	b = (b * 31 + 50) / 100;
+	return (unsigned short)(b << 10 | g << 5 | r);
+}
+
+/* One HLS channel (all in 0-100, hue in degrees 0-359), standard rules. */
+static int
+six_hls_ch(int m1, int m2, int h)
+{
+	h %= 360;
+	if (h < 0)
+		h += 360;
+	if (h < 60)
+		return m1 + (m2 - m1) * h / 60;
+	if (h < 180)
+		return m2;
+	if (h < 240)
+		return m1 + (m2 - m1) * (240 - h) / 60;
+	return m1;
+}
+
+/* DEC HLS: hue 0 is blue, 120 red, 240 green; l and s in percent. */
+static unsigned short
+six_hls(int h, int l, int s)
+{
+	int m1, m2;
+
+	h += 240;				/* DEC hue to the usual one (0 red) */
+	if (l > 100) l = 100;
+	if (s > 100) s = 100;
+	m2 = l <= 50 ? l * (100 + s) / 100 : l + s - l * s / 100;
+	m1 = 2 * l - m2;
+	return six_rgb(six_hls_ch(m1, m2, h + 120), six_hls_ch(m1, m2, h),
+	    six_hls_ch(m1, m2, h - 120));
+}
+
+/* Scroll the console until a band starting at image row y fits. */
+static void
+six_fit(int y)
+{
+	while (six.y0 + y + 6 > GTXT_CONS_H) {
+		gtxt_shift();
+		six.y0 -= GTXT_CHAR_H;
+	}
+}
+
+/* Fill w x h pixels at the image origin with the console background. */
+static void
+six_clear(int w, int h)
+{
+	int px, py, y;
+
+	if (gba_gfx_active())
+		return;
+	for (y = 0; y < h; y++) {
+		py = six.y0 + y;
+		if (py < 0 || py >= GTXT_CONS_H)
+			continue;
+		for (px = six.x0; px < six.x0 + w && px < GTXT_SCREEN_W; px++)
+			VRAM[py * GTXT_SCREEN_W + px] = gtxt_bg;
+	}
+}
+
+/* Draw sixel value v (0-63) n times at the current position. */
+static void
+six_put(int v, int n)
+{
+	unsigned short c = SIX_PAL[six.color & 0xff];
+	volatile unsigned short *p;
+	int px, b;
+
+	if (v) {
+		six_fit(six.y);
+		if (six.y + 6 > six.h)
+			six.h = six.y + 6;
+	}
+	if (v && !gba_gfx_active()) {
+		for (; n > 0 && (px = six.x0 + six.x) < GTXT_SCREEN_W; n--) {
+			p = VRAM + (six.y0 + six.y) * GTXT_SCREEN_W + px;
+			for (b = 0; b < 6; b++, p += GTXT_SCREEN_W)
+				if (v & (1 << b) && six.y0 + six.y + b >= 0)
+					*p = c;
+			six.x++;
+		}
+	}
+	six.x += n;
+	if (six.x > six.w)
+		six.w = six.x;
+}
+
+/* A '#', '!' or '"' command's numbers are all in: act on them. */
+static void
+six_cmd_end(void)
+{
+	int *p = six.parm;
+
+	switch (six.cmd) {
+	case '#':
+		if (six.np >= 5 && p[1] == 2)
+			SIX_PAL[p[0] & 0xff] = six_rgb(p[2], p[3], p[4]);
+		else if (six.np >= 5 && p[1] == 1)
+			SIX_PAL[p[0] & 0xff] = six_hls(p[2], p[3], p[4]);
+		six.color = p[0];
+		break;
+	case '!':
+		six.rep = p[0] ? p[0] : 1;
+		break;
+	case '"':			/* Pan;Pad;Ph;Pv */
+		if (!six.keep0 && six.np >= 4 && p[2] > 0 && p[3] > 0)
+			six_clear(p[2], p[3]);	/* rows scrolled in later are blank */
+		break;
+	}
+	six.cmd = 0;
+}
+
+/* Start an image: ESC P p1;p2;p3 q, parameters in gtxt_parm[]. */
+static void
+six_begin(void)
+{
+	int i;
+
+	gtxt_cursor(0);
+	if (gtxt_curx >= GTXT_COLS) {		/* deferred wrap */
+		gtxt_curx = 0;
+		gtxt_linefeed();
+	}
+	six.x0 = gtxt_curx * GTXT_CHAR_W;
+	six.y0 = gtxt_cury * GTXT_CHAR_H;
+	six.x = six.y = six.w = six.h = 0;
+	six.color = 0;
+	six.rep = 1;
+	six.cmd = 0;
+	six.keep0 = gtxt_parm[1] == 1;
+	for (i = 0; i < 16; i++)
+		SIX_PAL[i] = six_rgb(six_vt340[i][0], six_vt340[i][1],
+		    six_vt340[i][2]);
+	for (; i < 256; i++)
+		SIX_PAL[i] = 0;
+}
+
+/*
+ * End an image: put the cursor at the start of the text row holding its
+ * last pixel row, as xterm does, so the newline that usually follows
+ * moves to the line below it.
+ */
+static void
+six_end(void)
+{
+	int row;
+
+	if (six.cmd)
+		six_cmd_end();
+	if (six.h == 0)
+		return;
+	row = (six.y0 + six.h - 1) / GTXT_CHAR_H;
+	if (row < 0)
+		row = 0;
+	if (row > GTXT_BOTTOM)
+		row = GTXT_BOTTOM;
+	gtxt_curx = 0;
+	gtxt_cury = row;
+}
+
+/* One byte of sixel data. */
+static void
+six_feed(unsigned char c)
+{
+	if (six.cmd) {
+		if (c >= '0' && c <= '9') {
+			if (six.np == 0)
+				six.np = 1;
+			if (six.np <= SIX_NPARM)
+				six.parm[six.np - 1] =
+				    six.parm[six.np - 1] * 10 + (c - '0');
+			return;
+		}
+		if (c == ';') {
+			if (six.np == 0)
+				six.np = 1;
+			if (six.np < SIX_NPARM)
+				six.parm[six.np++] = 0;
+			return;
+		}
+		six_cmd_end();
+	}
+	if (c >= '?' && c <= '~') {
+		six_put(c - '?', six.rep);
+		six.rep = 1;
+		return;
+	}
+	switch (c) {
+	case '#':
+	case '!':
+	case '"':
+		six.cmd = c;
+		six.np = 0;
+		six.parm[0] = six.parm[1] = six.parm[2] = six.parm[3] =
+		    six.parm[4] = 0;
+		break;
+	case '$':
+		six.x = 0;
+		break;
+	case '-':
+		six.x = 0;
+		six.y += 6;
+		break;
+	}
+}
+
 /* Feed one byte to the escape-sequence state machine. */
 static void
 gtxt_esc_feed(unsigned char c)
 {
-    if (gtxt_estate == 1) {			/* just saw ESC */
-        if (c == '[') {
-            gtxt_estate = 2;
+    switch (gtxt_estate) {
+    case GTXT_ES_ESC:				/* just saw ESC */
+        if (c == '[' || c == 'P') {
+            gtxt_estate = c == '[' ? GTXT_ES_CSI : GTXT_ES_DCS;
             gtxt_nparm = 0;
             gtxt_parm[0] = gtxt_parm[1] = gtxt_parm[2] = gtxt_parm[3] = 0;
         } else {
-            gtxt_estate = 0;			/* unsupported ESC x: drop it */
+            gtxt_estate = GTXT_ES_TEXT;		/* unsupported ESC x: drop it */
         }
         return;
+    case GTXT_ES_SIXEL:
+        if (c == 0x1b) {
+            six_end();
+            gtxt_estate = GTXT_ES_ST;
+        } else
+            six_feed(c);
+        return;
+    case GTXT_ES_STR:
+        if (c == 0x1b)
+            gtxt_estate = GTXT_ES_ST;
+        return;
+    case GTXT_ES_ST:				/* ESC \ ends the string */
+        gtxt_estate = GTXT_ES_TEXT;
+        return;
     }
-    /* gtxt_estate == 2: collecting a CSI sequence */
+    /* GTXT_ES_CSI or GTXT_ES_DCS: collecting numeric parameters */
     if (c >= '0' && c <= '9') {
         if (gtxt_nparm < GTXT_MAXPARM)
             gtxt_parm[gtxt_nparm] = gtxt_parm[gtxt_nparm] * 10 + (c - '0');
@@ -531,9 +818,17 @@ gtxt_esc_feed(unsigned char c)
             gtxt_nparm++;
         return;
     }
+    if (gtxt_estate == GTXT_ES_DCS) {
+        if (c == 'q') {
+            six_begin();
+            gtxt_estate = GTXT_ES_SIXEL;
+        } else if (c >= '@' && c <= '~')
+            gtxt_estate = GTXT_ES_STR;		/* some other DCS: skip it */
+        return;
+    }
     if (c >= '@' && c <= '~')			/* a final byte: run it */
         gtxt_csi(c);
-    gtxt_estate = 0;				/* sequence ends (or was bad) */
+    gtxt_estate = GTXT_ES_TEXT;			/* sequence ends (or was bad) */
 }
 
 void
@@ -557,7 +852,7 @@ gtxt_putc(char c)
         return;
     }
     if (c == 0x1b) {
-        gtxt_estate = 1;
+        gtxt_estate = GTXT_ES_ESC;
         return;
     }
 

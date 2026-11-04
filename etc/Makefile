@@ -46,6 +46,12 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o ${OWN} -g ${GRP} -m 644 fstab.${MACHINE} \
 		    ${DESTDIR}/etc/fstab; \
 	fi
+# Per-port boot logo, a sixel image /etc/rc shows on the console (gba:
+# drawn on the LCD; made by tools/logo/mklogo.py).
+	if [ -f logo.six.${MACHINE} ]; then \
+		${INSTALL} -c -o ${OWN} -g ${GRP} -m 644 logo.six.${MACHINE} \
+		    ${DESTDIR}/etc/logo.six; \
+	fi
 # Per-port ttys, the same way (gba: adds its telnet pseudo-terminals).
 	if [ -f ttys.${MACHINE} ]; then \
 		${INSTALL} -c -o ${OWN} -g ${GRP} -m 644 ttys.${MACHINE} \

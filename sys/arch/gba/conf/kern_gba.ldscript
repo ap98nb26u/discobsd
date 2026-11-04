@@ -167,6 +167,7 @@ SECTIONS {
     .ewram_bss (NOLOAD) : {
         __ewram_bss_start = .;
         *tty_pty.o(.bss .bss.* COMMON)
+        *(.kewram_bss)
         . = ALIGN(4);
         __ewram_bss_end = .;
     } > KEWRAM

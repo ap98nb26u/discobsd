@@ -325,3 +325,5 @@ file /usr/share/zoneinfo/W-SU
 file /usr/share/zoneinfo/WET
 symlink /etc/localtime
 target /usr/share/zoneinfo/Japan
+# Boot logo: a sixel image that /etc/rc draws on the LCD console.
+file /etc/logo.six
