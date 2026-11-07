@@ -830,7 +830,8 @@ file /usr/share/examples/gba/beeptest
 file /usr/share/examples/gba/infloop
 file /usr/share/examples/gba/sigrestart
 
-# Self-hosting check: rebuild smlrc on the device (selfhost.sh, GBAED).
+# Self-hosting check: rebuild smlrc on the device (selfhost.sh; GBAED, or
+# GBA from an EverDrive).
 default
 dirmode 0775
 filemode 0664

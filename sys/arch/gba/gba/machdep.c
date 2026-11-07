@@ -140,13 +140,21 @@ volatile int gba_tick_in_kernel;
 static inline int
 gba_user_pc(unsigned pc)
 {
-    extern char __user_data_start[], __user_data_end[];
-
     return pc >= (unsigned)__user_data_start &&
         pc < (unsigned)__user_data_end;
 }
 
 volatile uint32_t myticks = 1;
+
+#ifndef GBAED
+/*
+ * End of the user window (USER_DATA_END in the kernel): USERRAM's (64K),
+ * until md_machdep_swap() moves swap to the EverDrive's PSRAM and grows
+ * the window over the EWRAM swap region after it (249K, as GBAED).
+ */
+extern char __userram_end[] __asm__("__swap_start");
+unsigned gba_user_end = (unsigned)__userram_end;
+#endif
 
 #ifdef HANGDUMP
 volatile unsigned irq_last_pc;		/* interrupted pc + 4, see locore0.S */

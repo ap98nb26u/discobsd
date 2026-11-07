@@ -7,9 +7,10 @@
 #   stage 2: smlrc1 compiles smlrc.c again              -> $T/smlrc2
 #   smlrc1 and smlrc2 must be identical (a fixed point).
 #
-# Needs a writable /tmp with about 1.5 MB free and GBAED (smlrc does not fit
-# the plain GBA kernel's 64K user window, and that build's root is read-only
-# on a plain cartridge).  Expect it to take a long time.  The stages run
+# Needs a writable /tmp with about 1.5 MB free and the 249K user window:
+# GBAED, or the GBA kernel run from an EverDrive (on a plain cartridge its
+# window is 64K, which smlrc does not fit, and its root is read-only).
+# Expect it to take a long time.  The stages run
 # cpp, the compiler, as and ld by hand (rather than through cc) so that
 # stage 2 can use the freshly built compiler.  smlrc.c and cgarm.c are
 # copies of usr.bin/smlrc; smlrc.c #includes cgarm.c from its directory.

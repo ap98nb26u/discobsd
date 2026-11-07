@@ -89,7 +89,12 @@ extern char     __kernel_flash_end[];
 extern char     __kernel_data_start[];
 extern char     __kernel_data_end[];
 extern char     __user_data_start[];
+#ifdef USER_DATA_END_RUNTIME
+/* The port sets the user window's end at boot (<machine/machparam.h>). */
+#define __user_data_end             ((char *)USER_DATA_END)
+#else
 extern char     __user_data_end[];
+#endif
 #endif /* XXX PIC32 */
 
 struct inode;

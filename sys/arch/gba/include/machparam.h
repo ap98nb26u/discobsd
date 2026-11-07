@@ -60,6 +60,13 @@
  * plain GBA build and all userland keep the 64K value.
  */
 #define MAXMEM		(249*1024)
+#elif defined(KERNEL)
+/*
+ * The plain GBA kernel: 64K, or 249K when it runs from an EverDrive and
+ * md_machdep_swap() has moved swap to the PSRAM, freeing the EWRAM swap
+ * region right after USERRAM (see USER_DATA_END below).
+ */
+#define MAXMEM		((unsigned)(USER_DATA_END - USER_DATA_START))
 #else
 #define MAXMEM		(64*1024)
 #endif
@@ -121,10 +128,12 @@
  * with USERRAM by hand.
  *
  * The window's start is the same for every GBA kernel, but its end is not
- * (GBA 64K, GBAED 249K), while userland is built once for both. So in
- * userland USER_DATA_END asks the running kernel (machdep.user_end, see
- * <machine/cpu.h>), once. Assembly and compilers other than gcc (the
- * native Smaller-C) get the GBA build's value.
+ * (GBA 64K, GBAED 249K, and the GBA kernel's grows to 249K at boot when it
+ * runs from an EverDrive: gba_user_end, set by md_machdep_swap()), while
+ * userland is built once for all. So in userland USER_DATA_END asks the
+ * running kernel (machdep.user_end, see <machine/cpu.h>), once. Assembly
+ * and compilers other than gcc (the native Smaller-C) get the GBA build's
+ * smallest value.
  */
 #define USER_DATA_START         (0x02001800)
 #ifdef GBAED
@@ -133,7 +142,11 @@
 #define USER_DATA_SIZE          (64 * 1024)     /* GBA/ROM-root: match kern_gba.ldscript USERRAM/MAXMEM. */
 #endif
 
-#if defined(KERNEL) || defined(__ASSEMBLER__) || !defined(__GNUC__) || \
+#if defined(KERNEL) && !defined(GBAED) && !defined(__ASSEMBLER__)
+extern unsigned gba_user_end;           /* gba/machdep.c */
+#define USER_DATA_END           (gba_user_end)
+#define USER_DATA_END_RUNTIME           /* <sys/systm.h>: __user_data_end too */
+#elif defined(KERNEL) || defined(__ASSEMBLER__) || !defined(__GNUC__) || \
     defined(__SMALLER_C__)
 #define USER_DATA_END           (USER_DATA_START + USER_DATA_SIZE)
 #else

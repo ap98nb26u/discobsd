@@ -190,6 +190,11 @@ md_machdep_rootrw(void)
  * EWRAM area the linker script sets aside - the bigger the better, as a
  * writable root also brings /etc/rc's motd update and the update and
  * cron daemons.  GBAED's swap is in PSRAM already.
+ *
+ * That EWRAM area follows the user window directly (kern_gba.ldscript),
+ * so the window then grows over it, from 64K to GBAED's 249K: big enough
+ * for cc's compiler pass, smlrc.  Called from mdprobe(), before the first
+ * user process.
  */
 void
 md_machdep_swap(caddr_t *startp, caddr_t *endp)
@@ -198,6 +203,12 @@ md_machdep_swap(caddr_t *startp, caddr_t *endp)
 
     if (md_cart_rw && start < MD_ED_WINDOW_END &&
         MD_ED_WINDOW_END - start > (u_int)(*endp - *startp)) {
+#ifndef GBAED
+        extern unsigned gba_user_end;
+
+        if (gba_user_end == (u_int)*startp)
+            gba_user_end = (u_int)*endp;
+#endif
         *startp = (caddr_t)start;
         *endp = (caddr_t)MD_ED_WINDOW_END;
     }

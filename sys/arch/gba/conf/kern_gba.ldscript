@@ -105,6 +105,13 @@ __user_data_start	= ORIGIN(USERRAM);
 __user_data_end		= ORIGIN(USERRAM) + LENGTH(USERRAM);
 __swap_start		= ORIGIN(SWAP);
 __swap_end		= ORIGIN(SWAP) + LENGTH(SWAP);
+/*
+ * Run from an EverDrive, md_gba.c moves swap to the PSRAM and the user
+ * window grows over the then unused SWAP region (gba_user_end, machdep.c),
+ * which must therefore follow USERRAM directly.
+ */
+ASSERT(ORIGIN(SWAP) == ORIGIN(USERRAM) + LENGTH(USERRAM),
+    "SWAP must follow USERRAM: the user window grows over it")
 
 syscall_vector		= ORIGIN(SYSVEC);
 u0			= ORIGIN(U0AREA);

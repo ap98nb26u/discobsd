@@ -407,7 +407,6 @@ syscall_handler(int sys_num, struct trapframe *frame)
 	 * process resumes inside its own memory (text+data+bss+stack).
 	 */
 	{
-		extern char __user_data_start[], __user_data_end[];
 		extern char gba_preempt_tramp_ret[];
 		unsigned lo = (unsigned)__user_data_start;
 		unsigned hi = (unsigned)__user_data_end;
