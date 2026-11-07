@@ -6,6 +6,13 @@ The GBA (GBA or GBAED build, with a serial cable) runs a small IP host,
 scripts connect it to a Linux IP interface when the link cable is on a
 Windows PC and Linux runs in WSL2 (whose kernel has no SLIP driver):
 
+    Telnet logins need an EverDrive (or the GBAED build): there the GBA
+    build swaps to the cartridge's PSRAM.  A plain flash cartridge has
+    only the 185K of swap in EWRAM, which slipd, a login shell and the
+    console's shell do not fit in; slipd then answers a telnet with
+    "slipd: not enough memory for a login" (or "... killed (out of
+    memory?)").  slipd itself fits: ping answers there.
+
     GBA --link cable/USB serial (COM3)-- com_bridge.ps1 (Windows)
         --TCP localhost:5555-- slip_tun.py (WSL2) --TUN gba0-- Linux IP
 

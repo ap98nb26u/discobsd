@@ -48,6 +48,7 @@ struct sess {
 	struct tcb	*tp;
 	int		mfd;		/* pty master, -1: none */
 	int		pid;		/* login, 0: gone */
+	int		killed;		/* it died of SIGKILL */
 	int		state, optcmd;
 	unsigned char	sb[8];		/* subnegotiation: option, data */
 	int		sblen;
@@ -183,9 +184,15 @@ telnet_open(struct tcb *tp)
 	sprintf(host, "%d.%d.%d.%d", a[0], a[1], a[2], a[3]);
 	pid = fork();
 	if (pid < 0) {
+		/* EAGAIN: typically no swap left for login (185K on a
+		   plain cartridge): say so rather than just drop the line */
+		static const char nomem[] =
+		    "slipd: not enough memory for a login\r\n";
+
 		close(s->mfd);
 		s->mfd = -1;
-		tcp_abort(tp);
+		tcp_write(tp, (const unsigned char *)nomem, sizeof(nomem) - 1);
+		tcp_close(tp);
 		return;
 	}
 	if (pid == 0)
@@ -193,6 +200,7 @@ telnet_open(struct tcb *tp)
 	fcntl(s->mfd, F_SETFL, O_NONBLOCK);
 	s->tp = tp;
 	s->pid = pid;
+	s->killed = 0;
 	s->state = S_DATA;
 	s->inlen = 0;
 	if (verbose)
@@ -341,15 +349,18 @@ telnet_closed(struct tcb *tp)
 static void
 reap(void)
 {
-	int pid, i;
+	int pid, i, st;
 
 	if (!child_died)
 		return;
 	child_died = 0;
-	while ((pid = wait3(0, WNOHANG, 0)) > 0)
+	while ((pid = wait3(&st, WNOHANG, 0)) > 0)
 		for (i = 0; i < NSESS; i++)
-			if (sess[i].pid == pid)
+			if (sess[i].pid == pid) {
 				sess[i].pid = 0;
+				sess[i].killed = WIFSIGNALED(st) &&
+				    WTERMSIG(st) == SIGKILL;
+			}
 }
 
 static void
@@ -387,6 +398,13 @@ telnet_poll(struct tcb *tp)
 	} else
 		k = 1;
 	if (k < 0 && s->pid == 0) {		/* logged out, output drained */
+		/* the kernel kills with SIGKILL when swap runs out */
+		static const char killed[] =
+		    "\r\nslipd: login session killed (out of memory?)\r\n";
+
+		if (s->killed)
+			tcp_write(tp, (const unsigned char *)killed,
+			    sizeof(killed) - 1);
 		close(s->mfd);
 		s->mfd = -1;
 		s->tp = 0;

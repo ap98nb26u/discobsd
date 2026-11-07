@@ -67,6 +67,9 @@ link cable (115200 baud), which can be used with a link-cable-to-serial
 adapter and a terminal program such as `cu`, `screen`, `minicom`, or `putty`.
 The plain GBA build needs no EverDrive for this. With no cable, or in an
 emulator, the serial side switches itself off and the LCD console runs alone.
+Telnet logins over the cable (slipd, see tools/gbanet/README) need more swap
+than a plain cartridge has: they work on the GBAED build and on the GBA build
+in an EverDrive, but not on a plain flash cartridge.
 
 Log in to DiscoBSD with user `root` and a blank password.
 

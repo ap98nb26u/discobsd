@@ -68,6 +68,8 @@ options         "CONS_MINOR=0"              # uart1 is /dev/tty0
 options         "SERIAL_CONSOLE"            # UART console over the link cable
 
 # Pseudo-terminals, for telnet logins through slipd (usr.sbin/slipd).
+# Those need the EverDrive's PSRAM swap: on a plain flash cartridge the
+# 185K of EWRAM swap is too small for slipd and a login shell.
 # Their tty structures live in the last 1K of EWRAM (KEWRAM in
 # kern_gba.ldscript) - IWRAM has no room left.
 service         pty     2
