@@ -223,11 +223,12 @@ main(argc,argv)
 #endif
 	sint = 1 HOURS;
 	f = "";
+	/*
+	 * No utmp (init creates it only on the way to single user, so a
+	 * root that was never written to, e.g. a read-only one, has none):
+	 * there is nobody logged in to warn, but still shut down.
+	 */
 	ufd = open(_PATH_UTMP,0);
-	if (ufd < 0) {
-		err(1, "%s", _PATH_UTMP);
-		/* NOTREACHED */
-	}
 	first = 1;
 	for (;;) {
 		for (i = 0; stogo <= interval[i].stogo && interval[i].sint; i++)
@@ -241,8 +242,10 @@ main(argc,argv)
 		if (sint >= stogo || sint == 0)
 			f = "FINAL ";
 		nowtime = time((long *)0);
-		(void) lseek(ufd, 0L, 0);
-		while (read(ufd,(char *)&utmp,sizeof utmp)==sizeof utmp)
+		if (ufd >= 0)
+			(void) lseek(ufd, 0L, 0);
+		while (ufd >= 0 &&
+		    read(ufd,(char *)&utmp,sizeof utmp)==sizeof utmp)
 		if (utmp.ut_name[0] &&
 		    strncmp(utmp.ut_name, IGNOREUSER, sizeof(utmp.ut_name))) {
 			if (setjmp(alarmbuf))
